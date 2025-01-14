@@ -1,7 +1,12 @@
 import time
+import json
 import logging
 from telegram import ForceReply, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
+# Read bot settings from a JSON file
+with open('settings.json', 'r') as f:
+    settings = json.load(f)
 
 # Enable logging
 logging.basicConfig(
@@ -40,7 +45,7 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
-    application = Application.builder().token("7998479938:AAGK2rhGr9u-E6fQSciZXdi80REGwwonnGU").build()
+    application = Application.builder().token(settings["telegram"]["bot_token"]).build()
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
