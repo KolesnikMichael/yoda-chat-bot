@@ -1,0 +1,48 @@
+@startuml
+
+object bot {
+name
+token
+parameters
+}
+
+
+object chat{
+id
+history
+context
+}
+
+object conversation {
+id
+participants: []
+}
+
+object group {
+id
+members
+history
+context
+}
+
+object message {
+}
+
+object ai_provider {
+token
+ai_model
+}
+
+object ai_model {
+name
+parameters
+}
+
+object user { 
+id
+name
+timezone
+interests
+}
+
+@enduml
