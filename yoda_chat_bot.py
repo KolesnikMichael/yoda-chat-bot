@@ -1,6 +1,7 @@
 import time
 import json
 import logging
+import argparse
 from telegram import ForceReply, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from mistralai import Mistral
@@ -10,11 +11,43 @@ from mistralai.models import UserMessage
 with open('settings.json', 'r') as f:
     settings = json.load(f)
 
-bot_token = settings["telegram"]["bot_token"]
+test_mode = False
 api_key = settings["mistral"]["api_key"]
 model = settings["mistral"]["model"]
 ai_client = Mistral(api_key=api_key)
 conversation_history = {}
+
+def print_help():
+    help_text = """
+    Usage: python bot.py [--test] [--help]
+
+    Options:
+      --test    Enable test mode
+      --help    Show this help message and exit
+    """
+    print(help_text)
+
+def parse_arguments():
+    global test_mode
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--test', action='store_true', help='Enable test mode')
+    parser.add_argument('--help', action='store_true', help='Show this help message and exit')
+
+    args = parser.parse_args()
+
+    if args.help:
+        print_help()
+        exit(0)
+
+    test_mode = args.test
+
+parse_arguments()
+
+def get_bot_token():
+    if test_mode:
+        return settings["telegram"]["bot_token_test"]
+    else:
+        return settings["telegram"]["bot_token"]
 
 # Enable logging
 logging.basicConfig(
@@ -72,7 +105,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
-    application = Application.builder().token(bot_token).build()
+    application = Application.builder().token(get_bot_token()).build()
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
