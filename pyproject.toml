@@ -1,0 +1,19 @@
+[project]
+name = "Yoda Chat Bot"
+version = "0.0.1"
+authors = [
+  { name="Team Yoda", email="michael.kolesnik@gmail.com" },
+]
+description = "Telegram bot chatting just like Yoda would do."
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+license-files = ["LICENCE"]
+
+[project.urls]
+Homepage = "https://github.com/KolesnikMichael/yoda-chat-bot"
+Issues = "https://github.com/KolesnikMichael/yoda-chat-bot/issues"
