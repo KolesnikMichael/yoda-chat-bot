@@ -75,7 +75,7 @@ async def handle_photo(update: Update, context: CallbackContext) -> None:
             return None
 
     base64_image = encode_image(image_path)
-
+    caption = update.message.caption or "Что изображено на картинке?"
     # Формируем запрос к Mistral AI
     if base64_image:
         messages = [
@@ -84,7 +84,7 @@ async def handle_photo(update: Update, context: CallbackContext) -> None:
                 "content": [
                     {
                         "type": "text",
-                        "text": "Я не могу посмотреть, что на картинке. Опиши, пожалуйста, подробно."
+                        "text": f"{caption}"
                     },
                     {
                         "type": "image_url",
