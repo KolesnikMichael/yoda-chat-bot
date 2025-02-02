@@ -1,48 +1,89 @@
+' https://www.plantuml.com/plantuml/uml/SyfFKj2rKt3CoKnELR1Io4ZDoSa700005
 @startuml
 
-object bot {
+object Composer {
 name
 token
-parameters
+capabilities[]
+settings[]
 }
 
+object PTB_update {
+update_id
+message
+}
 
-object chat{
+object Chat {
 id
-history
-context
+type
+threads[]
 }
 
-object conversation {
+
+object Thread {
 id
-participants: []
+messages[]
 }
 
-object group {
-id
-members
-history
-context
+object Message {
+message_id
+from_user
+date
+chat_id
+text
+audio
+document
+photo
+video
+voice
+video_note
+caption
+location
+poll
+quote
 }
 
-object message {
-}
 
-object ai_provider {
+object AI_provider {
+name
 token
+}
+
+object AI_model {
+name
+ai_provider_name
+capabilities[]
+settings[]
+}
+
+object Capability {
+name
+description
 ai_model
 }
 
-object ai_model {
-name
-parameters
+object User { 
+id
+first_name
+last_name
+username
+language_code
+timezone
+location
+known_since
+traits[]
+topics[]
+interests[]
 }
 
-object user { 
-id
-name
-timezone
-interests
-}
+Composer::capabilities --> Capability
+Capability::AI_model --> AI_model
+AI_model::AI_provider_name --> AI_provider
+Thread::users --> User
+PTB_update::message --> Message
+Chat::threads --> Thread
+Message --> Thread::messages
+Message::from_user --> User
+Message::chat_id --> Chat
 
 @enduml
