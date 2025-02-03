@@ -1,7 +1,10 @@
+import logging
 from mistralai import Mistral
 
+logger = logging.getLogger(__name__)
+
 class LanguageProcessing:
-    def __init__(self, settings, logger):
+    def __init__(self, settings):
         self.settings = settings
 
         self.mistral_client = Mistral(api_key=settings["mistral_large_latest"]["api_key"])

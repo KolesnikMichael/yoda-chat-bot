@@ -1,13 +1,15 @@
+import logging
 from mind.reason._reason import Reason
 from mind.emotions import Emotions
 from mind.memory import Memory
 
+logger = logging.getLogger(__name__)
+
 class Mind:
-    def __init__(self, settings, logger):
-        self.logger = logger
-        self.reason = Reason(self, settings["reason"], logger)
-        self.memory = Memory(self, settings["memory"], logger)
-        self.emotions = Emotions(self, settings["emotions"], logger)
+    def __init__(self, settings):
+        self.reason = Reason(self, settings["reason"])
+        self.memory = Memory(self, settings["memory"])
+        self.emotions = Emotions(self, settings["emotions"])
 
     def wake_up(self, bot):
         self.bot = bot

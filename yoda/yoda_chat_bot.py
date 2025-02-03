@@ -1,5 +1,5 @@
-import argparse
 import logging
+import argparse
 import json
 from mind._mind import Mind
 from embodiment.telegram_bot import TelegramBot
@@ -15,17 +15,18 @@ def parse_arguments():
 
 
 def main() -> None:
-    logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.basicConfig(format="%(asctime)s (%(levelname)s): %(name)s - %(message)s", level=logging.INFO)
     logger = logging.getLogger(__name__)
 
     args = parse_arguments()
+    logger.info("Starting with arguments: %s", args)
 
     with open('settings.json', 'r') as settings_file:
         settings_json = json.load(settings_file)
 
-    mind = Mind(settings_json["mind"], logger)
-    body = TelegramBot(settings_json["embodiment"]["telegram"], logger, args.test)
+    mind = Mind(settings_json["mind"])
+    body = TelegramBot(settings_json["embodiment"]["telegram"], args.test)
 
     body.wake_up(mind)
 

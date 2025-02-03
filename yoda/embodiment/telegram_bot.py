@@ -1,10 +1,12 @@
+import logging
 import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+logger = logging.getLogger(__name__)
+
 class TelegramBot:
-    def __init__(self, settings, logger, test_mode=False):
-        self.logger = logger
+    def __init__(self, settings, test_mode=False):
         self.settings = settings
 
         if test_mode:

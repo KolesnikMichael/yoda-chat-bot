@@ -1,6 +1,9 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 class Emotions:
-    def __init__(self, mind, settings, logger):
-        self.logger = logger
+    def __init__(self, mind, settings):
         self.mind = mind
         self.glad = settings["glad"]
         self.mad = settings["mad"]
