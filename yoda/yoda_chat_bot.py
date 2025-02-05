@@ -1,8 +1,11 @@
 import logging
 import argparse
+import os
 import json
 from mind._mind import Mind
 from embodiment.telegram_bot import TelegramBot
+
+os.environ['PATH'] += os.pathsep + os.path.abspath('bin')
 
 def parse_arguments():
     global test_mode

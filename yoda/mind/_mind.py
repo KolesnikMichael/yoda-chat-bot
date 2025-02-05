@@ -16,11 +16,23 @@ class Mind:
 
 
     def process_text_message(self, user, message_text):
-        text = message_text
-        response = self.reason.process_text(user, text)
+        logger.info(f"Got text message from {user}")
+        response = self.reason.process_text(user, message_text)
         return response
     
 
+    def process_voice_message(self, user, audio_file_path):
+        logger.info(f"Got voice message from {user}")
+        response = self.reason.process_voice(user, audio_file_path)
+        return response
+    
+
+    def process_photo_message(self, user, photo_file_path, caption):
+        logger.info(f"Got photo message from {user}")
+        response = self.reason.process_image(user, photo_file_path, caption)
+        return response
+
+    
     async def send_text_message(self, user, message_text):
         await self.bot.send_message(user, message_text)
 
