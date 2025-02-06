@@ -2,6 +2,7 @@ import logging
 from mind.reason.intelligence.language_processing import LanguageProcessor
 from mind.reason.intelligence.speech_recognition import SpeechRecognizer
 from mind.reason.intelligence.computer_vision import ComputerVision
+from mind.reason.conversation import Conversation
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,7 @@ class Reason:
         self.language_processor = LanguageProcessor(settings["intelligence"]["language_processing"])
         self.speech_recognition = SpeechRecognizer()
         self.computer_vision = ComputerVision(settings["intelligence"]["computer_vision"])
-        self.conversations = {}
+        self.conversation = Conversation()
 
     async def convert_audio_to_text(self, audio_file_path, language):
         text = self.speech_recognition.speech_to_text(audio_file_path, language)
@@ -21,15 +22,10 @@ class Reason:
     async def process_text(self, user, text):
         logger.info(f"Got text message from {user}")
 
-        if user not in self.conversations:
-            logger.info(f"Starting new conversation with {user}")
-            self.conversations[user] = [{"role": "user", "content": "Reply as Yoda from Star Wars"}]
+        messages = self.conversation.add(user=user, role="user", line=text)
 
-        self.conversations[user].append({"role": "user", "content": text})
-
-        reply = await self.language_processor.reply_in_conversation(self.conversations[user])
-
-        self.conversations[user].append({"role": "user", "content": reply})
+        reply = await self.language_processor.reply_in_conversation(messages)
+        self.conversation.add(user=user, role="assistant", line=reply)
 
         await self.mind.send_text_message(user, reply)   
 
@@ -37,35 +33,17 @@ class Reason:
     async def process_voice(self, user, audio_file_path, language="ru-RU"):
         logger.info(f"Got voice message from {user}")
 
-        if user not in self.conversations:
-            logger.info("Starting new conversation")
-            self.conversations[user] = [{"role": "user", "content": "Reply as Yoda from Star Wars"}]
-
         text = await self.convert_audio_to_text(audio_file_path, language)   
 
-        self.conversations[user].append({"role": "user", "content": text})
-
-        reply = await self.language_processor.reply_in_conversation(self.conversations[user])
-
-        self.conversations[user].append({"role": "user", "content": reply})
-
-        await self.mind.send_text_message(user, reply)   
+        await self.process_text(user, text)
 
 
     async def process_image(self, user, photo_file_path, caption):
         logger.info(f"Got image message from {user}")
 
-        if user not in self.conversations:
-            logger.info("Starting new conversation")
-            self.conversations[user] = [{"role": "user", "content": "Reply as Yoda from Star Wars"}]
-
         image_description = self.computer_vision.image_to_description(photo_file_path)
 
-        self.conversations[user].append({"role": "system", "content": f"User sent an image with description: {image_description}"})
-        self.conversations[user].append({"role": "user", "content": caption})
+        self.conversation.add(user=user, role="user") # Mistral accepts "system" message only after "user" message
+        self.conversation.add(user=user, role="system", line=f"User sent an image with description: {image_description}")
 
-        reply = await self.language_processor.reply_in_conversation(self.conversations[user])
-
-        self.conversations[user].append({"role": "user", "content": reply})
-
-        await self.mind.send_text_message(user, reply)   
+        await self.process_text(user, caption)  
