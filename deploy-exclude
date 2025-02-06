@@ -1,0 +1,6 @@
+.git
+.pytest_cache
+.vscode
+*.exe
+__pycache__
+deploy-exclude
