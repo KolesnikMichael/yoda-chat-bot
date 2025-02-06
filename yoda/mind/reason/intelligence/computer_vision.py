@@ -1,4 +1,5 @@
 import logging
+import os
 import base64
 from mistralai import Mistral
 
@@ -36,5 +37,7 @@ class ComputerVision:
         chat_response = self.mistral_client.chat.complete(
             model=self.model_name,
             messages=messages)
+        
+        os.remove(image_file_path)
                 
         return chat_response.choices[0].message.content
