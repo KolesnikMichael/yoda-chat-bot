@@ -15,21 +15,24 @@ class Mind:
         self.bot = bot
 
 
-    def process_text_message(self, user, message_text):
+    def process_text_message(self, user, message_text, message_time):
+        user = user['id']
         logger.info(f"Got text message from {user}")
-        response = self.reason.process_text(user, message_text)
+        response = self.reason.process_text(user, message_text, message_time)
         return response
     
 
-    def process_voice_message(self, user, audio_file_path):
+    def process_voice_message(self, user, audio_file_path, message_time):
+        user = user['id']
         logger.info(f"Got voice message from {user}")
-        response = self.reason.process_voice(user, audio_file_path)
+        response = self.reason.process_voice(user, audio_file_path, message_time)
         return response
     
 
-    def process_photo_message(self, user, photo_file_path, caption):
+    def process_photo_message(self, user, photo_file_path, caption, message_time):
+        user = user['id']
         logger.info(f"Got photo message from {user}")
-        response = self.reason.process_image(user, photo_file_path, caption)
+        response = self.reason.process_image(user, photo_file_path, caption, message_time)
         return response
 
     

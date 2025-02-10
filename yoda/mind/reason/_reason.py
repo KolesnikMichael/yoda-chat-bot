@@ -1,8 +1,8 @@
 import logging
-from mind.reason.intelligence.language_processing import LanguageProcessor
-from mind.reason.intelligence.speech_recognition import SpeechRecognizer
-from mind.reason.intelligence.computer_vision import ComputerVision
-from mind.reason.conversation import Conversation
+from .intelligence.language import LanguageProcessor
+from .intelligence.speech import SpeechRecognizer
+from .intelligence.vision import ComputerVision
+from .conversation import Conversation
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class Reason:
         return text
     
 
-    async def process_text(self, user, text):
+    async def process_text(self, user, text, message_time):
         logger.info(f"Got text message from {user}")
 
         messages = self.conversation.add(user=user, role="user", line=text)
@@ -30,15 +30,15 @@ class Reason:
         await self.mind.send_text_message(user, reply)   
 
 
-    async def process_voice(self, user, audio_file_path, language="ru-RU"):
+    async def process_voice(self, user, audio_file_path, message_time, language="ru-RU"):
         logger.info(f"Got voice message from {user}")
 
         text = await self.convert_audio_to_text(audio_file_path, language)   
 
-        await self.process_text(user, text)
+        await self.process_text(user, text, message_time)
 
 
-    async def process_image(self, user, photo_file_path, caption):
+    async def process_image(self, user, photo_file_path, caption, message_time):
         logger.info(f"Got image message from {user}")
 
         image_description = self.computer_vision.image_to_description(photo_file_path)
@@ -46,4 +46,4 @@ class Reason:
         self.conversation.add(user=user, role="user") # Mistral accepts "system" message only after "user" message
         self.conversation.add(user=user, role="system", line=f"User sent an image with description: {image_description}")
 
-        await self.process_text(user, caption)  
+        await self.process_text(user, caption, message_time)  
