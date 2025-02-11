@@ -1,7 +1,7 @@
 import logging
-from mind.reason._reason import Reason
-from mind.emotions import Emotions
-from mind.memory import Memory
+from ._reason import Reason
+from ._emotions import Emotions
+from ._memory import Memory
 
 logger = logging.getLogger(__name__)
 
