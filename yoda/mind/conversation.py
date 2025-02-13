@@ -5,9 +5,10 @@ class Conversation:
         self.conversations = {}  # Dictionary to store conversations for each user, later to be inited from a database
 
     
-    def add(self, user, role="user", line=''):
+    def add_line(self, user_id: int, chat_id: int, role="user", line=''):
+        user = f"{user_id}@{chat_id}"
         if user not in self.conversations:
-            logging.info(f"Starting new conversation for user {user}")
+            logging.info(f"Starting new conversation with {user}")
             self.conversations[user] = [{"role": "system", "content": "Reply as Yoda from Star Wars"}]
         self.conversations[user].append({"role": role, "content": line})
         return self.conversations[user]

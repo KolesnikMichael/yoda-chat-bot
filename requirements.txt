@@ -3,4 +3,5 @@ mistralai
 pytest
 pytest-asyncio
 SpeechRecognition
-PyDub 
+PyDub
+redis

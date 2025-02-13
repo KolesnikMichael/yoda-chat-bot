@@ -9,7 +9,7 @@ class SpeechRecognizer:
     def __init__(self):
         pass
 
-    def speech_to_text(self, audio_file_path, language="ru-RU"):
+    def speech_to_text(self, audio_file_path, language: str):
         wav_audio_file_path = audio_file_path.with_suffix(".wav")        
 
         audio = AudioSegment.from_file(audio_file_path, format="ogg")
