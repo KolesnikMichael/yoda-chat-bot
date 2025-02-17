@@ -92,7 +92,7 @@ class TelegramBot:
             "first_name": message.from_user.first_name,
             "last_name": message.from_user.last_name,
             "language_code": message.from_user.language_code,
-            "last_active": message.date.timestamp()
+            "last_active": f"{message.date}"
             }
         return user_info
 

@@ -18,21 +18,21 @@ class Mind:
 
     def process_text_message(self, user_id: int, chat_id: int, user_info: dict, message_text: str):
         logger.info(f"Got text message from {user_id}@{chat_id}")
-        self.memory.refresh_user_info(user_id, user_info)
+        self.memory.update_sender_info(user_id, chat_id, user_info)
         response = self.reason.process_text(user_id=user_id, chat_id=chat_id, text=message_text)
         return response
 
 
     def process_voice_message(self, user_id: int, chat_id: int, user_info: dict, audio_file_path):
         logger.info(f"Got voice message from {user_id}@{chat_id}")
-        self.memory.refresh_user_info(user_id, user_info)
+        self.memory.update_sender_info(user_id, chat_id, user_info)
         response = self.reason.process_voice(user_id=user_id, chat_id=chat_id, audio_file_path=audio_file_path)
         return response
 
 
     def process_photo_message(self, user_id: int, chat_id: int, user_info: dict, photo_file_path, caption: str):
         logger.info(f"Got photo message from {user_id}@{chat_id}")
-        self.memory.refresh_user_info(user_id, user_info)
+        self.memory.update_sender_info(user_id, chat_id, user_info)
         response = self.reason.process_image(user_id, chat_id, photo_file_path, caption)
         return response
 
