@@ -1,5 +1,6 @@
 import logging
 import time
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -57,7 +58,7 @@ class TelegramBot:
 
   async def send_message(self, chat_id: int, message: str) -> None:
     for _ in range(3):
-      time.sleep(1)
+      await asyncio.sleep(1)
       await self.bot.send_chat_action(chat_id=chat_id, action="TYPING")
     await self.bot.send_message(chat_id=chat_id, text=message)
 
