@@ -1,0 +1,29 @@
+- TelegramAPI should not emulate typing - decide
+- Bootstrap still looks strange in yoda - check for mutual dependency and wake up
+- Check if TelegramBot wakes mind up too late, and if it should at all
+- *ProviderOperation -> *Provider
+- Verify that passing APIs and Providers as parameters is really necessary [for tests]
+- But why on Earth pass Operations? They aren't to be mocked, are they?
+- mind is really mind blowing - is it true Integration?
+- message files downloand looks weird
+- Mind: check why memory_operation is handled in a strange way. Tests again? - That's because there's no MemoryProvider?
+- Memory: MemoryProvider is missing
+- Emotions haven't mapped to Affect, adjust settings name and use them
+- Mind: self.emotions_settings
+- Mind: _message_sender is a bad name
+- Update AGENTS.md with Coding Style and add string formatting rule
+- Remove duplicate logging in TelegramBot and Mind, by changing the message at least
+- Cognition: check normalization logic
+- EmotionState: check name
+- EmotionState: should dataclass implement getters/setters or just returns data on instatiation?
+- Settings: update settings name to be consistent
+- VisionProvider should not remove image after success
+- Default system prompt appears as Memory constant, and also in Affect.build_system_prompt
+- Move conversion logic from SpeechApi to AudioProvider, and probably SpeechApi is not needed after all (or is it tests again?)
+- Check why json.dumps(current_chat_info) but json.dumps({**current_user_info, **user_info})
+- Check why UserProfile().__dict__ but EmotionState()
+- Check what does Conversation(user_id=user_id, chat_id=chat_id) return
+- Conversation: check how methods work and why there are media_type and timestamp
+- Check if every memory.add_conversation_line call adds a system prompt
+- Mind: check if empty user message is still needed before system message
+ 

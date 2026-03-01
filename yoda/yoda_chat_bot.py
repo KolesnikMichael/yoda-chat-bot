@@ -1,11 +1,19 @@
-import logging
 import argparse
-import os
 import json
-from mind._mind import Mind
-from embodiment.telegram_bot import TelegramBot
+import logging
+import os
+import sys
+from pathlib import Path
 
-os.environ['PATH'] += os.pathsep + os.path.abspath('bin')
+# When run as script (e.g. from launch.json), project root must be on path so "yoda" package resolves.
+_project_root = Path(__file__).resolve().parents[1]
+if str(_project_root) not in sys.path:
+  sys.path.insert(0, str(_project_root))
+
+os.environ["PATH"] += os.pathsep + str(_project_root / "bin")
+
+from yoda.mind.mind import Mind
+from yoda.embodiment.telegram_bot import TelegramBot
 
 
 def parse_arguments():
