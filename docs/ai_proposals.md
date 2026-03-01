@@ -1,4 +1,5 @@
-### Design Issues
+# AI review results
+## Design Issues
 - Tight Coupling
   - [Mind](cci:2://file:///home/akamike/projects/yoda-chat-bot/yoda/mind/_mind.py:7:0-40:58) and [Reason](cci:2://file:///home/akamike/projects/yoda-chat-bot/yoda/mind/_reason.py:8:0-49:79) have circular dependencies
   - Components directly access [self.mind.send_text_message()](cci:1://file:///home/akamike/projects/yoda-chat-bot/yoda/mind/_mind.py:39:4-40:58)
@@ -19,14 +20,14 @@
   - Inconsistent log levels and formats
   - No connection pooling for Redis
 
-### Object Model Issues
+## Object Model Issues
 - Profiles and chats in Memory could be modeled as small classes/value objects instead of raw dicts JSON-encoded into Redis; that would make evolution and validation easier.
 
-### Tests & maintainability
+## Tests & maintainability
 - **Tests**: Essentially a legacy smoke test that doesn’t match the current code, so real coverage is near zero. This is the biggest maintainability risk.
 - Bring tests up to date around `Reason`, `Conversation`, and Telegram handlers, and remove or fix the legacy test.
 
-### Specific Code Issues
+## Specific Code Issues
 - Memory Class Problems:
   - No connection pooling for Redis
   - Hardcoded schema versions
