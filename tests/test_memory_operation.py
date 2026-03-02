@@ -41,9 +41,10 @@ async def test_update_sender_info_creates_user_and_chat():
 
 
 def test_add_conversation_line_initializes_system_prompt():
-  memory = MemoryOperation()
+  conversation = None
 
-  messages = memory.add_conversation_line(
+  conversation, messages = MemoryOperation.add_conversation_line(
+      conversation=conversation,
       user_id=9,
       chat_id=11,
       role="user",

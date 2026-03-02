@@ -12,37 +12,41 @@ DEFAULT_SYSTEM_PROMPT = "Reply as Yoda from Star Wars"
 
 
 class MemoryOperation:
-  def __init__(self):
-    self.conversations: dict[str, Conversation] = {}
-
   @staticmethod
-  def _conversation_key(user_id: int, chat_id: int) -> str:
+  def conversation_key(user_id: int, chat_id: int) -> str:
     return f"{user_id}@{chat_id}"
 
+  @staticmethod
   def add_conversation_line(
-      self,
+      conversation: Conversation | None,
       user_id: int,
       chat_id: int,
       role: str = "user",
       line: str = "",
       system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-  ) -> list[dict]:
-    key = self._conversation_key(user_id, chat_id)
-    conversation = self.conversations.get(key)
-
+  ) -> tuple[Conversation, list[dict]]:
     if not conversation:
+      key = MemoryOperation.conversation_key(user_id, chat_id)
       logger.info(f"Starting new conversation with {key}")
       conversation = Conversation(user_id=user_id, chat_id=chat_id)
-      self.conversations[key] = conversation
 
     conversation.ensure_system_prompt(system_prompt)
     conversation.add_message(role=role, text=line)
-    return conversation.to_llm_messages()
+    return conversation, conversation.to_llm_messages()
 
 
 class MemoryProvider:
   def __init__(self, storage_api):
     self.storage_api = storage_api
+    self.conversations: dict[str, Conversation] = {}
+
+  def get_conversation(self, user_id: int, chat_id: int) -> Conversation | None:
+    key = MemoryOperation.conversation_key(user_id, chat_id)
+    return self.conversations.get(key)
+
+  def save_conversation(self, conversation: Conversation) -> None:
+    key = MemoryOperation.conversation_key(conversation.user_id, conversation.chat_id)
+    self.conversations[key] = conversation
 
   async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
     current_user_info_raw = await self.storage_api.hget("users", str(user_id))

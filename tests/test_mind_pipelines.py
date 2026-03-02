@@ -1,31 +1,25 @@
 import pytest
 
 from yoda.mind.mind import Mind
-
-
-class FakeMemoryOperation:
-  def __init__(self):
-    self.lines = []
-
-  def add_conversation_line(self, user_id: int, chat_id: int, role: str, line: str, system_prompt: str) -> list[dict]:
-    self.lines.append(
-        {
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "role": role,
-            "line": line,
-            "system_prompt": system_prompt,
-        }
-    )
-    return [{"role": "system", "content": system_prompt}, {"role": role, "content": line}]
+from yoda.mind.memory.memory import MemoryOperation
+from yoda.mind.memory.data.conversation import Conversation
 
 
 class FakeMemoryProvider:
   def __init__(self):
     self.sender_updates = []
+    self.conversations: dict[str, Conversation] = {}
 
   async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
     self.sender_updates.append((user_id, chat_id, user_info))
+
+  def get_conversation(self, user_id: int, chat_id: int) -> Conversation | None:
+    key = MemoryOperation.conversation_key(user_id, chat_id)
+    return self.conversations.get(key)
+
+  def save_conversation(self, conversation: Conversation) -> None:
+    key = MemoryOperation.conversation_key(conversation.user_id, conversation.chat_id)
+    self.conversations[key] = conversation
 
 
 class FakeLanguageProvider:
@@ -46,11 +40,6 @@ class FakeVisionProvider:
 class FakeCognitionOperation:
   def normalize_user_text(self, text: str) -> str:
     return text.strip()
-
-
-class FakeAffectOperation:
-  def build_system_prompt(self) -> str:
-    return "Reply as Yoda from Star Wars"
 
 
 class FakeSender:
@@ -76,15 +65,12 @@ def build_settings():
 
 @pytest.mark.asyncio
 async def test_text_pipeline_sends_response():
-  memory = FakeMemoryOperation()
   memory_provider = FakeMemoryProvider()
   sender = FakeSender()
   mind = Mind(
       build_settings(),
-      memory_operation=memory,
       memory_provider=memory_provider,
       cognition_operation=FakeCognitionOperation(),
-      affect_operation=FakeAffectOperation(),
       language_provider=FakeLanguageProvider(),
       audio_provider=FakeAudioProvider(),
       vision_provider=FakeVisionProvider(),
@@ -99,20 +85,20 @@ async def test_text_pipeline_sends_response():
   )
 
   assert sender.calls == [(2, "reply:Hello")]
-  assert memory.lines[0]["role"] == "user"
-  assert memory.lines[1]["role"] == "assistant"
+  conversation = memory_provider.get_conversation(user_id=1, chat_id=2)
+  assert conversation is not None
+  messages = conversation.to_llm_messages()
+  assert messages[-2]["role"] == "user"
+  assert messages[-1]["role"] == "assistant"
 
 
 @pytest.mark.asyncio
 async def test_voice_pipeline_uses_audio_provider():
-  memory = FakeMemoryOperation()
   sender = FakeSender()
   mind = Mind(
       build_settings(),
-      memory_operation=memory,
       memory_provider=FakeMemoryProvider(),
       cognition_operation=FakeCognitionOperation(),
-      affect_operation=FakeAffectOperation(),
       language_provider=FakeLanguageProvider(),
       audio_provider=FakeAudioProvider(),
       vision_provider=FakeVisionProvider(),
@@ -131,14 +117,12 @@ async def test_voice_pipeline_uses_audio_provider():
 
 @pytest.mark.asyncio
 async def test_photo_pipeline_adds_image_context():
-  memory = FakeMemoryOperation()
+  memory_provider = FakeMemoryProvider()
   sender = FakeSender()
   mind = Mind(
       build_settings(),
-      memory_operation=memory,
-      memory_provider=FakeMemoryProvider(),
+      memory_provider=memory_provider,
       cognition_operation=FakeCognitionOperation(),
-      affect_operation=FakeAffectOperation(),
       language_provider=FakeLanguageProvider(),
       audio_provider=FakeAudioProvider(),
       vision_provider=FakeVisionProvider(),
@@ -153,7 +137,10 @@ async def test_photo_pipeline_adds_image_context():
       caption="What is this?",
   )
 
-  system_lines = [line for line in memory.lines if line["role"] == "system"]
+  conversation = memory_provider.get_conversation(user_id=3, chat_id=5)
+  assert conversation is not None
+  messages = conversation.to_llm_messages()
+  system_lines = [m for m in messages if m["role"] == "system"]
   assert system_lines
-  assert "a lightsaber in hand" in system_lines[0]["line"]
+  assert any("a lightsaber in hand" in m["content"] for m in system_lines)
   assert sender.calls == [(5, "reply:What is this?")]

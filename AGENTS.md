@@ -1,4 +1,4 @@
-# AGENTS.md — Architecture Guide for Embodiment/Mind Chatbot
+# IODA architecture guide, coding style and more for Yoda chatbot
 
 ## Context
 This project is a Telegram chatbot with LLM integration, memory, and planned emotional dynamics and agentic capabilities (web research, cron triggers, site watching, group chat).
@@ -68,8 +68,8 @@ TBD
 Use `asyncio.gather()` whenever two or more Providers/Portals are called and their inputs are independent.
 
 ## Workflows
-- Use TDD where applicable/reasonable
-- Run tests before proposing any changes for review
+- Use TDD where applicable and reasonable
+- Run tests before proposing any changes for review (pytest module is available in .venv)
 
 ## Coding Style
 - Use f-string formatting for string concatenation

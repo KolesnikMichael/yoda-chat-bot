@@ -4,8 +4,9 @@ from yoda.api.llm_api import LLMApi
 from yoda.api.speech_api import SpeechApi
 from yoda.api.storage_api import StorageApi
 
-from .affect import AffectOperation
+from .affect import AffectOperation, AffectProvider
 from .cognition import CognitionOperation
+from .memory.data.emotion_state import EmotionState
 from .memory.memory import MemoryOperation, MemoryProvider
 from .perception.audio import AudioProvider
 from .perception.language import LanguageProvider
@@ -18,10 +19,9 @@ class Mind:
   def __init__(
       self,
       settings: dict,
-      memory_operation=None,
       memory_provider=None,
       cognition_operation=None,
-      affect_operation=None,
+      affect_provider=None,
       language_provider=None,
       audio_provider=None,
       vision_provider=None,
@@ -29,7 +29,6 @@ class Mind:
     reason_settings = settings["reason"]
     memory_settings = settings["memory"]
     emotions_settings = settings["emotions"]
-    self.memory = memory_operation or MemoryOperation()
     if memory_provider:
       self.memory_provider = memory_provider
     else:
@@ -41,7 +40,7 @@ class Mind:
       self.memory_provider = MemoryProvider(storage_api=storage_api)
 
     self.cognition = cognition_operation or CognitionOperation()
-    self.affect = affect_operation or AffectOperation()
+    self.affect_provider = affect_provider or AffectProvider(EmotionState(**emotions_settings))
     if language_provider:
       self.language_provider = language_provider
     else:
@@ -72,24 +71,30 @@ class Mind:
 
   async def _process_text_pipeline(self, user_id: int, chat_id: int, text: str) -> str:
     normalized_text = self.cognition.normalize_user_text(text)
-    system_prompt = self.affect.build_system_prompt()
+    emotion_state = self.affect_provider.get_emotion_state()
+    system_prompt = AffectOperation.build_system_prompt(emotion_state)
 
-    messages = self.memory.add_conversation_line(
+    conversation = self.memory_provider.get_conversation(user_id=user_id, chat_id=chat_id)
+    conversation, messages = MemoryOperation.add_conversation_line(
+        conversation=conversation,
         user_id=user_id,
         chat_id=chat_id,
         role="user",
         line=normalized_text,
         system_prompt=system_prompt,
     )
+    self.memory_provider.save_conversation(conversation)
 
     reply = await self.language_provider.reply_in_conversation(messages)
-    self.memory.add_conversation_line(
+    conversation, _ = MemoryOperation.add_conversation_line(
+        conversation=conversation,
         user_id=user_id,
         chat_id=chat_id,
         role="assistant",
         line=reply,
         system_prompt=system_prompt,
     )
+    self.memory_provider.save_conversation(conversation)
     return reply
 
   async def process_text_message(self, user_id: int, chat_id: int, user_info: dict, message_text: str):
@@ -112,21 +117,26 @@ class Mind:
     await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
 
     image_description = await self.vision_provider.image_to_description(photo_file_path)
-    system_prompt = self.affect.build_system_prompt()
-    self.memory.add_conversation_line(
+    emotion_state = self.affect_provider.get_emotion_state()
+    system_prompt = AffectOperation.build_system_prompt(emotion_state)
+    conversation = self.memory_provider.get_conversation(user_id=user_id, chat_id=chat_id)
+    conversation, _ = MemoryOperation.add_conversation_line(
+        conversation=conversation,
         user_id=user_id,
         chat_id=chat_id,
         role="user",
         line="",
         system_prompt=system_prompt,
     ) # Mistral won't accept system message with no preceeding user message
-    self.memory.add_conversation_line(
+    conversation, _ = MemoryOperation.add_conversation_line(
+        conversation=conversation,
         user_id=user_id,
         chat_id=chat_id,
         role="system",
         line=f"User sent an image with description: {image_description}",
         system_prompt=system_prompt,
     )
+    self.memory_provider.save_conversation(conversation)
     reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=caption)
     if self._message_sender:
       await self._message_sender(chat_id, reply)
