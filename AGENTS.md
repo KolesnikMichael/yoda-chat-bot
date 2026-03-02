@@ -45,7 +45,7 @@ mind/
     audio.py            # Provider (async): uses API for speech-to-text conversion
     vision.py           # Provider (async): uses vision AI model API for image-to-text
   memory/
-    memory.py           # Operation (sync): extract facts, build profile + Provider (async): conversation history, user profiles
+    memory.py           # Operation (sync): extract facts, build profile AND Provider (async): conversation history, user profiles
     data/
       user_profile.py   # Data: UserProfile { facts, preferences, emotion }
       conversation.py   # Data: Conversation { user_id, messages: [Message] }
@@ -67,3 +67,9 @@ TBD
 ## asyncio Rules
 Use `asyncio.gather()` whenever two or more Providers/Portals are called and their inputs are independent.
 
+## Workflows
+- Use TDD where applicable/reasonable
+- Run tests before proposing any changes for review
+
+## Coding Style
+- Use f-string formatting for string concatenation

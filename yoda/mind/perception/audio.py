@@ -1,4 +1,4 @@
-class AudioProviderOperation:
+class AudioProvider:
   def __init__(self, speech_api):
     self._speech_api = speech_api
 

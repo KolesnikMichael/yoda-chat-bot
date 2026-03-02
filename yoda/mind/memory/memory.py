@@ -32,7 +32,7 @@ class MemoryOperation:
     conversation = self.conversations.get(key)
 
     if not conversation:
-      logger.info("Starting new conversation with %s", key)
+      logger.info(f"Starting new conversation with {key}")
       conversation = Conversation(user_id=user_id, chat_id=chat_id)
       self.conversations[key] = conversation
 
@@ -46,7 +46,7 @@ class MemoryOperation:
       current_user_info = json.loads(current_user_info_raw)
     else:
       current_user_info = {"known_since": user_info.get("last_active")}
-      logger.info("Registered user %s", user_id)
+      logger.info(f"Registered user {user_id}")
 
     await self.storage_api.hset("users", str(user_id), json.dumps({**current_user_info, **user_info}))
 
@@ -72,7 +72,7 @@ class MemoryOperation:
           "last_active": "",
           "schema_version": CHAT_SCHEMA_VERSION,
       }
-      logger.info("Registered chat %s", chat_id)
+      logger.info(f"Registered chat {chat_id}")
 
     current_chat_info["last_active"] = last_active
     await self.storage_api.hset("chats", str(chat_id), json.dumps(current_chat_info))

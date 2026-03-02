@@ -28,6 +28,9 @@ class FakeTelegramApi:
   async def download_photo_to_cache(self, message, cache_dir: str = "./.file_cache"):
     return "photo.jpg"
 
+  async def emulate_typing(self, bot, chat_id: int, seconds: int):
+    return None
+
   async def send_message(self, bot, chat_id: int, message: str):
     return None
 

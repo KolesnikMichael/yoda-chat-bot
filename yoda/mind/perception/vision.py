@@ -2,7 +2,7 @@ import base64
 import os
 
 
-class VisionProviderOperation:
+class VisionProvider:
   def __init__(self, settings: dict, llm_api):
     self._llm_api = llm_api
     self._model_name = settings["pixtral_large_latest"]["model_name"]

@@ -56,6 +56,7 @@ class TelegramBot:
     await self.mind.process_photo_message(user_id=user_id, chat_id=chat_id, user_info=user_info, photo_file_path=photo_file_path, caption=caption)
 
   async def send_message(self, chat_id: int, message: str) -> None:
+    await self.telegram_api.emulate_typing(self.bot, chat_id=chat_id, seconds=3)
     await self.telegram_api.send_message(self.bot, chat_id=chat_id, message=message)
 
   async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

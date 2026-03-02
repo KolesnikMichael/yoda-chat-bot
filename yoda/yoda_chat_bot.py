@@ -34,7 +34,7 @@ def main() -> None:
   logger = logging.getLogger(__name__)
 
   args = parse_arguments()
-  logger.info("Starting with arguments: %s", args)
+  logger.info(f"Starting with arguments: {args}")
 
   with open('settings.json', 'r') as settings_file:
     settings_json = json.load(settings_file)
