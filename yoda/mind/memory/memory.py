@@ -12,8 +12,7 @@ DEFAULT_SYSTEM_PROMPT = "Reply as Yoda from Star Wars"
 
 
 class MemoryOperation:
-  def __init__(self, storage_api):
-    self.storage_api = storage_api
+  def __init__(self):
     self.conversations: dict[str, Conversation] = {}
 
   @staticmethod
@@ -39,6 +38,11 @@ class MemoryOperation:
     conversation.ensure_system_prompt(system_prompt)
     conversation.add_message(role=role, text=line)
     return conversation.to_llm_messages()
+
+
+class MemoryProvider:
+  def __init__(self, storage_api):
+    self.storage_api = storage_api
 
   async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
     current_user_info_raw = await self.storage_api.hget("users", str(user_id))

@@ -6,7 +6,7 @@ from yoda.api.storage_api import StorageApi
 
 from .affect import AffectOperation
 from .cognition import CognitionOperation
-from .memory.memory import MemoryOperation
+from .memory.memory import MemoryOperation, MemoryProvider
 from .perception.audio import AudioProvider
 from .perception.language import LanguageProvider
 from .perception.vision import VisionProvider
@@ -19,6 +19,7 @@ class Mind:
       self,
       settings: dict,
       memory_operation=None,
+      memory_provider=None,
       cognition_operation=None,
       affect_operation=None,
       language_provider=None,
@@ -28,15 +29,16 @@ class Mind:
     reason_settings = settings["reason"]
     memory_settings = settings["memory"]
     emotions_settings = settings["emotions"]
-    if memory_operation:
-      self.memory = memory_operation
+    self.memory = memory_operation or MemoryOperation()
+    if memory_provider:
+      self.memory_provider = memory_provider
     else:
       storage_api = StorageApi(
           host=memory_settings.get("redis_host", "localhost"),
           port=memory_settings.get("redis_port", 6379),
           db=memory_settings.get("redis_db", 0),
       )
-      self.memory = MemoryOperation(storage_api=storage_api)
+      self.memory_provider = MemoryProvider(storage_api=storage_api)
 
     self.cognition = cognition_operation or CognitionOperation()
     self.affect = affect_operation or AffectOperation()
@@ -92,14 +94,14 @@ class Mind:
 
   async def process_text_message(self, user_id: int, chat_id: int, user_info: dict, message_text: str):
     logger.info(f"Got text message from {user_id}@{chat_id}")
-    await self.memory.update_sender_info(user_id, chat_id, user_info)
+    await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
     reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=message_text)
     if self._message_sender:
       await self._message_sender(chat_id, reply)
 
   async def process_voice_message(self, user_id: int, chat_id: int, user_info: dict, audio_file_path):
     logger.info(f"Got voice message from {user_id}@{chat_id}")
-    await self.memory.update_sender_info(user_id, chat_id, user_info)
+    await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
     text = await self.audio_provider.speech_to_text(audio_file_path=audio_file_path, language="ru-RU")
     reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=text)
     if self._message_sender:
@@ -107,7 +109,7 @@ class Mind:
 
   async def process_photo_message(self, user_id: int, chat_id: int, user_info: dict, photo_file_path, caption: str):
     logger.info(f"Got photo message from {user_id}@{chat_id}")
-    await self.memory.update_sender_info(user_id, chat_id, user_info)
+    await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
 
     image_description = await self.vision_provider.image_to_description(photo_file_path)
     system_prompt = self.affect.build_system_prompt()

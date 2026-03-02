@@ -5,11 +5,7 @@ from yoda.mind.mind import Mind
 
 class FakeMemoryOperation:
   def __init__(self):
-    self.sender_updates = []
     self.lines = []
-
-  async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
-    self.sender_updates.append((user_id, chat_id, user_info))
 
   def add_conversation_line(self, user_id: int, chat_id: int, role: str, line: str, system_prompt: str) -> list[dict]:
     self.lines.append(
@@ -22,6 +18,14 @@ class FakeMemoryOperation:
         }
     )
     return [{"role": "system", "content": system_prompt}, {"role": role, "content": line}]
+
+
+class FakeMemoryProvider:
+  def __init__(self):
+    self.sender_updates = []
+
+  async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
+    self.sender_updates.append((user_id, chat_id, user_info))
 
 
 class FakeLanguageProvider:
@@ -73,10 +77,12 @@ def build_settings():
 @pytest.mark.asyncio
 async def test_text_pipeline_sends_response():
   memory = FakeMemoryOperation()
+  memory_provider = FakeMemoryProvider()
   sender = FakeSender()
   mind = Mind(
       build_settings(),
       memory_operation=memory,
+      memory_provider=memory_provider,
       cognition_operation=FakeCognitionOperation(),
       affect_operation=FakeAffectOperation(),
       language_provider=FakeLanguageProvider(),
@@ -104,6 +110,7 @@ async def test_voice_pipeline_uses_audio_provider():
   mind = Mind(
       build_settings(),
       memory_operation=memory,
+      memory_provider=FakeMemoryProvider(),
       cognition_operation=FakeCognitionOperation(),
       affect_operation=FakeAffectOperation(),
       language_provider=FakeLanguageProvider(),
@@ -129,6 +136,7 @@ async def test_photo_pipeline_adds_image_context():
   mind = Mind(
       build_settings(),
       memory_operation=memory,
+      memory_provider=FakeMemoryProvider(),
       cognition_operation=FakeCognitionOperation(),
       affect_operation=FakeAffectOperation(),
       language_provider=FakeLanguageProvider(),

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from yoda.mind.memory.memory import MemoryOperation
+from yoda.mind.memory.memory import MemoryOperation, MemoryProvider
 
 
 class FakeStorageApi:
@@ -21,7 +21,7 @@ class FakeStorageApi:
 @pytest.mark.asyncio
 async def test_update_sender_info_creates_user_and_chat():
   storage = FakeStorageApi()
-  memory = MemoryOperation(storage_api=storage)
+  memory_provider = MemoryProvider(storage_api=storage)
   user_info = {
       "username": "luke",
       "first_name": "Luke",
@@ -30,7 +30,7 @@ async def test_update_sender_info_creates_user_and_chat():
       "last_active": "2026-02-20T00:00:00",
   }
 
-  await memory.update_sender_info(user_id=1, chat_id=1, user_info=user_info)
+  await memory_provider.update_sender_info(user_id=1, chat_id=1, user_info=user_info)
 
   saved_user = json.loads(storage.data["users"]["1"])
   saved_chat = json.loads(storage.data["chats"]["1"])
@@ -41,7 +41,7 @@ async def test_update_sender_info_creates_user_and_chat():
 
 
 def test_add_conversation_line_initializes_system_prompt():
-  memory = MemoryOperation(storage_api=FakeStorageApi())
+  memory = MemoryOperation()
 
   messages = memory.add_conversation_line(
       user_id=9,
