@@ -1,12 +1,7 @@
 import logging
 
-from yoda.api.llm_api import LLMApi
-from yoda.api.speech_api import SpeechApi
-from yoda.api.storage_api import StorageApi
-
 from .affect import AffectOperation, AffectProvider
 from .cognition import CognitionOperation
-from .memory.data.emotion_state import EmotionState
 from .memory.memory import MemoryOperation, MemoryProvider
 from .perception.audio import AudioProvider
 from .perception.language import LanguageProvider
@@ -20,57 +15,31 @@ class Mind:
       self,
       settings: dict,
       memory_provider=None,
-      cognition_operation=None,
       affect_provider=None,
       language_provider=None,
       audio_provider=None,
       vision_provider=None,
   ):
     reason_settings = settings["reason"]
-    memory_settings = settings["memory"]
-    emotions_settings = settings["emotions"]
-    if memory_provider:
-      self.memory_provider = memory_provider
-    else:
-      storage_api = StorageApi(
-          host=memory_settings.get("redis_host", "localhost"),
-          port=memory_settings.get("redis_port", 6379),
-          db=memory_settings.get("redis_db", 0),
-      )
-      self.memory_provider = MemoryProvider(storage_api=storage_api)
 
-    self.cognition = cognition_operation or CognitionOperation()
-    self.affect_provider = affect_provider or AffectProvider(EmotionState(**emotions_settings))
-    if language_provider:
-      self.language_provider = language_provider
-    else:
-      language_llm_api = LLMApi(
-          api_key=reason_settings["intelligence"]["language_processing"]["mistral_large_latest"]["api_key"]
-      )
-      self.language_provider = LanguageProvider(
-          settings=reason_settings["intelligence"]["language_processing"],
-          llm_api=language_llm_api,
-      )
+    self.memory_provider = memory_provider \
+      or MemoryProvider.from_settings(settings["memory"])
+    self.language_provider = language_provider \
+      or LanguageProvider.from_settings(reason_settings["intelligence"]["language_processing"])
+    self.audio_provider = audio_provider \
+      or AudioProvider.from_settings(settings.get("audio", {}))
+    self.vision_provider = vision_provider \
+      or VisionProvider.from_settings(reason_settings["intelligence"]["computer_vision"])
+    self.affect_provider = affect_provider \
+      or AffectProvider.from_settings(settings["emotions"])
 
-    self.audio_provider = audio_provider or AudioProvider(speech_api=SpeechApi())
-    if vision_provider:
-      self.vision_provider = vision_provider
-    else:
-      vision_llm_api = LLMApi(
-          api_key=reason_settings["intelligence"]["computer_vision"]["pixtral_large_latest"]["api_key"]
-      )
-      self.vision_provider = VisionProvider(
-          settings=reason_settings["intelligence"]["computer_vision"],
-          llm_api=vision_llm_api,
-      )
-    self.emotions = emotions_settings
     self._message_sender = None
 
   def bind_message_sender(self, message_sender) -> None:
     self._message_sender = message_sender
 
   async def _process_text_pipeline(self, user_id: int, chat_id: int, text: str) -> str:
-    normalized_text = self.cognition.normalize_user_text(text)
+    normalized_text = CognitionOperation.normalize_user_text(text)
     emotion_state = self.affect_provider.get_emotion_state()
     system_prompt = AffectOperation.build_system_prompt(emotion_state)
 

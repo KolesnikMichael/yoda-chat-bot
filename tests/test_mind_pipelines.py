@@ -37,11 +37,6 @@ class FakeVisionProvider:
     return "a lightsaber in hand"
 
 
-class FakeCognitionOperation:
-  def normalize_user_text(self, text: str) -> str:
-    return text.strip()
-
-
 class FakeSender:
   def __init__(self):
     self.calls = []
@@ -70,7 +65,6 @@ async def test_text_pipeline_sends_response():
   mind = Mind(
       build_settings(),
       memory_provider=memory_provider,
-      cognition_operation=FakeCognitionOperation(),
       language_provider=FakeLanguageProvider(),
       audio_provider=FakeAudioProvider(),
       vision_provider=FakeVisionProvider(),
@@ -98,7 +92,6 @@ async def test_voice_pipeline_uses_audio_provider():
   mind = Mind(
       build_settings(),
       memory_provider=FakeMemoryProvider(),
-      cognition_operation=FakeCognitionOperation(),
       language_provider=FakeLanguageProvider(),
       audio_provider=FakeAudioProvider(),
       vision_provider=FakeVisionProvider(),
@@ -122,7 +115,6 @@ async def test_photo_pipeline_adds_image_context():
   mind = Mind(
       build_settings(),
       memory_provider=memory_provider,
-      cognition_operation=FakeCognitionOperation(),
       language_provider=FakeLanguageProvider(),
       audio_provider=FakeAudioProvider(),
       vision_provider=FakeVisionProvider(),

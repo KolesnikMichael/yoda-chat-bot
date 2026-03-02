@@ -1,13 +1,11 @@
-- mind is really mind blowing - is it true Integration?
 - message files downloand looks weird
 - Emotions haven't mapped to Affect, adjust settings name and use them
-- Mind: self.emotions_settings
 - Mind: _message_sender is a bad name
 - Remove duplicate logging in TelegramBot and Mind, by changing the message at least
 - Cognition: check normalization logic
 - EmotionState: check name
 - EmotionState: should dataclass implement getters/setters or just returns data on instatiation?
-- Settings: update settings name to be consistent
+- Settings: update settings name and structure to be consistent with codebase
 - VisionProvider should not remove image after success
 - Default system prompt appears as Memory constant, and also in Affect.build_system_prompt
 - Move conversion logic from SpeechApi to AudioProvider, and probably SpeechApi is not needed after all (or is it tests again?)
