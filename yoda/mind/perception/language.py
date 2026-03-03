@@ -4,11 +4,17 @@ from yoda.api.llm_api import LLMApi
 class LanguageProvider:
   def __init__(self, settings: dict, llm_api: LLMApi):
     self._llm_api = llm_api
-    self._model_name = settings["mistral_large_latest"]["model_name"]
+    try:
+      self._model_name = settings["model_name"]
+    except KeyError as e:
+      raise ValueError("Language settings missing required 'model_name'") from e
 
   @classmethod
   def from_settings(cls, language_settings: dict) -> "LanguageProvider":
-    api_key = language_settings["mistral_large_latest"]["api_key"]
+    try:
+      api_key = language_settings["api_key"]
+    except KeyError as e:
+      raise ValueError("Language settings missing required 'api_key'") from e
     llm_api = LLMApi(api_key=api_key)
     return cls(settings=language_settings, llm_api=llm_api)
 

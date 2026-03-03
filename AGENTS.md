@@ -70,7 +70,10 @@ TBD
 
 ## Workflow
 - Use TDD where applicable and reasonable
-- Run tests before proposing any changes for review (pytest module is available in .venv)
+- Run tests before proposing any changes for review
+
+### How to run tests
+**When running tests, prefer `python -m pytest` from the project root, using the interpreter in `.venv\Scripts\python.exe`.**
 
 ## Coding Style and Patterns
 - Use f-string formatting for concatenation

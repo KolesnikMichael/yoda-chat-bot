@@ -5,11 +5,17 @@ import os
 class VisionProvider:
   def __init__(self, settings: dict, llm_api: LLMApi):
     self._llm_api = llm_api
-    self._model_name = settings["pixtral_large_latest"]["model_name"]
+    try:
+      self._model_name = settings["model_name"]
+    except KeyError as e:
+      raise ValueError("Vision settings missing required 'model_name'") from e
 
   @classmethod
   def from_settings(cls, vision_settings: dict) -> "VisionProvider":
-    api_key = vision_settings["pixtral_large_latest"]["api_key"]
+    try:
+      api_key = vision_settings["api_key"]
+    except KeyError as e:
+      raise ValueError("Vision settings missing required 'api_key'") from e
     llm_api = LLMApi(api_key=api_key)
     return cls(settings=vision_settings, llm_api=llm_api)
 

@@ -20,18 +20,27 @@ class Mind:
       audio_provider=None,
       vision_provider=None,
   ):
-    reason_settings = settings["reason"]
+    try:
+      perception_settings = settings["perception"]
+      memory_settings = settings["memory"]
+      emotions_settings = settings["emotions"]
+      language_settings = perception_settings["language"]
+      audio_settings = perception_settings["audio"]
+      vision_settings = perception_settings["vision"]
+    except KeyError as e:
+      missing_key = e.args[0]
+      raise ValueError(f"Mind settings missing required key: {missing_key}") from e
 
     self.memory_provider = memory_provider \
-      or MemoryProvider.from_settings(settings["memory"])
+      or MemoryProvider.from_settings(memory_settings)
     self.language_provider = language_provider \
-      or LanguageProvider.from_settings(reason_settings["intelligence"]["language_processing"])
+      or LanguageProvider.from_settings(language_settings)
     self.audio_provider = audio_provider \
-      or AudioProvider.from_settings(settings.get("audio", {}))
+      or AudioProvider.from_settings(audio_settings)
     self.vision_provider = vision_provider \
-      or VisionProvider.from_settings(reason_settings["intelligence"]["computer_vision"])
+      or VisionProvider.from_settings(vision_settings)
     self.affect_provider = affect_provider \
-      or AffectProvider.from_settings(settings["emotions"])
+      or AffectProvider.from_settings(emotions_settings)
 
     self._message_sender = None
 
@@ -67,22 +76,19 @@ class Mind:
     return reply
 
   async def process_text_message(self, user_id: int, chat_id: int, user_info: dict, message_text: str):
-    logger.info(f"Got text message from {user_id}@{chat_id}")
     await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
     reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=message_text)
     if self._message_sender:
       await self._message_sender(chat_id, reply)
 
   async def process_voice_message(self, user_id: int, chat_id: int, user_info: dict, audio_file_path):
-    logger.info(f"Got voice message from {user_id}@{chat_id}")
     await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
-    text = await self.audio_provider.speech_to_text(audio_file_path=audio_file_path, language="ru-RU")
+    text = await self.audio_provider.speech_to_text(audio_file_path=audio_file_path)
     reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=text)
     if self._message_sender:
       await self._message_sender(chat_id, reply)
 
   async def process_photo_message(self, user_id: int, chat_id: int, user_info: dict, photo_file_path, caption: str):
-    logger.info(f"Got photo message from {user_id}@{chat_id}")
     await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
 
     image_description = await self.vision_provider.image_to_description(photo_file_path)

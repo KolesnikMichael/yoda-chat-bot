@@ -39,8 +39,19 @@ def main() -> None:
   with open('settings.json', 'r') as settings_file:
     settings_json = json.load(settings_file)
 
-  mind = Mind(settings_json["mind"])
-  body = TelegramBot(settings_json["embodiment"]["telegram"], args.test)
+  try:
+    mind_settings = settings_json["mind"]
+  except KeyError as e:
+    raise ValueError("settings.json is missing required 'mind' section") from e
+
+  try:
+    embodiment_settings = settings_json["embodiment"]
+    telegram_settings = embodiment_settings["telegram"]
+  except KeyError as e:
+    raise ValueError("settings.json is missing required 'embodiment.telegram' section") from e
+
+  mind = Mind(mind_settings)
+  body = TelegramBot(telegram_settings, args.test)
 
   body.wake_up(mind)
 

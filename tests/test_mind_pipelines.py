@@ -47,13 +47,16 @@ class FakeSender:
 
 def build_settings():
   return {
-      "reason": {
-          "intelligence": {
-              "language_processing": {"mistral_large_latest": {"model_name": "mistral-large-latest", "api_key": "x"}},
-              "computer_vision": {"pixtral_large_latest": {"model_name": "pixtral-large-latest", "api_key": "x"}},
-          }
+      "perception": {
+          "language": {"model_name": "mistral-large-latest", "api_key": "x"},
+          "vision": {"model_name": "pixtral-large-latest", "api_key": "x"},
+          "audio": {"default_language": "ru-RU"},
       },
-      "memory": {},
+      "memory": {
+          "redis_host": "localhost",
+          "redis_port": 6379,
+          "redis_db": 0,
+      },
       "emotions": {"glad": 0, "mad": 0, "sad": 0, "scared": 0},
   }
 

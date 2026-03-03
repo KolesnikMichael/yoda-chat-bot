@@ -61,7 +61,7 @@ def build_update(text: str = "hello", caption: str = ""):
 async def test_text_handler_routes_to_mind():
   telegram_api = FakeTelegramApi()
   bot = TelegramBot(
-      settings={"bot_token": "token", "bot_token_test": "test-token"},
+      settings={"bot_token": "token", "bot_test_token": "test-token"},
       test_mode=True,
       telegram_api=telegram_api,
   )
@@ -77,7 +77,7 @@ async def test_text_handler_routes_to_mind():
 async def test_voice_handler_routes_to_mind():
   telegram_api = FakeTelegramApi()
   bot = TelegramBot(
-      settings={"bot_token": "token", "bot_token_test": "test-token"},
+      settings={"bot_token": "token", "bot_test_token": "test-token"},
       test_mode=False,
       telegram_api=telegram_api,
   )
@@ -93,7 +93,7 @@ async def test_voice_handler_routes_to_mind():
 async def test_photo_handler_routes_to_mind():
   telegram_api = FakeTelegramApi()
   bot = TelegramBot(
-      settings={"bot_token": "token", "bot_token_test": "test-token"},
+      settings={"bot_token": "token", "bot_test_token": "test-token"},
       telegram_api=telegram_api,
   )
   mind = SimpleNamespace(process_photo_message=AsyncMock())
