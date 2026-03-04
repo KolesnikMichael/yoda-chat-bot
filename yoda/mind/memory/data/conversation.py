@@ -13,7 +13,7 @@ class Conversation:
     if not self.messages:
       self.messages.append(Message(role="system", text=system_prompt))
 
-  def add_message(self, role: str, text: str = "", media_type: str = "text", timestamp: str = "") -> None:
+  def add_message(self, role: str, text: str, media_type: str = "text", timestamp: str = "") -> None:
     self.messages.append(
         Message(
             role=role,

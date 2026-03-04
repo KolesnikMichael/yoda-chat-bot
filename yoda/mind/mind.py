@@ -50,8 +50,8 @@ class Mind:
 
   async def _process_text_pipeline(self, user_id: int, chat_id: int, text: str) -> str:
     normalized_text = CognitionOperation.normalize_user_text(text)
-    emotion_state = self.affect_provider.get_emotion_state()
-    system_prompt = AffectOperation.build_system_prompt(emotion_state)
+    emotional_state = self.affect_provider.get_emotional_state()
+    system_prompt = AffectOperation.build_system_prompt(emotional_state)
 
     conversation = self.memory_provider.get_conversation(user_id=user_id, chat_id=chat_id)
     conversation, messages = MemoryOperation.add_conversation_line(
@@ -95,17 +95,9 @@ class Mind:
     await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
 
     image_description = await self.vision_provider.image_to_description(photo_file_path)
-    emotion_state = self.affect_provider.get_emotion_state()
-    system_prompt = AffectOperation.build_system_prompt(emotion_state)
+    emotional_state = self.affect_provider.get_emotional_state()
+    system_prompt = AffectOperation.build_system_prompt(emotional_state)
     conversation = self.memory_provider.get_conversation(user_id=user_id, chat_id=chat_id)
-    conversation, _ = MemoryOperation.add_conversation_line(
-        conversation=conversation,
-        user_id=user_id,
-        chat_id=chat_id,
-        role="user",
-        line="",
-        system_prompt=system_prompt,
-    ) # Mistral won't accept system message with no preceeding user message
     conversation, _ = MemoryOperation.add_conversation_line(
         conversation=conversation,
         user_id=user_id,

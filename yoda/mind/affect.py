@@ -1,20 +1,20 @@
-from .memory.data.emotion_state import EmotionState
+from .memory.data.emotional_state import EmotionalState
 
 
 class AffectOperation:
   @staticmethod
-  def build_system_prompt(emotion_state: EmotionState | None = None) -> str:
+  def build_system_prompt(emotional_state: EmotionalState | None = None) -> str:
     # Keep behavior equivalent to current bot while leaving room for emotion-influenced prompts.
     return "Reply as Yoda from Star Wars"
 
 
 class AffectProvider:
-  def __init__(self, emotion_state: EmotionState | None = None):
-    self._emotion_state = emotion_state or EmotionState()
+  def __init__(self, emotional_state: EmotionalState | None = None):
+    self._emotional_state = emotional_state or EmotionalState()
 
-  def get_emotion_state(self) -> EmotionState:
-    return self._emotion_state
+  def get_emotional_state(self) -> EmotionalState:
+    return self._emotional_state
 
   @classmethod
   def from_settings(cls, emotions_settings: dict) -> "AffectProvider":
-    return cls(EmotionState(**emotions_settings))
+    return cls(EmotionalState(**emotions_settings))

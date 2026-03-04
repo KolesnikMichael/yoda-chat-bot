@@ -41,7 +41,7 @@ mind/
   data/
     message.py                     # Message { role, text, media_type, timestamp }
     conversation.py                # Conversation { user_id, messages: [Message] }
-    emotion_state.py               # EmotionState { valence, arousal }
+    emotional_state.py               # EmotionalState { valence, arousal }
     user_profile.py                # UserProfile { facts, preferences, emotion }
     agent_result.py                # AgentResult { answer, tools_used }
     trigger_event.py               # TriggerEvent { topic, payload, source }

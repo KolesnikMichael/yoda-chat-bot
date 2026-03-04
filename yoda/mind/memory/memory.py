@@ -23,8 +23,8 @@ class MemoryOperation:
       conversation: Conversation | None,
       user_id: int,
       chat_id: int,
-      role: str = "user",
-      line: str = "",
+      role: str,
+      line: str,
       system_prompt: str = DEFAULT_SYSTEM_PROMPT,
   ) -> tuple[Conversation, list[dict]]:
     if not conversation:

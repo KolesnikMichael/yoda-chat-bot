@@ -58,11 +58,11 @@ mind/
       user_profile.py   # Data: UserProfile { facts, preferences, emotion }
       conversation.py   # Data: Conversation { user_id, chat_id, messages: [Message] }
       message.py        # Data: Message { role, text, media_type, timestamp }
-      emotion_state.py  # Data: EmotionState { glad, mad, sad, scared }
+      emotional_state.py  # Data: EmotionalState { glad, mad, sad, scared }
       
   cognition.py          # Operation (sync, static): operates on messages and conversations, make decisions
   affect.py             # AffectOperation (sync, static): updates mood, decays, influences system prompt;
-                        # AffectProvider: owns EmotionState, can use external context later
+                        # AffectProvider: owns EmotionalState, can use external context later
 ```
 ## Core Pipelines
 
@@ -79,4 +79,6 @@ TBD
 - Use f-string formatting for concatenation
 - It is preferable to use static methods for Operations that don't need to be instantiated
 - It is preferable to use builder pattern for Providers 
+- It is preferable to follow "fail fast" principle for error handling
+- Use explicit type hints for all functions and methods
 - Use `asyncio.gather()` whenever two or more Providers/Portals are called and their inputs are independent

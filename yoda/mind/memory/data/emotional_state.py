@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class EmotionState:
+class EmotionalState:
   glad: float = 0.0
   mad: float = 0.0
   sad: float = 0.0

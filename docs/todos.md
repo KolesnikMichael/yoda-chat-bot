@@ -1,13 +1,7 @@
 - message files downloand looks weird
-- Emotions haven't mapped to Affect, adjust settings name and use them
-- Cognition: check normalization logic
-- EmotionState: check name
-- EmotionState: should dataclass implement getters/setters or just returns data on instatiation?
-- VisionProvider should not remove image after success? Move conversion logic from SpeechApi to AudioProvider?
 - Default system prompt appears as Memory constant, and also in Affect.build_system_prompt
 - Check why json.dumps(current_chat_info) but json.dumps({**current_user_info, **user_info})
-- Check why UserProfile().__dict__ but EmotionState()
-- Check what does Conversation(user_id=user_id, chat_id=chat_id) return
-- Conversation: check how methods work and why there are media_type and timestamp
-- Check if every memory.add_conversation_line call adds a system prompt
-- Mind: check if empty user message is still needed before system message
+- Check why UserProfile().__dict__ but EmotionalState()
+- Stop passing system prompt to MemoryOperation.add_conversation_line every now and then. Instead introduce start_conversation method that will be called once at the beginning of the conversation
+- AffectProvider: should return current emotional state as a string, and MemoryOperation should pass it to MemoryProvider and it should append it to the conversation as a system message
+- Remove media_type from Message dataclass, it's not needed
