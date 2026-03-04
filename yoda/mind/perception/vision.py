@@ -1,6 +1,5 @@
 from yoda.api.llm_api import LLMApi
 import base64
-import os
 
 class VisionProvider:
   def __init__(self, settings: dict, llm_api: LLMApi):
@@ -26,11 +25,8 @@ class VisionProvider:
 
   async def image_to_description(self, image_file_path: str) -> str:
     image_base64 = self.encode_image_to_base64(image_file_path)
-    description = await self._llm_api.describe_image(
+    return await self._llm_api.describe_image(
         model_name=self._model_name,
         image_base64=image_base64,
         prompt="Please describe the image in detail.",
     )
-    if os.path.exists(image_file_path):
-      os.remove(image_file_path)
-    return description

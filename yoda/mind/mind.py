@@ -1,4 +1,5 @@
 import logging
+import os
 
 from .affect import AffectOperation, AffectProvider
 from .cognition import CognitionOperation
@@ -87,6 +88,8 @@ class Mind:
     reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=text)
     if self._message_sender:
       await self._message_sender(chat_id, reply)
+    if os.path.exists(audio_file_path):
+      os.remove(audio_file_path)
 
   async def process_photo_message(self, user_id: int, chat_id: int, user_info: dict, photo_file_path, caption: str):
     await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
@@ -115,3 +118,5 @@ class Mind:
     reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=caption)
     if self._message_sender:
       await self._message_sender(chat_id, reply)
+    if os.path.exists(photo_file_path):
+      os.remove(photo_file_path)

@@ -33,8 +33,6 @@ class SpeechApi:
     except speech_recognition.RequestError:
       text = ""
     finally:
-      if os.path.exists(audio_file_path):
-        os.remove(audio_file_path)
       if os.path.exists(wav_audio_file_path):
         os.remove(wav_audio_file_path)
 
