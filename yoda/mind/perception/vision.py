@@ -9,15 +9,6 @@ class VisionProvider:
     except KeyError as e:
       raise ValueError("Vision settings missing required 'model_name'") from e
 
-  @classmethod
-  def from_settings(cls, vision_settings: dict) -> "VisionProvider":
-    try:
-      api_key = vision_settings["api_key"]
-    except KeyError as e:
-      raise ValueError("Vision settings missing required 'api_key'") from e
-    llm_api = LLMApi(api_key=api_key)
-    return cls(settings=vision_settings, llm_api=llm_api)
-
   @staticmethod
   def encode_image_to_base64(image_file_path) -> str:
     with open(image_file_path, "rb") as image_file:

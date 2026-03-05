@@ -14,7 +14,3 @@ class AffectProvider:
 
   def get_emotional_state(self) -> EmotionalState:
     return self._emotional_state
-
-  @classmethod
-  def from_settings(cls, emotions_settings: dict) -> "AffectProvider":
-    return cls(EmotionalState(**emotions_settings))

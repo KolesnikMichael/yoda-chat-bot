@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
+from yoda.mind.affect import AffectProvider
 from yoda.mind.mind import Mind
 from yoda.mind.memory.memory import MemoryOperation
 from yoda.mind.memory.data.conversation import Conversation
@@ -52,33 +53,22 @@ class FakeSender:
     self.calls.append((chat_id, message))
 
 
-def build_settings():
-  return {
-      "perception": {
-          "language": {"model_name": "mistral-large-latest", "api_key": "x"},
-          "vision": {"model_name": "pixtral-large-latest", "api_key": "x"},
-          "audio": {"default_language": "ru-RU"},
-      },
-      "memory": {
-          "redis_host": "localhost",
-          "redis_port": 6379,
-          "redis_db": 0,
-      },
-      "emotions": {"glad": 0, "mad": 0, "sad": 0, "scared": 0},
-  }
+def build_mind(**overrides) -> Mind:
+  defaults = dict(
+      language_provider=FakeLanguageProvider(),
+      vision_provider=FakeVisionProvider(),
+      audio_provider=FakeAudioProvider(),
+      memory_provider=FakeMemoryProvider(),
+      affect_provider=AffectProvider(),
+  )
+  return Mind(**(defaults | overrides))
 
 
 @pytest.mark.asyncio
 async def test_text_pipeline_sends_response():
   memory_provider = FakeMemoryProvider()
   sender = FakeSender()
-  mind = Mind(
-      build_settings(),
-      memory_provider=memory_provider,
-      language_provider=FakeLanguageProvider(),
-      audio_provider=FakeAudioProvider(),
-      vision_provider=FakeVisionProvider(),
-  )
+  mind = build_mind(memory_provider=memory_provider)
   mind.bind_message_sender(sender)
 
   await mind.process_text_message(
@@ -100,13 +90,7 @@ async def test_text_pipeline_sends_response():
 @patch("yoda.mind.mind.AudioOperation.convert_ogg_to_wav", return_value=Path("voice.wav"))
 async def test_voice_pipeline_uses_audio_provider(mock_convert_ogg_to_wav):
   sender = FakeSender()
-  mind = Mind(
-      build_settings(),
-      memory_provider=FakeMemoryProvider(),
-      language_provider=FakeLanguageProvider(),
-      audio_provider=FakeAudioProvider(),
-      vision_provider=FakeVisionProvider(),
-  )
+  mind = build_mind()
   mind.bind_message_sender(sender)
 
   await mind.process_voice_message(
@@ -123,13 +107,7 @@ async def test_voice_pipeline_uses_audio_provider(mock_convert_ogg_to_wav):
 async def test_photo_pipeline_adds_image_context():
   memory_provider = FakeMemoryProvider()
   sender = FakeSender()
-  mind = Mind(
-      build_settings(),
-      memory_provider=memory_provider,
-      language_provider=FakeLanguageProvider(),
-      audio_provider=FakeAudioProvider(),
-      vision_provider=FakeVisionProvider(),
-  )
+  mind = build_mind(memory_provider=memory_provider)
   mind.bind_message_sender(sender)
 
   await mind.process_photo_message(

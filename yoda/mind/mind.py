@@ -16,35 +16,17 @@ logger = logging.getLogger(__name__)
 class Mind:
   def __init__(
       self,
-      settings: dict,
-      memory_provider=None,
-      affect_provider=None,
-      language_provider=None,
-      audio_provider=None,
-      vision_provider=None,
+      language_provider: LanguageProvider,
+      vision_provider: VisionProvider,
+      audio_provider: AudioProvider,
+      memory_provider: MemoryProvider,
+      affect_provider: AffectProvider,
   ):
-    try:
-      perception_settings = settings["perception"]
-      memory_settings = settings["memory"]
-      emotions_settings = settings["emotions"]
-      language_settings = perception_settings["language"]
-      audio_settings = perception_settings["audio"]
-      vision_settings = perception_settings["vision"]
-    except KeyError as e:
-      missing_key = e.args[0]
-      raise ValueError(f"Mind settings missing required key: {missing_key}") from e
-
-    self.memory_provider = memory_provider \
-      or MemoryProvider.from_settings(memory_settings)
-    self.language_provider = language_provider \
-      or LanguageProvider.from_settings(language_settings)
-    self.audio_provider = audio_provider \
-      or AudioProvider.from_settings(audio_settings)
-    self.vision_provider = vision_provider \
-      or VisionProvider.from_settings(vision_settings)
-    self.affect_provider = affect_provider \
-      or AffectProvider.from_settings(emotions_settings)
-
+    self.language_provider = language_provider
+    self.vision_provider = vision_provider
+    self.audio_provider = audio_provider
+    self.memory_provider = memory_provider
+    self.affect_provider = affect_provider
     self._message_sender = None
 
   def bind_message_sender(self, message_sender) -> None:

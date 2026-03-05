@@ -56,15 +56,6 @@ class MemoryProvider:
     self.storage_api = storage_api
     self.conversations: dict[str, Conversation] = {}
 
-  @classmethod
-  def from_settings(cls, memory_settings: dict) -> "MemoryProvider":
-    storage_api = StorageApi(
-        host=memory_settings.get("redis_host", "localhost"),
-        port=memory_settings.get("redis_port", 6379),
-        db=memory_settings.get("redis_db", 0),
-    )
-    return cls(storage_api=storage_api)
-
   def get_conversation(self, user_id: int, chat_id: int) -> Conversation | None:
     key = MemoryOperation.conversation_key(user_id, chat_id)
     return self.conversations.get(key)

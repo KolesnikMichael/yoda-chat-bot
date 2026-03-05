@@ -9,15 +9,6 @@ class LanguageProvider:
     except KeyError as e:
       raise ValueError("Language settings missing required 'model_name'") from e
 
-  @classmethod
-  def from_settings(cls, language_settings: dict) -> "LanguageProvider":
-    try:
-      api_key = language_settings["api_key"]
-    except KeyError as e:
-      raise ValueError("Language settings missing required 'api_key'") from e
-    llm_api = LLMApi(api_key=api_key)
-    return cls(settings=language_settings, llm_api=llm_api)
-
   async def reply_in_conversation(self, conversation: list[dict]) -> str:
     return await self._llm_api.complete_chat_async(
         model_name=self._model_name,
