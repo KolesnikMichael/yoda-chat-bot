@@ -25,8 +25,16 @@ class VisionProvider:
 
   async def image_to_description(self, image_file_path: str) -> str:
     image_base64 = self.encode_image_to_base64(image_file_path)
-    return await self._llm_api.describe_image(
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Please describe the image in detail."},
+                {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image_base64}"},
+            ],
+        }
+    ]
+    return await self._llm_api.complete_chat_via_thread(
         model_name=self._model_name,
-        image_base64=image_base64,
-        prompt="Please describe the image in detail.",
+        messages=messages,
     )

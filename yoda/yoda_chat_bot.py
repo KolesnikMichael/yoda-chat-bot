@@ -12,8 +12,15 @@ if str(_project_root) not in sys.path:
 
 os.environ["PATH"] += os.pathsep + str(_project_root / "bin")
 
-from yoda.mind.mind import Mind
+from yoda.api.llm_api import LLMApi
+from yoda.api.speech_api import SpeechApi
+from yoda.api.storage_api import StorageApi
 from yoda.embodiment.telegram_bot import TelegramBot
+from yoda.mind.memory.memory import MemoryProvider
+from yoda.mind.mind import Mind
+from yoda.mind.perception.audio import AudioProvider
+from yoda.mind.perception.language import LanguageProvider
+from yoda.mind.perception.vision import VisionProvider
 
 
 def parse_arguments():
@@ -49,8 +56,35 @@ def main() -> None:
     telegram_settings = embodiment_settings["telegram"]
   except KeyError as e:
     raise ValueError("settings.json is missing required 'embodiment.telegram' section") from e
+  perception_settings = mind_settings["perception"]
+  language_settings = perception_settings["language"]
+  vision_settings = perception_settings["vision"]
+  audio_settings = perception_settings["audio"]
 
-  mind = Mind(mind_settings)
+  llm_api = LLMApi(api_key=language_settings["api_key"])
+  language_provider = LanguageProvider(settings=language_settings, llm_api=llm_api)
+  vision_provider = VisionProvider(settings=vision_settings, llm_api=llm_api)
+
+  audio_provider = AudioProvider(
+      speech_api=SpeechApi(),
+      default_language=audio_settings["default_language"],
+  )
+
+  memory_settings = mind_settings["memory"]
+  storage_api = StorageApi(
+      host=memory_settings.get("redis_host", "localhost"),
+      port=memory_settings.get("redis_port", 6379),
+      db=memory_settings.get("redis_db", 0),
+  )
+  memory_provider = MemoryProvider(storage_api=storage_api)
+
+  mind = Mind(
+      mind_settings,
+      memory_provider=memory_provider,
+      language_provider=language_provider,
+      audio_provider=audio_provider,
+      vision_provider=vision_provider,
+  )
   body = TelegramBot(telegram_settings, args.test)
 
   body.wake_up(mind)

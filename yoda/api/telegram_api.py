@@ -1,4 +1,3 @@
-import asyncio
 import time
 
 from telegram import Update
@@ -12,10 +11,8 @@ class TelegramApi:
   def run_polling(self, application: Application) -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-  async def emulate_typing(self, bot, chat_id: int, seconds: int) -> None:
-    for _ in range(seconds):
-      await asyncio.sleep(1)
-      await bot.send_chat_action(chat_id=chat_id, action="TYPING")
+  async def send_typing_action(self, bot, chat_id: int) -> None:
+    await bot.send_chat_action(chat_id=chat_id, action="TYPING")
 
   async def send_message(self, bot, chat_id: int, message: str) -> None:
     await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')

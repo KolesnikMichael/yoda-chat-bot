@@ -1,3 +1,6 @@
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from yoda.mind.mind import Mind
@@ -8,10 +11,14 @@ from yoda.mind.memory.data.conversation import Conversation
 class FakeMemoryProvider:
   def __init__(self):
     self.sender_updates = []
+    self.chat_updates = []
     self.conversations: dict[str, Conversation] = {}
 
   async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
     self.sender_updates.append((user_id, chat_id, user_info))
+
+  async def update_chat_info(self, chat_id: int, chat_type: str, last_active: str) -> None:
+    self.chat_updates.append((chat_id, chat_type, last_active))
 
   def get_conversation(self, user_id: int, chat_id: int) -> Conversation | None:
     key = MemoryOperation.conversation_key(user_id, chat_id)
@@ -90,7 +97,8 @@ async def test_text_pipeline_sends_response():
 
 
 @pytest.mark.asyncio
-async def test_voice_pipeline_uses_audio_provider():
+@patch("yoda.mind.mind.AudioOperation.convert_ogg_to_wav", return_value=Path("voice.wav"))
+async def test_voice_pipeline_uses_audio_provider(mock_convert_ogg_to_wav):
   sender = FakeSender()
   mind = Mind(
       build_settings(),

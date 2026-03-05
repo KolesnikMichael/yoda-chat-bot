@@ -36,6 +36,20 @@ class MemoryOperation:
     conversation.add_message(role=role, text=line)
     return conversation, conversation.to_llm_messages()
 
+  @staticmethod
+  def migrate_chat(chat_info: dict, current_version: int, chat_type: str) -> dict:
+    migrated = chat_info
+    for version in range(current_version, CHAT_SCHEMA_VERSION):
+      if version == 1:
+        delta = {
+            "chat_type": chat_type,
+            "history": [],
+            "conversation": {"users": [], "messages": []},
+            "schema_version": version + 1,
+        }
+        migrated = {**migrated, **delta}
+    return migrated
+
 
 class MemoryProvider:
   def __init__(self, storage_api):
@@ -69,20 +83,13 @@ class MemoryProvider:
 
     await self.storage_api.hset("users", str(user_id), json.dumps({**current_user_info, **user_info}))
 
-    chat_type = "private" if user_id == chat_id else "group"
-    await self.update_chat_info(
-        chat_id=chat_id,
-        chat_type=chat_type,
-        last_active=user_info.get("last_active", ""),
-    )
-
   async def update_chat_info(self, chat_id: int, chat_type: str, last_active: str) -> None:
     current_chat_info_raw = await self.storage_api.hget("chats", str(chat_id))
     if current_chat_info_raw:
       current_chat_info = json.loads(current_chat_info_raw)
       current_schema_version = current_chat_info.get("schema_version", 1)
       if current_schema_version < CHAT_SCHEMA_VERSION:
-        current_chat_info = self._migrate_chat(current_chat_info, current_schema_version, chat_type)
+        current_chat_info = MemoryOperation.migrate_chat(current_chat_info, current_schema_version, chat_type)
     else:
       current_chat_info = {
           "chat_type": chat_type,
@@ -108,16 +115,3 @@ class MemoryProvider:
     current_user_profile = {**current_user_profile, **user_profile}
     current_user_profile["updated_on"] = dtm.datetime.now(dtm.UTC).isoformat()
     await self.storage_api.hset("user_profiles", user_profile_id, json.dumps(current_user_profile))
-
-  def _migrate_chat(self, chat_info: dict, current_version: int, chat_type: str) -> dict:
-    migrated = chat_info
-    for version in range(current_version, CHAT_SCHEMA_VERSION):
-      if version == 1:
-        delta = {
-            "chat_type": chat_type,
-            "history": [],
-            "conversation": {"users": [], "messages": []},
-            "schema_version": version + 1,
-        }
-        migrated = {**migrated, **delta}
-    return migrated
