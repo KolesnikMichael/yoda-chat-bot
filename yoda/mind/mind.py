@@ -90,7 +90,7 @@ class Mind:
     if os.path.exists(wav_path):
       os.remove(wav_path)
 
-  async def process_photo_message(self, user_id: int, chat_id: int, user_info: dict, photo_file_path, caption: str):
+  async def process_photo_message(self, user_id: int, chat_id: int, user_info: dict, photo_file_paths: list[str], caption: str):
     await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
     chat_type = CognitionOperation.determine_chat_type(user_id, chat_id)
     await self.memory_provider.update_chat_info(
@@ -99,21 +99,41 @@ class Mind:
         last_active=user_info.get("last_active", ""),
     )
 
-    image_description = await self.vision_provider.image_to_description(photo_file_path)
+    descriptions = await asyncio.gather(
+        *(self.vision_provider.image_to_description(p) for p in photo_file_paths)
+    )
+    combined = "\n".join(
+        f"[Photo {i+1}]: {desc}" for i, desc in enumerate(descriptions)
+    )
+    caption_part = f"with caption \"{caption}\" " if caption else ""
+    line = f"User sent {len(descriptions)} image(s) {caption_part}:\n{combined}"
+
     emotional_state = self.affect_provider.get_emotional_state()
     system_prompt = AffectOperation.build_system_prompt(emotional_state)
     conversation = self.memory_provider.get_conversation(user_id=user_id, chat_id=chat_id)
-    conversation, _ = MemoryOperation.add_conversation_line(
+    conversation, messages = MemoryOperation.add_conversation_line(
         conversation=conversation,
         user_id=user_id,
         chat_id=chat_id,
         role="system",
-        line=f"User sent an image with description: {image_description}",
+        line=line,
         system_prompt=system_prompt,
     )
     self.memory_provider.save_conversation(conversation)
-    reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=caption)
+
+    reply = await self.language_provider.reply_in_conversation(messages)
+    conversation, _ = MemoryOperation.add_conversation_line(
+        conversation=conversation,
+        user_id=user_id,
+        chat_id=chat_id,
+        role="assistant",
+        line=reply,
+        system_prompt=system_prompt,
+    )
+    self.memory_provider.save_conversation(conversation)
+
     if self._message_sender:
       await self._message_sender(chat_id, reply)
-    if os.path.exists(photo_file_path):
-      os.remove(photo_file_path)
+    for photo_file_path in photo_file_paths:
+      if os.path.exists(photo_file_path):
+        os.remove(photo_file_path)

@@ -114,7 +114,7 @@ async def test_photo_pipeline_adds_image_context():
       user_id=3,
       chat_id=5,
       user_info={"last_active": "now"},
-      photo_file_path="photo.jpg",
+      photo_file_paths=["photo.jpg"],
       caption="What is this?",
   )
 
@@ -123,5 +123,48 @@ async def test_photo_pipeline_adds_image_context():
   messages = conversation.to_llm_messages()
   system_lines = [m for m in messages if m["role"] == "system"]
   assert system_lines
-  assert any("a lightsaber in hand" in m["content"] for m in system_lines)
-  assert sender.calls == [(5, "reply:What is this?")]
+  photo_line = next(m["content"] for m in system_lines if "image(s)" in m["content"])
+  assert "a lightsaber in hand" in photo_line
+  assert 'caption "What is this?"' in photo_line
+  assert messages[-1]["role"] == "assistant"
+  assert len(sender.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_photo_pipeline_combines_multiple_descriptions():
+  memory_provider = FakeMemoryProvider()
+  sender = FakeSender()
+  call_count = 0
+
+  class CountingVisionProvider:
+    async def image_to_description(self, image_file_path: str) -> str:
+      nonlocal call_count
+      call_count += 1
+      return f"description of {image_file_path}"
+
+  mind = build_mind(
+      memory_provider=memory_provider,
+      vision_provider=CountingVisionProvider(),
+  )
+  mind.bind_message_sender(sender)
+
+  await mind.process_photo_message(
+      user_id=3,
+      chat_id=5,
+      user_info={"last_active": "now"},
+      photo_file_paths=["photo1.jpg", "photo2.jpg", "photo3.jpg"],
+      caption="What are these?",
+  )
+
+  assert call_count == 3
+  conversation = memory_provider.get_conversation(user_id=3, chat_id=5)
+  messages = conversation.to_llm_messages()
+  system_lines = [m for m in messages if m["role"] == "system"]
+  combined_line = next(m["content"] for m in system_lines if "image(s)" in m["content"])
+  assert 'caption "What are these?"' in combined_line
+  assert "[Photo 1]: description of photo1.jpg" in combined_line
+  assert "[Photo 2]: description of photo2.jpg" in combined_line
+  assert "[Photo 3]: description of photo3.jpg" in combined_line
+  assert combined_line.count("\n") >= 3
+  assert messages[-1]["role"] == "assistant"
+  assert len(sender.calls) == 1

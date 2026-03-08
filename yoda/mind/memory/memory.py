@@ -5,12 +5,12 @@ import logging
 from yoda.api.storage_api import StorageApi
 
 from .data.conversation import Conversation
+from .data.system_prompt import DEFAULT_SYSTEM_PROMPT
 from .data.user_profile import UserProfile
 
 logger = logging.getLogger(__name__)
 
 CHAT_SCHEMA_VERSION = 2
-DEFAULT_SYSTEM_PROMPT = "Reply as Yoda from Star Wars"
 
 
 class MemoryOperation:

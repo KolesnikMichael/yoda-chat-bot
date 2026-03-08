@@ -9,9 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
+  MEDIA_GROUP_TIMEOUT_SECONDS = 1.0
+
   def __init__(self, settings, test_mode: bool = False, telegram_api: TelegramApi | None = None):
     self.settings = settings
     self.telegram_api = telegram_api or TelegramApi()
+    self._pending_groups: dict[tuple[int, str], dict] = {}
 
     token_key = "bot_test_token" if test_mode else "bot_token"
     try:
@@ -49,7 +52,46 @@ class TelegramBot:
 
     photo_file_path = await self.telegram_api.download_photo_to_cache(update.message)
     caption = update.message.caption or ""
-    await self.mind.process_photo_message(user_id=user_id, chat_id=chat_id, user_info=user_info, photo_file_path=photo_file_path, caption=caption)
+    media_group_id = update.message.media_group_id
+
+    if not media_group_id:
+      await self.mind.process_photo_message(
+          user_id=user_id, chat_id=chat_id, user_info=user_info,
+          photo_file_paths=[photo_file_path], caption=caption,
+      )
+      return
+
+    key = (chat_id, media_group_id)
+    if key not in self._pending_groups:
+      self._pending_groups[key] = {
+          "user_id": user_id, "chat_id": chat_id,
+          "user_info": user_info, "caption": caption,
+          "photo_file_paths": [],
+      }
+    group = self._pending_groups[key]
+    group["photo_file_paths"].append(photo_file_path)
+    if caption:
+      group["caption"] = caption
+
+    job_name = f"media_group_{chat_id}_{media_group_id}"
+    for job in context.job_queue.get_jobs_by_name(job_name):
+      job.schedule_removal()
+    context.job_queue.run_once(
+        self._flush_media_group, when=self.MEDIA_GROUP_TIMEOUT_SECONDS,
+        data=key, name=job_name,
+    )
+
+  async def _flush_media_group(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+    key = context.job.data
+    group = self._pending_groups.pop(key, None)
+    if not group:
+      return
+    await self.mind.process_photo_message(
+        user_id=group["user_id"], chat_id=group["chat_id"],
+        user_info=group["user_info"],
+        photo_file_paths=group["photo_file_paths"],
+        caption=group["caption"],
+    )
 
   async def send_message(self, chat_id: int, message: str) -> None:
     for _ in range(3):
