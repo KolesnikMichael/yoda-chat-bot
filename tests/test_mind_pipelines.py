@@ -7,6 +7,7 @@ from yoda.mind.affect import AffectProvider
 from yoda.mind.mind import Mind
 from yoda.mind.memory.memory import MemoryOperation
 from yoda.mind.memory.data.conversation import Conversation
+from yoda.mind.memory.data.pending_message import PendingMessage
 
 
 class FakeMemoryProvider:
@@ -21,12 +22,12 @@ class FakeMemoryProvider:
   async def update_chat_info(self, chat_id: int, chat_type: str, last_active: str) -> None:
     self.chat_updates.append((chat_id, chat_type, last_active))
 
-  def get_conversation(self, user_id: int, chat_id: int) -> Conversation | None:
-    key = MemoryOperation.conversation_key(user_id, chat_id)
+  def get_conversation(self, chat_id: int) -> Conversation | None:
+    key = MemoryOperation.conversation_key(chat_id)
     return self.conversations.get(key)
 
   def save_conversation(self, conversation: Conversation) -> None:
-    key = MemoryOperation.conversation_key(conversation.user_id, conversation.chat_id)
+    key = MemoryOperation.conversation_key(conversation.chat_id)
     self.conversations[key] = conversation
 
 
@@ -64,22 +65,37 @@ def build_mind(**overrides) -> Mind:
   return Mind(**(defaults | overrides))
 
 
+def make_pending(media_type: str = "text", text: str = "Hello",
+                 user_id: int = 1, first_name: str = "Luke",
+                 photo_file_paths: list[str] | None = None,
+                 caption: str = "", audio_file_path: str = "",
+                 media_group_id: str | None = None) -> PendingMessage:
+  return PendingMessage(
+      user_id=user_id,
+      user_info={"first_name": first_name, "last_active": "now"},
+      media_type=media_type,
+      text=text,
+      photo_file_paths=photo_file_paths or [],
+      caption=caption,
+      audio_file_path=audio_file_path,
+      media_group_id=media_group_id,
+  )
+
+
 @pytest.mark.asyncio
-async def test_text_pipeline_sends_response():
+async def test_text_batch_sends_response():
   memory_provider = FakeMemoryProvider()
   sender = FakeSender()
   mind = build_mind(memory_provider=memory_provider)
   mind.bind_message_sender(sender)
 
-  await mind.process_text_message(
-      user_id=1,
-      chat_id=2,
-      user_info={"last_active": "now"},
-      message_text=" Hello ",
+  await mind.process_message_batch(
+      chat_id=1,
+      batch=[make_pending(text=" Hello ", user_id=1)],
   )
 
-  assert sender.calls == [(2, "reply:Hello")]
-  conversation = memory_provider.get_conversation(user_id=1, chat_id=2)
+  assert sender.calls == [(1, "reply:Hello")]
+  conversation = memory_provider.get_conversation(chat_id=1)
   assert conversation is not None
   messages = conversation.to_llm_messages()
   assert messages[-2]["role"] == "user"
@@ -88,37 +104,35 @@ async def test_text_pipeline_sends_response():
 
 @pytest.mark.asyncio
 @patch("yoda.mind.mind.AudioOperation.convert_ogg_to_wav", return_value=Path("voice.wav"))
-async def test_voice_pipeline_uses_audio_provider(mock_convert_ogg_to_wav):
+async def test_voice_batch_uses_audio_provider(mock_convert):
   sender = FakeSender()
   mind = build_mind()
   mind.bind_message_sender(sender)
 
-  await mind.process_voice_message(
-      user_id=7,
-      chat_id=9,
-      user_info={"last_active": "now"},
-      audio_file_path="voice.ogg",
+  await mind.process_message_batch(
+      chat_id=7,
+      batch=[make_pending(media_type="voice", audio_file_path="voice.ogg", user_id=7)],
   )
 
-  assert sender.calls == [(9, "reply:voice text")]
+  assert sender.calls == [(7, "reply:voice text")]
 
 
 @pytest.mark.asyncio
-async def test_photo_pipeline_adds_image_context():
+async def test_photo_batch_adds_image_context():
   memory_provider = FakeMemoryProvider()
   sender = FakeSender()
   mind = build_mind(memory_provider=memory_provider)
   mind.bind_message_sender(sender)
 
-  await mind.process_photo_message(
-      user_id=3,
+  await mind.process_message_batch(
       chat_id=5,
-      user_info={"last_active": "now"},
-      photo_file_paths=["photo.jpg"],
-      caption="What is this?",
+      batch=[make_pending(
+          media_type="photo", user_id=5,
+          photo_file_paths=["photo.jpg"], caption="What is this?",
+      )],
   )
 
-  conversation = memory_provider.get_conversation(user_id=3, chat_id=5)
+  conversation = memory_provider.get_conversation(chat_id=5)
   assert conversation is not None
   messages = conversation.to_llm_messages()
   system_lines = [m for m in messages if m["role"] == "system"]
@@ -131,7 +145,7 @@ async def test_photo_pipeline_adds_image_context():
 
 
 @pytest.mark.asyncio
-async def test_photo_pipeline_combines_multiple_descriptions():
+async def test_photo_batch_combines_multiple_descriptions():
   memory_provider = FakeMemoryProvider()
   sender = FakeSender()
   call_count = 0
@@ -148,16 +162,17 @@ async def test_photo_pipeline_combines_multiple_descriptions():
   )
   mind.bind_message_sender(sender)
 
-  await mind.process_photo_message(
-      user_id=3,
+  await mind.process_message_batch(
       chat_id=5,
-      user_info={"last_active": "now"},
-      photo_file_paths=["photo1.jpg", "photo2.jpg", "photo3.jpg"],
-      caption="What are these?",
+      batch=[make_pending(
+          media_type="photo", user_id=5,
+          photo_file_paths=["photo1.jpg", "photo2.jpg", "photo3.jpg"],
+          caption="What are these?",
+      )],
   )
 
   assert call_count == 3
-  conversation = memory_provider.get_conversation(user_id=3, chat_id=5)
+  conversation = memory_provider.get_conversation(chat_id=5)
   messages = conversation.to_llm_messages()
   system_lines = [m for m in messages if m["role"] == "system"]
   combined_line = next(m["content"] for m in system_lines if "image(s)" in m["content"])
@@ -168,3 +183,63 @@ async def test_photo_pipeline_combines_multiple_descriptions():
   assert combined_line.count("\n") >= 3
   assert messages[-1]["role"] == "assistant"
   assert len(sender.calls) == 1
+
+
+@pytest.mark.asyncio
+@patch("yoda.mind.mind.AudioOperation.convert_ogg_to_wav", return_value=Path("voice.wav"))
+async def test_mixed_batch_processes_all_types(mock_convert):
+  memory_provider = FakeMemoryProvider()
+  sender = FakeSender()
+  mind = build_mind(memory_provider=memory_provider)
+  mind.bind_message_sender(sender)
+
+  await mind.process_message_batch(
+      chat_id=1,
+      batch=[
+          make_pending(text="hey", user_id=1),
+          make_pending(media_type="photo", user_id=1,
+                       photo_file_paths=["pic.jpg"], caption="look"),
+          make_pending(media_type="voice", user_id=1, audio_file_path="v.ogg"),
+      ],
+  )
+
+  conversation = memory_provider.get_conversation(chat_id=1)
+  messages = conversation.to_llm_messages()
+  roles = [m["role"] for m in messages]
+  assert "user" in roles
+  assert "system" in roles
+  assert roles[-1] == "assistant"
+  assert len(sender.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_group_chat_text_includes_sender_name():
+  memory_provider = FakeMemoryProvider()
+  sender = FakeSender()
+  mind = build_mind(memory_provider=memory_provider)
+  mind.bind_message_sender(sender)
+
+  await mind.process_message_batch(
+      chat_id=100,
+      batch=[
+          make_pending(text="hello", user_id=42, first_name="Obi"),
+          make_pending(text="hi there", user_id=43, first_name="Anakin"),
+      ],
+  )
+
+  conversation = memory_provider.get_conversation(chat_id=100)
+  messages = conversation.to_llm_messages()
+  user_messages = [m["content"] for m in messages if m["role"] == "user"]
+  assert "Obi: hello" in user_messages
+  assert "Anakin: hi there" in user_messages
+
+
+@pytest.mark.asyncio
+async def test_empty_batch_is_noop():
+  sender = FakeSender()
+  mind = build_mind()
+  mind.bind_message_sender(sender)
+
+  await mind.process_message_batch(chat_id=1, batch=[])
+
+  assert sender.calls == []

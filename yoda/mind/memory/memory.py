@@ -15,22 +15,21 @@ CHAT_SCHEMA_VERSION = 2
 
 class MemoryOperation:
   @staticmethod
-  def conversation_key(user_id: int, chat_id: int) -> str:
-    return f"{user_id}@{chat_id}"
+  def conversation_key(chat_id: int) -> str:
+    return str(chat_id)
 
   @staticmethod
   def add_conversation_line(
       conversation: Conversation | None,
-      user_id: int,
       chat_id: int,
       role: str,
       line: str,
       system_prompt: str = DEFAULT_SYSTEM_PROMPT,
   ) -> tuple[Conversation, list[dict]]:
     if not conversation:
-      key = MemoryOperation.conversation_key(user_id, chat_id)
-      logger.info(f"Starting new conversation with {key}")
-      conversation = Conversation(user_id=user_id, chat_id=chat_id)
+      key = MemoryOperation.conversation_key(chat_id)
+      logger.info(f"Starting new conversation in chat {key}")
+      conversation = Conversation(chat_id=chat_id)
 
     conversation.ensure_system_prompt(system_prompt)
     conversation.add_message(role=role, text=line)
@@ -56,12 +55,12 @@ class MemoryProvider:
     self.storage_api = storage_api
     self.conversations: dict[str, Conversation] = {}
 
-  def get_conversation(self, user_id: int, chat_id: int) -> Conversation | None:
-    key = MemoryOperation.conversation_key(user_id, chat_id)
+  def get_conversation(self, chat_id: int) -> Conversation | None:
+    key = MemoryOperation.conversation_key(chat_id)
     return self.conversations.get(key)
 
   def save_conversation(self, conversation: Conversation) -> None:
-    key = MemoryOperation.conversation_key(conversation.user_id, conversation.chat_id)
+    key = MemoryOperation.conversation_key(conversation.chat_id)
     self.conversations[key] = conversation
 
   async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:

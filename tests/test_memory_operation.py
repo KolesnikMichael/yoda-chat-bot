@@ -59,7 +59,6 @@ def test_add_conversation_line_initializes_system_prompt():
 
   conversation, messages = MemoryOperation.add_conversation_line(
       conversation=conversation,
-      user_id=9,
       chat_id=11,
       role="user",
       line="Hello there",

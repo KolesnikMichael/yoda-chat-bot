@@ -3,6 +3,8 @@ import logging
 import os
 from pathlib import Path
 
+from yoda.mind.memory.data.pending_message import PendingMessage
+
 from .affect import AffectOperation, AffectProvider
 from .cognition import CognitionOperation
 from .memory.memory import MemoryOperation, MemoryProvider
@@ -32,108 +34,95 @@ class Mind:
   def bind_message_sender(self, message_sender) -> None:
     self._message_sender = message_sender
 
-  async def _process_text_pipeline(self, user_id: int, chat_id: int, text: str) -> str:
-    normalized_text = CognitionOperation.normalize_user_text(text)
-    emotional_state = self.affect_provider.get_emotional_state()
-    system_prompt = AffectOperation.build_system_prompt(emotional_state)
+  async def process_message_batch(self, chat_id: int, batch: list[PendingMessage]) -> None:
+    if not batch:
+      return
 
-    conversation = self.memory_provider.get_conversation(user_id=user_id, chat_id=chat_id)
-    conversation, messages = MemoryOperation.add_conversation_line(
-        conversation=conversation,
-        user_id=user_id,
-        chat_id=chat_id,
-        role="user",
-        line=normalized_text,
-        system_prompt=system_prompt,
-    )
-    self.memory_provider.save_conversation(conversation)
+    chat_type = CognitionOperation.determine_chat_type(batch[0].user_id, chat_id)
 
-    reply = await self.language_provider.reply_in_conversation(messages)
-    conversation, _ = MemoryOperation.add_conversation_line(
-        conversation=conversation,
-        user_id=user_id,
-        chat_id=chat_id,
-        role="assistant",
-        line=reply,
-        system_prompt=system_prompt,
-    )
-    self.memory_provider.save_conversation(conversation)
-    return reply
-
-  async def process_text_message(self, user_id: int, chat_id: int, user_info: dict, message_text: str):
-    await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
-    chat_type = CognitionOperation.determine_chat_type(user_id, chat_id)
-    await self.memory_provider.update_chat_info(
-        chat_id=chat_id,
-        chat_type=chat_type,
-        last_active=user_info.get("last_active", ""),
-    )
-    reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=message_text)
-    if self._message_sender:
-      await self._message_sender(chat_id, reply)
-
-  async def process_voice_message(self, user_id: int, chat_id: int, user_info: dict, audio_file_path):
-    await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
-    chat_type = CognitionOperation.determine_chat_type(user_id, chat_id)
-    await self.memory_provider.update_chat_info(
-        chat_id=chat_id,
-        chat_type=chat_type,
-        last_active=user_info.get("last_active", ""),
-    )
-    wav_path = await asyncio.to_thread(AudioOperation.convert_ogg_to_wav, Path(audio_file_path))
-    text = await self.audio_provider.speech_to_text(audio_file_path=wav_path)
-    reply = await self._process_text_pipeline(user_id=user_id, chat_id=chat_id, text=text)
-    if self._message_sender:
-      await self._message_sender(chat_id, reply)
-    if os.path.exists(audio_file_path):
-      os.remove(audio_file_path)
-    if os.path.exists(wav_path):
-      os.remove(wav_path)
-
-  async def process_photo_message(self, user_id: int, chat_id: int, user_info: dict, photo_file_paths: list[str], caption: str):
-    await self.memory_provider.update_sender_info(user_id, chat_id, user_info)
-    chat_type = CognitionOperation.determine_chat_type(user_id, chat_id)
-    await self.memory_provider.update_chat_info(
-        chat_id=chat_id,
-        chat_type=chat_type,
-        last_active=user_info.get("last_active", ""),
+    unique_users = {msg.user_id: msg.user_info for msg in batch}
+    last_active = batch[-1].user_info.get("last_active", "")
+    await asyncio.gather(
+        *(self.memory_provider.update_sender_info(uid, chat_id, uinfo)
+          for uid, uinfo in unique_users.items()),
+        self.memory_provider.update_chat_info(
+            chat_id=chat_id, chat_type=chat_type, last_active=last_active),
     )
 
-    descriptions = await asyncio.gather(
-        *(self.vision_provider.image_to_description(p) for p in photo_file_paths)
+    perceived = await asyncio.gather(
+        *(self._perceive_message(msg, chat_type) for msg in batch)
     )
-    combined = "\n".join(
-        f"[Photo {i+1}]: {desc}" for i, desc in enumerate(descriptions)
-    )
-    caption_part = f"with caption \"{caption}\" " if caption else ""
-    line = f"User sent {len(descriptions)} image(s) {caption_part}:\n{combined}"
 
     emotional_state = self.affect_provider.get_emotional_state()
     system_prompt = AffectOperation.build_system_prompt(emotional_state)
-    conversation = self.memory_provider.get_conversation(user_id=user_id, chat_id=chat_id)
-    conversation, messages = MemoryOperation.add_conversation_line(
-        conversation=conversation,
-        user_id=user_id,
-        chat_id=chat_id,
-        role="system",
-        line=line,
-        system_prompt=system_prompt,
-    )
+    conversation = self.memory_provider.get_conversation(chat_id=chat_id)
+
+    messages = None
+    for entry in perceived:
+      conversation, messages = MemoryOperation.add_conversation_line(
+          conversation=conversation,
+          chat_id=chat_id,
+          role=entry["role"],
+          line=entry["text"],
+          system_prompt=system_prompt,
+      )
     self.memory_provider.save_conversation(conversation)
 
-    reply = await self.language_provider.reply_in_conversation(messages)
-    conversation, _ = MemoryOperation.add_conversation_line(
-        conversation=conversation,
-        user_id=user_id,
-        chat_id=chat_id,
-        role="assistant",
-        line=reply,
-        system_prompt=system_prompt,
-    )
-    self.memory_provider.save_conversation(conversation)
+    if CognitionOperation.should_reply(chat_type) and messages:
+      reply = await self.language_provider.reply_in_conversation(messages)
+      conversation, _ = MemoryOperation.add_conversation_line(
+          conversation=conversation,
+          chat_id=chat_id,
+          role="assistant",
+          line=reply,
+          system_prompt=system_prompt,
+      )
+      self.memory_provider.save_conversation(conversation)
+      if self._message_sender:
+        await self._message_sender(chat_id, reply)
 
-    if self._message_sender:
-      await self._message_sender(chat_id, reply)
-    for photo_file_path in photo_file_paths:
-      if os.path.exists(photo_file_path):
-        os.remove(photo_file_path)
+    self._cleanup_temp_files(batch)
+
+  async def _perceive_message(self, msg: PendingMessage, chat_type: str) -> dict:
+    if msg.media_type == "text":
+      text = CognitionOperation.normalize_user_text(msg.text)
+      sender = msg.user_info.get("first_name", "User")
+      text = f"{sender}: {text}"
+      return {"role": "system", "text": text}
+
+    if msg.media_type == "voice":
+      wav_path = await asyncio.to_thread(
+          AudioOperation.convert_ogg_to_wav, Path(msg.audio_file_path))
+      text = await self.audio_provider.speech_to_text(audio_file_path=wav_path)
+      text = CognitionOperation.normalize_user_text(text)
+      sender = msg.user_info.get("first_name", "User")
+      text = f"{sender} (voice): {text}"
+      if os.path.exists(wav_path):
+        os.remove(wav_path)
+      return {"role": "system", "text": text}
+
+    if msg.media_type == "photo":
+      descriptions = await asyncio.gather(
+          *(self.vision_provider.image_to_description(p)
+            for p in msg.photo_file_paths)
+      )
+      combined = "\n".join(
+          f"[Photo {i+1}]: {desc}" for i, desc in enumerate(descriptions)
+      )
+      caption_part = f'with caption "{msg.caption}" ' if msg.caption else ""
+      sender = msg.user_info.get("first_name", "User")
+      line = f"{sender} sent {len(descriptions)} image(s) {caption_part}:\n{combined}"
+      return {"role": "system", "text": line}
+
+    raise ValueError(f"Unknown media type: {msg.media_type}")
+
+  @staticmethod
+  def _cleanup_temp_files(batch: list[PendingMessage]) -> None:
+    for msg in batch:
+      if msg.media_type == "voice" and msg.audio_file_path:
+        if os.path.exists(msg.audio_file_path):
+          os.remove(msg.audio_file_path)
+      elif msg.media_type == "photo":
+        for path in msg.photo_file_paths:
+          if os.path.exists(path):
+            os.remove(path)

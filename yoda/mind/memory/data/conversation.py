@@ -5,7 +5,6 @@ from .message import Message
 
 @dataclass
 class Conversation:
-  user_id: int
   chat_id: int
   messages: list[Message] = field(default_factory=list)
 

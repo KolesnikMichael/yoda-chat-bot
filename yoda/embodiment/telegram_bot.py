@@ -4,17 +4,19 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from yoda.api.telegram_api import TelegramApi
+from yoda.mind.memory.data.pending_message import PendingMessage
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_BATCH_TIMEOUT_SECONDS = 5.0
+
 
 class TelegramBot:
-  MEDIA_GROUP_TIMEOUT_SECONDS = 1.0
-
   def __init__(self, settings, test_mode: bool = False, telegram_api: TelegramApi | None = None):
     self.settings = settings
     self.telegram_api = telegram_api or TelegramApi()
-    self._pending_groups: dict[tuple[int, str], dict] = {}
+    self._pending_batches: dict[int, list[PendingMessage]] = {}
+    self.batch_timeout = settings.get("message_batch_timeout", DEFAULT_BATCH_TIMEOUT_SECONDS)
 
     token_key = "bot_test_token" if test_mode else "bot_token"
     try:
@@ -36,15 +38,26 @@ class TelegramBot:
     user_id, chat_id, user_info = self.get_user_details(update.message)
     logger.info(f"Got text message from {user_id}@{chat_id}")
 
-    message_text = update.message.text
-    await self.mind.process_text_message(user_id=user_id, chat_id=chat_id, user_info=user_info, message_text=message_text)
+    pending = PendingMessage(
+        user_id=user_id,
+        user_info=user_info,
+        media_type="text",
+        text=update.message.text,
+    )
+    self._add_to_batch(chat_id, pending, context)
 
   async def handle_voice_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id, chat_id, user_info = self.get_user_details(update.message)
     logger.info(f"Got voice message from {user_id}@{chat_id}")
 
     audio_file_path = await self.telegram_api.download_voice_to_cache(update.message)
-    await self.mind.process_voice_message(user_id=user_id, chat_id=chat_id, user_info=user_info, audio_file_path=audio_file_path)
+    pending = PendingMessage(
+        user_id=user_id,
+        user_info=user_info,
+        media_type="voice",
+        audio_file_path=audio_file_path,
+    )
+    self._add_to_batch(chat_id, pending, context)
 
   async def handle_photo_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id, chat_id, user_info = self.get_user_details(update.message)
@@ -54,44 +67,52 @@ class TelegramBot:
     caption = update.message.caption or ""
     media_group_id = update.message.media_group_id
 
-    if not media_group_id:
-      await self.mind.process_photo_message(
-          user_id=user_id, chat_id=chat_id, user_info=user_info,
-          photo_file_paths=[photo_file_path], caption=caption,
-      )
-      return
+    if media_group_id:
+      existing = self._find_pending_photo_group(chat_id, media_group_id)
+      if existing:
+        existing.photo_file_paths.append(photo_file_path)
+        if caption:
+          existing.caption = caption
+        self._reset_batch_timer(chat_id, context)
+        return
 
-    key = (chat_id, media_group_id)
-    if key not in self._pending_groups:
-      self._pending_groups[key] = {
-          "user_id": user_id, "chat_id": chat_id,
-          "user_info": user_info, "caption": caption,
-          "photo_file_paths": [],
-      }
-    group = self._pending_groups[key]
-    group["photo_file_paths"].append(photo_file_path)
-    if caption:
-      group["caption"] = caption
+    pending = PendingMessage(
+        user_id=user_id,
+        user_info=user_info,
+        media_type="photo",
+        photo_file_paths=[photo_file_path],
+        caption=caption,
+        media_group_id=media_group_id,
+    )
+    self._add_to_batch(chat_id, pending, context)
 
-    job_name = f"media_group_{chat_id}_{media_group_id}"
+  def _find_pending_photo_group(self, chat_id: int, media_group_id: str) -> PendingMessage | None:
+    for pm in self._pending_batches.get(chat_id, []):
+      if pm.media_group_id == media_group_id:
+        return pm
+    return None
+
+  def _add_to_batch(self, chat_id: int, pending: PendingMessage, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if chat_id not in self._pending_batches:
+      self._pending_batches[chat_id] = []
+    self._pending_batches[chat_id].append(pending)
+    self._reset_batch_timer(chat_id, context)
+
+  def _reset_batch_timer(self, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    job_name = f"batch_{chat_id}"
     for job in context.job_queue.get_jobs_by_name(job_name):
       job.schedule_removal()
     context.job_queue.run_once(
-        self._flush_media_group, when=self.MEDIA_GROUP_TIMEOUT_SECONDS,
-        data=key, name=job_name,
+        self._flush_batch, when=self.batch_timeout,
+        data=chat_id, name=job_name,
     )
 
-  async def _flush_media_group(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-    key = context.job.data
-    group = self._pending_groups.pop(key, None)
-    if not group:
+  async def _flush_batch(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = context.job.data
+    batch = self._pending_batches.pop(chat_id, None)
+    if not batch:
       return
-    await self.mind.process_photo_message(
-        user_id=group["user_id"], chat_id=group["chat_id"],
-        user_info=group["user_info"],
-        photo_file_paths=group["photo_file_paths"],
-        caption=group["caption"],
-    )
+    await self.mind.process_message_batch(chat_id=chat_id, batch=batch)
 
   async def send_message(self, chat_id: int, message: str) -> None:
     for _ in range(3):
@@ -100,19 +121,15 @@ class TelegramBot:
     await self.telegram_api.send_message(self.bot, chat_id=chat_id, message=message)
 
   async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /start is issued."""
     await update.message.reply_text("Start!")
 
   async def reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /reset is issued."""
     await update.message.reply_text("Reset!")
 
   async def settings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /settings is issued."""
     await update.message.reply_text("Settings!")
 
   async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /help is issued."""
     await update.message.reply_text("Help!")
 
   def get_user_details(self, message):
