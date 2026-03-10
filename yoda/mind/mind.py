@@ -1,4 +1,5 @@
 import asyncio
+import datetime as dtm
 import logging
 import os
 from pathlib import Path
@@ -65,17 +66,20 @@ class Mind:
           role=entry["role"],
           line=entry["text"],
           system_prompt=system_prompt,
+          timestamp=entry["timestamp"],
       )
     self.memory_provider.save_conversation(conversation)
 
     if CognitionOperation.should_reply(chat_type) and messages:
       reply = await self.language_provider.reply_in_conversation(messages)
+      reply_timestamp = f"{dtm.datetime.now(dtm.UTC)}"
       conversation, _ = MemoryOperation.add_conversation_line(
           conversation=conversation,
           chat_id=chat_id,
           role="assistant",
           line=reply,
           system_prompt=system_prompt,
+          timestamp=reply_timestamp,
       )
       self.memory_provider.save_conversation(conversation)
       if self._message_sender:
@@ -87,8 +91,7 @@ class Mind:
     if msg.media_type == "text":
       text = CognitionOperation.normalize_user_text(msg.text)
       sender = msg.user_info.get("first_name", "User")
-      text = f"{sender}: {text}"
-      return {"role": "system", "text": text}
+      text = f"On {msg.timestamp} {sender}: {text}"
 
     if msg.media_type == "voice":
       wav_path = await asyncio.to_thread(
@@ -96,10 +99,9 @@ class Mind:
       text = await self.audio_provider.speech_to_text(audio_file_path=wav_path)
       text = CognitionOperation.normalize_user_text(text)
       sender = msg.user_info.get("first_name", "User")
-      text = f"{sender} (voice): {text}"
+      text = f"On {sender} (voice): {text}"
       if os.path.exists(wav_path):
         os.remove(wav_path)
-      return {"role": "system", "text": text}
 
     if msg.media_type == "photo":
       descriptions = await asyncio.gather(
@@ -111,10 +113,12 @@ class Mind:
       )
       caption_part = f'with caption "{msg.caption}" ' if msg.caption else ""
       sender = msg.user_info.get("first_name", "User")
-      line = f"{sender} sent {len(descriptions)} image(s) {caption_part}:\n{combined}"
-      return {"role": "system", "text": line}
-
-    raise ValueError(f"Unknown media type: {msg.media_type}")
+      text = f"On {sender} sent {len(descriptions)} image(s) {caption_part}:\n{combined}"
+    
+    if text is None:
+      raise ValueError(f"Unknown media type: {msg.media_type}")
+    else:
+      return {"role": "system", "text": text, "timestamp": msg.timestamp}
 
   @staticmethod
   def _cleanup_temp_files(batch: list[PendingMessage]) -> None:

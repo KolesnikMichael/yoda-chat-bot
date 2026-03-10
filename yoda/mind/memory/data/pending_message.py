@@ -11,3 +11,4 @@ class PendingMessage:
   caption: str = ""
   audio_file_path: str = ""
   media_group_id: str | None = None
+  timestamp: str = ""

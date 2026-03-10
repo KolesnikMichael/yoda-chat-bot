@@ -100,6 +100,7 @@ async def test_text_handler_adds_to_pending_batch():
   assert len(batch) == 1
   assert batch[0].media_type == "text"
   assert batch[0].text == "Hi"
+  assert batch[0].timestamp != ""
   assert len(scheduled) == 1
 
 

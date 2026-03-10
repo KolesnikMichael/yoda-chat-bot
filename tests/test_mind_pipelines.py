@@ -69,7 +69,8 @@ def make_pending(media_type: str = "text", text: str = "Hello",
                  user_id: int = 1, first_name: str = "Luke",
                  photo_file_paths: list[str] | None = None,
                  caption: str = "", audio_file_path: str = "",
-                 media_group_id: str | None = None) -> PendingMessage:
+                 media_group_id: str | None = None,
+                 timestamp: str = "2026-03-09 21:36:51+00:00") -> PendingMessage:
   return PendingMessage(
       user_id=user_id,
       user_info={"first_name": first_name, "last_active": "now"},
@@ -79,6 +80,7 @@ def make_pending(media_type: str = "text", text: str = "Hello",
       caption=caption,
       audio_file_path=audio_file_path,
       media_group_id=media_group_id,
+      timestamp=timestamp,
   )
 
 
@@ -94,11 +96,13 @@ async def test_text_batch_sends_response():
       batch=[make_pending(text=" Hello ", user_id=1)],
   )
 
-  assert sender.calls == [(1, "reply:Hello")]
+  assert sender.calls == [
+      (1, "reply:On 2026-03-09 21:36:51+00:00 Luke: Hello")
+  ]
   conversation = memory_provider.get_conversation(chat_id=1)
   assert conversation is not None
   messages = conversation.to_llm_messages()
-  assert messages[-2]["role"] == "user"
+  assert messages[-2]["role"] == "system"
   assert messages[-1]["role"] == "assistant"
 
 
@@ -114,7 +118,7 @@ async def test_voice_batch_uses_audio_provider(mock_convert):
       batch=[make_pending(media_type="voice", audio_file_path="voice.ogg", user_id=7)],
   )
 
-  assert sender.calls == [(7, "reply:voice text")]
+  assert sender.calls == [(7, "reply:On Luke (voice): voice text")]
 
 
 @pytest.mark.asyncio
@@ -206,8 +210,7 @@ async def test_mixed_batch_processes_all_types(mock_convert):
   conversation = memory_provider.get_conversation(chat_id=1)
   messages = conversation.to_llm_messages()
   roles = [m["role"] for m in messages]
-  assert "user" in roles
-  assert "system" in roles
+  assert roles.count("system") >= 2
   assert roles[-1] == "assistant"
   assert len(sender.calls) == 1
 
@@ -229,9 +232,28 @@ async def test_group_chat_text_includes_sender_name():
 
   conversation = memory_provider.get_conversation(chat_id=100)
   messages = conversation.to_llm_messages()
-  user_messages = [m["content"] for m in messages if m["role"] == "user"]
-  assert "Obi: hello" in user_messages
-  assert "Anakin: hi there" in user_messages
+  system_messages = [m["content"] for m in messages if m["role"] == "system"]
+  assert "On 2026-03-09 21:36:51+00:00 Obi: hello" in system_messages
+  assert "On 2026-03-09 21:36:51+00:00 Anakin: hi there" in system_messages
+
+
+@pytest.mark.asyncio
+async def test_timestamps_stored_on_messages():
+  memory_provider = FakeMemoryProvider()
+  sender = FakeSender()
+  mind = build_mind(memory_provider=memory_provider)
+  mind.bind_message_sender(sender)
+
+  await mind.process_message_batch(
+      chat_id=1,
+      batch=[make_pending(text="Hi", user_id=1, timestamp="2026-03-09 21:36:51+00:00")],
+  )
+
+  conversation = memory_provider.get_conversation(chat_id=1)
+  incoming_msg = next(m for m in conversation.messages if "Hi" in m.text)
+  assert incoming_msg.timestamp == "2026-03-09 21:36:51+00:00"
+  assistant_msg = next(m for m in conversation.messages if m.role == "assistant")
+  assert assistant_msg.timestamp != ""
 
 
 @pytest.mark.asyncio

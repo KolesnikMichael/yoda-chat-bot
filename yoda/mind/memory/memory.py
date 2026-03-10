@@ -25,6 +25,7 @@ class MemoryOperation:
       role: str,
       line: str,
       system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+      timestamp: str = "",
   ) -> tuple[Conversation, list[dict]]:
     if not conversation:
       key = MemoryOperation.conversation_key(chat_id)
@@ -32,7 +33,7 @@ class MemoryOperation:
       conversation = Conversation(chat_id=chat_id)
 
     conversation.ensure_system_prompt(system_prompt)
-    conversation.add_message(role=role, text=line)
+    conversation.add_message(role=role, text=line, timestamp=timestamp)
     return conversation, conversation.to_llm_messages()
 
   @staticmethod
