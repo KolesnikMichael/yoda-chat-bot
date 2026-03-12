@@ -73,7 +73,7 @@ TBD
 - Run tests before proposing any changes for review
 
 ### How to run tests
-**When running tests, prefer `python -m pytest` from the project root, using the interpreter in `.venv\Scripts\python.exe`.**
+**When running tests, prefer `python -m pytest` from the project root, using the interpreter in `.venv\Scripts\python.exe` or `.venv/bin/python`.**
 
 ## Coding Style and Patterns
 - Use f-string formatting for concatenation
