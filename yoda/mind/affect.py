@@ -2,7 +2,7 @@ from .memory.data.emotional_state import EmotionalState
 from .memory.data.system_prompt import DEFAULT_SYSTEM_PROMPT
 
 
-class AffectOperation:
+class AffectCore:
     @staticmethod
     def build_system_prompt(
         emotional_state: EmotionalState | None = None,

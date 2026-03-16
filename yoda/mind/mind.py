@@ -6,10 +6,10 @@ from pathlib import Path
 
 from yoda.mind.memory.data.pending_message import PendingMessage
 
-from .affect import AffectOperation, AffectProvider
-from .cognition import CognitionOperation
-from .memory.memory import MemoryOperation, MemoryProvider
-from .perception.audio import AudioOperation, AudioProvider
+from .affect import AffectCore, AffectProvider
+from .cognition import CognitionCore
+from .memory.memory import MemoryCore, MemoryProvider
+from .perception.audio import AudioCore, AudioProvider
 from .perception.language import LanguageProvider
 from .perception.vision import VisionProvider
 
@@ -39,7 +39,7 @@ class Mind:
         if not batch:
             return
 
-        chat_type = CognitionOperation.determine_chat_type(
+        chat_type = CognitionCore.determine_chat_type(
             batch[0].user_id, chat_id)
 
         unique_users = {msg.user_id: msg.user_info for msg in batch}
@@ -56,7 +56,7 @@ class Mind:
         )
 
         emotional_state = self.affect_provider.get_emotional_state()
-        system_prompt = AffectOperation.build_system_prompt(
+        system_prompt = AffectCore.build_system_prompt(
             emotional_state,
             chat_type=chat_type,
             now=f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}",
@@ -65,7 +65,7 @@ class Mind:
 
         messages = None
         for entry in perceived:
-            conversation, messages = MemoryOperation.add_conversation_line(
+            conversation, messages = MemoryCore.add_conversation_line(
                 conversation=conversation,
                 chat_id=chat_id,
                 role=entry["role"],
@@ -75,10 +75,10 @@ class Mind:
             )
         self.memory_provider.save_conversation(conversation)
 
-        if CognitionOperation.should_reply(chat_type) and messages:
+        if CognitionCore.should_reply(chat_type) and messages:
             reply = await self.language_provider.reply_in_conversation(messages)
             reply_timestamp = f"{dtm.datetime.now(dtm.UTC)}"
-            conversation, _ = MemoryOperation.add_conversation_line(
+            conversation, _ = MemoryCore.add_conversation_line(
                 conversation=conversation,
                 chat_id=chat_id,
                 role="assistant",
@@ -94,17 +94,17 @@ class Mind:
 
     async def _perceive_message(self, msg: PendingMessage, chat_type: str) -> dict:
         if msg.media_type == "text":
-            text = CognitionOperation.normalize_user_text(msg.text)
+            text = CognitionCore.normalize_user_text(msg.text)
             sender = msg.user_info.get("first_name", "User")
-            text = f"On {msg.timestamp} {sender}: {text}"
+            text = f'On {msg.timestamp} {sender} sent text message: "{text}"'
 
         if msg.media_type == "voice":
             wav_path = await asyncio.to_thread(
-                AudioOperation.convert_ogg_to_wav, Path(msg.audio_file_path))
+                AudioCore.convert_ogg_to_wav, Path(msg.audio_file_path))
             text = await self.audio_provider.speech_to_text(audio_file_path=wav_path)
-            text = CognitionOperation.normalize_user_text(text)
+            text = CognitionCore.normalize_user_text(text)
             sender = msg.user_info.get("first_name", "User")
-            text = f"On {msg.timestamp} {sender} (voice): {text}"
+            text = f'On {msg.timestamp} {sender} sent voice message: "{text}"'
             if os.path.exists(wav_path):
                 os.remove(wav_path)
 
@@ -116,9 +116,9 @@ class Mind:
             combined = "\n".join(
                 f"[Photo {i+1}]: {desc}" for i, desc in enumerate(descriptions)
             )
-            caption_part = f'with caption "{msg.caption}" ' if msg.caption else ""
+            caption_part = f' with caption "{msg.caption}" ' if msg.caption else ""
             sender = msg.user_info.get("first_name", "User")
-            text = f"On {msg.timestamp} {sender} sent {len(descriptions)} image(s) {caption_part}:\n{combined}"
+            text = f"On {msg.timestamp} {sender} sent {len(descriptions)} image(s){caption_part}:\n{combined}"
 
         if text is None:
             raise ValueError(f"Unknown media type: {msg.media_type}")

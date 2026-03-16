@@ -5,7 +5,7 @@ import pytest
 
 from yoda.mind.affect import AffectProvider
 from yoda.mind.mind import Mind
-from yoda.mind.memory.memory import MemoryOperation
+from yoda.mind.memory.memory import MemoryCore
 from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.memory.data.pending_message import PendingMessage
 
@@ -23,11 +23,11 @@ class FakeMemoryProvider:
         self.chat_updates.append((chat_id, chat_type, last_active))
 
     def get_conversation(self, chat_id: int) -> Conversation | None:
-        key = MemoryOperation.conversation_key(chat_id)
+        key = MemoryCore.conversation_key(chat_id)
         return self.conversations.get(key)
 
     def save_conversation(self, conversation: Conversation) -> None:
-        key = MemoryOperation.conversation_key(conversation.chat_id)
+        key = MemoryCore.conversation_key(conversation.chat_id)
         self.conversations[key] = conversation
 
 
@@ -97,7 +97,7 @@ async def test_text_batch_sends_response():
     )
 
     assert sender.calls == [
-        (1, "reply:On 2026-03-09 21:36:51+00:00 Luke: Hello")
+        (1, 'reply:On 2026-03-09 21:36:51+00:00 Luke sent text message: "Hello"')
     ]
     conversation = memory_provider.get_conversation(chat_id=1)
     assert conversation is not None
@@ -107,7 +107,7 @@ async def test_text_batch_sends_response():
 
 
 @pytest.mark.asyncio
-@patch("yoda.mind.mind.AudioOperation.convert_ogg_to_wav", return_value=Path("voice.wav"))
+@patch("yoda.mind.mind.AudioCore.convert_ogg_to_wav", return_value=Path("voice.wav"))
 async def test_voice_batch_uses_audio_provider(mock_convert):
     sender = FakeSender()
     mind = build_mind()
@@ -119,7 +119,7 @@ async def test_voice_batch_uses_audio_provider(mock_convert):
                             audio_file_path="voice.ogg", user_id=7)],
     )
 
-    assert sender.calls == [(7, "reply:On 2026-03-09 21:36:51+00:00 Luke (voice): voice text")]
+    assert sender.calls == [(7, 'reply:On 2026-03-09 21:36:51+00:00 Luke sent voice message: "voice text"')]
 
 
 @pytest.mark.asyncio
@@ -193,7 +193,7 @@ async def test_photo_batch_combines_multiple_descriptions():
 
 
 @pytest.mark.asyncio
-@patch("yoda.mind.mind.AudioOperation.convert_ogg_to_wav", return_value=Path("voice.wav"))
+@patch("yoda.mind.mind.AudioCore.convert_ogg_to_wav", return_value=Path("voice.wav"))
 async def test_mixed_batch_processes_all_types(mock_convert):
     memory_provider = FakeMemoryProvider()
     sender = FakeSender()
@@ -237,8 +237,8 @@ async def test_group_chat_text_includes_sender_name():
     conversation = memory_provider.get_conversation(chat_id=100)
     messages = conversation.to_llm_messages()
     system_messages = [m["content"] for m in messages if m["role"] == "system"]
-    assert "On 2026-03-09 21:36:51+00:00 Obi: hello" in system_messages
-    assert "On 2026-03-09 21:36:51+00:00 Anakin: hi there" in system_messages
+    assert 'On 2026-03-09 21:36:51+00:00 Obi sent text message: "hello"' in system_messages
+    assert 'On 2026-03-09 21:36:51+00:00 Anakin sent text message: "hi there"' in system_messages
 
 
 @pytest.mark.asyncio

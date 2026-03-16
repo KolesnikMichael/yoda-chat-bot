@@ -16,13 +16,16 @@ There are two key differences between IODA and other widely adopted Hexagonal, O
 ---
 | Layer | Role | Rules |
 |-------|------|-------|
-| **I** — Integration | Orchestrates pipelines, composes workflows | Only calls to Operations or other Integrations and then awaits. Pure data flow. |
-| **O** — Operation | Pure logic, transformations. Divides into: </br> **Core**: main logic that is independent of the environment,</br> **Portals**: adapters facing other software or users, </br> **Providers**: adapters facing services or infrastructure like databases or system timer. | All types of Operation may depend on Data. Portal and Providers may also depend on API. But Operations cannot depend on other Operations or Integrations. Some side effects and async behavior. |
-| **D** — Data | Data structures / DTOs to be used by Operations to exchange data| Minimal logic only (data consistency, accessors). No dependencies on functional modules. |
-| **A** — API |  Represents services/infrastructure outside the application | All `async def`. Always behind a thin façade. Side effects. Mocked in tests. |
+| **I** — Integration | Orchestrates pipelines, composes workflows | Only calls to Operations or other Integrations and then awaits. Pure data flow. No business logic. |
+| **O** — Operation | Divides into three sub-types: </br> **Core** (sync, static): pure logic, transformations, decisions — independent of the environment, </br> **Portal** (async): adapters facing other software or users, </br> **Provider** (async): adapters facing services or infrastructure like databases or system timer. | Core depends only on Data. Portals and Providers may also depend on API. Operations cannot depend on other Operations or Integrations. |
+| **D** — Data | Data structures / DTOs to be used by Operations to exchange data | Minimal logic only (data consistency, accessors). No dependencies on functional modules. |
+| **A** — API | Represents services/infrastructure outside the application | All `async def`. Always behind a thin façade. Side effects. Mocked in tests. |
 ---
 
-The bottom line: **Functional Dependencies are forbidden** between Operations. If Op A needs data from Op B — the Integration passes it explicitly as a parameter.
+**Key rules:**
+- **No functional dependencies between Operations.** If Op A needs data from Op B — the Integration passes it explicitly as a parameter.
+- **An Integration may call other Integrations** to compose complex workflows from simpler pipelines. Each sub-Integration follows the same rules: no business logic, only calls and awaits.
+- Class naming convention: `*Core` for Core operations, `*Provider` for Providers, `*Portal` for Portals. This makes the IODA sub-type immediately visible from the class name.
 
 ### Inside Agent Module: Hexagonal Architecture
 TBD
@@ -51,7 +54,7 @@ mind/
     vision.py           # Provider (async): uses vision AI model API for image-to-text conversion
     
   memory/
-    memory.py           # MemoryOperation (sync, static): extracts facts, builds profile;
+    memory.py           # MemoryCore (sync, static): extracts facts, builds profile;
                         # MemoryProvider (async): owns in-memory conversations and storage API
                         
     data/
@@ -60,9 +63,9 @@ mind/
       message.py        # Data: Message { role, text, media_type, timestamp }
       emotional_state.py  # Data: EmotionalState { glad, mad, sad, scared }
       
-  cognition.py          # Operation (sync, static): operates on messages and conversations, make decisions
-  affect.py             # AffectOperation (sync, static): updates mood, decays, influences system prompt;
-                        # AffectProvider: owns EmotionalState, can use external context later
+  cognition.py          # CognitionCore (sync, static): operates on messages and conversations, make decisions
+  affect.py             # AffectCore (sync, static): updates mood, decays, influences system prompt;
+                        # AffectProvider (async): owns EmotionalState, can use external context later
 ```
 ## Core Pipelines
 
@@ -77,7 +80,7 @@ TBD
 
 ## Coding Style and Patterns
 - Use f-string formatting for concatenation
-- It is preferable to use static methods for Operations that don't need to be instantiated
+- It is preferable to use static methods for Core operations that don't need to be instantiated
 - It is preferable to use builder pattern for Providers 
 - It is preferable to follow "fail fast" principle for error handling
 - Use explicit type hints for all functions and methods

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 CHAT_SCHEMA_VERSION = 2
 
 
-class MemoryOperation:
+class MemoryCore:
     @staticmethod
     def conversation_key(chat_id: int) -> str:
         return str(chat_id)
@@ -28,7 +28,7 @@ class MemoryOperation:
         timestamp: str = "",
     ) -> tuple[Conversation, list[dict]]:
         if not conversation:
-            key = MemoryOperation.conversation_key(chat_id)
+            key = MemoryCore.conversation_key(chat_id)
             logger.info(f"Starting new conversation in chat {key}")
             conversation = Conversation(chat_id=chat_id)
 
@@ -57,11 +57,11 @@ class MemoryProvider:
         self.conversations: dict[str, Conversation] = {}
 
     def get_conversation(self, chat_id: int) -> Conversation | None:
-        key = MemoryOperation.conversation_key(chat_id)
+        key = MemoryCore.conversation_key(chat_id)
         return self.conversations.get(key)
 
     def save_conversation(self, conversation: Conversation) -> None:
-        key = MemoryOperation.conversation_key(conversation.chat_id)
+        key = MemoryCore.conversation_key(conversation.chat_id)
         self.conversations[key] = conversation
 
     async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
@@ -80,7 +80,7 @@ class MemoryProvider:
             current_chat_info = json.loads(current_chat_info_raw)
             current_schema_version = current_chat_info.get("schema_version", 1)
             if current_schema_version < CHAT_SCHEMA_VERSION:
-                current_chat_info = MemoryOperation.migrate_chat(
+                current_chat_info = MemoryCore.migrate_chat(
                     current_chat_info, current_schema_version, chat_type)
         else:
             current_chat_info = {

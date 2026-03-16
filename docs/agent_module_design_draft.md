@@ -91,7 +91,7 @@ class WebSearchTool(Tool):
 
 Rules:
 - No business logic in adapters.
-- If result needs transformation (e.g. parsing HTML → text), add a sync Op in `ops/` and call it here.
+- If result needs transformation (e.g. parsing HTML → text), add a sync Core function and call it here.
 - Adapters may use Providers (e.g. `LLMProvider` for summarisation) — that's fine.
 
 ---
@@ -191,3 +191,27 @@ class AgentResult:
 | Logic in `agent_provider.py` (e.g. filtering results) | Move to `react_loop.observe()` |
 | Sync tool execution (sequential) | Use `asyncio.gather()` for parallel calls |
 | Tool adapter holding state between calls | Tools must be stateless; state lives in `AgentContext` |
+
+---
+
+## Ideas from SGR Agent Core (vamplabAI/sgr-agent-core)
+
+Reviewed the SGR framework for reuse — it doesn't fit as a dependency (full standalone framework, deeply OpenAI-coupled, template-method inheritance instead of hexagonal). But three ideas are worth adapting:
+
+### 1. Structured output for Decision
+
+SGR's `ReasoningTool` is a Pydantic schema that the LLM fills via structured output — reasoning steps, situation assessment, plan status, and selected tool all come back as typed fields rather than free-text that needs parsing.
+
+**Adaptation for Yoda:** `ReactLoop.decide()` could internally use LLM structured output to produce the `Decision` object. The Pydantic schema acts as a contract between the LLM and the loop, eliminating brittle text parsing. The `Decision` dataclass could carry optional reasoning metadata (steps taken, confidence) useful for logging and debugging, while the core flow (`tool_calls` / `final_answer`) stays unchanged.
+
+### 2. Pydantic-based tool schemas (self-describing tools)
+
+In SGR, each tool IS a Pydantic model — the model fields are the tool's parameters, and the schema auto-generates the tool description sent to the LLM. No hand-written tool descriptions to keep in sync.
+
+**Adaptation for Yoda:** Each `Tool` adapter could expose a Pydantic model describing its parameters. `AgentProvider` would collect these schemas at construction time and pass them to `ReactLoop` as part of context, so the LLM always gets an accurate, auto-generated tool catalog. The `Tool` port interface stays abstract — the schema is an additional property, not a replacement.
+
+### 3. Clarification mechanism (pause-and-ask)
+
+SGR agents can pause mid-loop to ask the user for clarification before continuing research. The loop enters a `WAITING_FOR_CLARIFICATION` state and resumes when the user responds.
+
+**Adaptation for Yoda:** `Decision` could include a `clarification_needed: str | None` field. When set, `AgentProvider.run()` would yield the question back to the caller (the Mind pipeline), which routes it through embodiment to the user. On the next message, the pipeline resumes the agent with the user's answer injected into context. This keeps the clarification flow inside the existing IODA pipeline model — no async events or internal state machines needed.

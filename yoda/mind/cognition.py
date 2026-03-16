@@ -1,4 +1,4 @@
-class CognitionOperation:
+class CognitionCore:
     @staticmethod
     def normalize_user_text(text: str) -> str:
         normalized = (text or "").strip()

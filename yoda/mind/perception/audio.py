@@ -6,7 +6,7 @@ from pydub import AudioSegment  # type: ignore[reportMissingImports]
 from yoda.api.speech_api import SpeechApi
 
 
-class AudioOperation:
+class AudioCore:
     @staticmethod
     def convert_ogg_to_wav(audio_file_path: Path) -> Path:
         project_root = Path(__file__).resolve().parents[3]
