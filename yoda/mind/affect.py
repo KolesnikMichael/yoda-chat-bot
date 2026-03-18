@@ -14,10 +14,12 @@ class AffectCore:
         if chat_type == "group":
             context_lines.append(
                 "You are in a Telegram group chat. Multiple users may be present. "
-                "Address users by name when relevant.")
+                "Address users by name only when relevant. "
+                "If you want your reply to appear as separate messages use $NEXT-MESSAGE$ as separator(s).")
         else:
             context_lines.append(
-                "You are in a private Telegram chat, one-on-one.")
+                "You are in a private Telegram chat, one-on-one. "
+                "Call user by name only when you want to add some extra emphasis to your words.")
 
         context_lines.append(
             "Messages include timestamps. Use them for time-aware greetings "
