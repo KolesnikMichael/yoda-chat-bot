@@ -16,3 +16,6 @@ class StorageApi:
 
     async def hset(self, key: str, field: str, value: str) -> int:
         return await asyncio.to_thread(self._client.hset, key, field, value)
+
+    async def hdel(self, key: str, field: str) -> int:
+        return await asyncio.to_thread(self._client.hdel, key, field)

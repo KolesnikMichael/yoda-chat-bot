@@ -5,3 +5,6 @@ pytest-asyncio
 SpeechRecognition
 PyDub
 redis
+apscheduler~=3.11
+pyyaml
+pydantic

@@ -95,6 +95,21 @@ class MemoryProvider:
         current_chat_info["last_active"] = last_active
         await self.storage_api.hset("chats", str(chat_id), json.dumps(current_chat_info))
 
+    async def get_user_profile(self, user_id: int, chat_id: int) -> UserProfile:
+        user_profile_id = f"{user_id}@{chat_id}"
+        raw = await self.storage_api.hget("user_profiles", user_profile_id)
+        if raw:
+            data = json.loads(raw)
+            interests = data.pop("interests", [])
+            miscellaneous = data.pop("miscellaneous", [])
+            return UserProfile(
+                **{k: v for k, v in data.items() if k in UserProfile.__dataclass_fields__
+                   and k not in ("interests", "miscellaneous")},
+                interests=interests,
+                miscellaneous=miscellaneous,
+            )
+        return UserProfile()
+
     async def update_user_profile(self, user_id: int, chat_id: int, user_profile: dict) -> None:
         user_profile_id = f"{user_id}@{chat_id}"
         current_user_profile_raw = await self.storage_api.hget("user_profiles", user_profile_id)

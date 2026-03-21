@@ -27,8 +27,8 @@ There are two key differences between IODA and other widely adopted Hexagonal, O
 - **An Integration may call other Integrations** to compose complex workflows from simpler pipelines. Each sub-Integration follows the same rules: no business logic, only calls and awaits.
 - Class naming convention: `*Core` for Core operations, `*Provider` for Providers, `*Portal` for Portals. This makes the IODA sub-type immediately visible from the class name.
 
-### Inside Agent Module: Hexagonal Architecture
-TBD
+### Inside Agent Module: IODA Runtime + Declarative Skills
+The agent module uses IODA for the runtime (pipelines, tool execution, state) and declarative skill specs for behavior. Skills are markdown files loaded at runtime. Tools are typed async adapters with an optional `terminal` flag (loop auto-exits after a terminal tool succeeds). Two-phase token optimization: compact skill catalog on every turn, full spec only for the selected skill. Infrastructure tools (`ask_user`, `update_profile`) are available to all skills.
 
 ## Project Structure
 Project structure follows anthropomorphic separation of concerns rather than following IODA categories. For example, memory.py combines Operation and Provider functions.
@@ -37,10 +37,12 @@ Project structure follows anthropomorphic separation of concerns rather than fol
 yoda_chat_bot.py        # Wires everything, starts event loop. Then binds embodiment to mind (async)
 
 api/
-  llm_api.py            # API (async): facade for LLM APIs (language, vision)
+  llm_api.py            # API (async): facade for LLM APIs (language, vision, structured output)
   speech_api.py         # API (async): speech-to-text conversion using Google library
   storage_api.py        # API (async): API for Redis storage
   telegram_api.py       # API (async): facade for Telegram API
+  scheduler_api.py      # API (async): facade for APScheduler (AsyncIOScheduler + RedisJobStore),
+                        #   module-level _fire_job callback (async, picklable for Redis job store)
 
 embodiment/
   telegram_bot.py       # Portal (async): receives updates (text/audio/photo), sends replies
@@ -66,6 +68,23 @@ mind/
   cognition.py          # CognitionCore (sync, static): operates on messages and conversations, make decisions
   affect.py             # AffectCore (sync, static): updates mood, decays, influences system prompt;
                         # AffectProvider (async): owns EmotionalState, can use external context later
+
+  agent/
+    agent_provider.py   # Integration (async): orchestrates two-phase ReAct loop with suspend/resume
+    session_provider.py # Provider (async): persists/restores AgentContext via StorageApi
+    core/
+      react_loop.py     # Core (sync, static): builds LLM context, validates Decision, manages state
+    data/
+      agent_data.py     # Data: SkillSummary, SkillSpec, ToolCall, ToolResult, Decision, AgentContext, AgentResult
+    skills/
+      catalog.py        # Core (sync, static): loads and indexes skill specs from markdown files
+      specs/
+        schedule_message.md  # Skill spec: schedule one-time reminder messages
+    tools/
+      tool_port.py      # Port: abstract Tool interface with Pydantic schema and terminal flag
+      ask_user_tool.py  # Virtual tool: suspends loop, signals clarification needed
+      scheduler_tool.py # Provider (async): schedules jobs via SchedulerApi (terminal)
+      update_profile_tool.py # Provider (async): saves user profile fields via MemoryProvider
 ```
 ## Core Pipelines
 

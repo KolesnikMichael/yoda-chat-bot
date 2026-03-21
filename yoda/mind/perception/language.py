@@ -1,3 +1,5 @@
+from pydantic import BaseModel
+
 from yoda.api.llm_api import LLMApi
 
 
@@ -14,4 +16,15 @@ class LanguageProvider:
         return await self._llm_api.complete_chat_async(
             model_name=self._model_name,
             messages=conversation,
+        )
+
+    async def parse_structured(
+        self,
+        messages: list[dict],
+        response_format: type[BaseModel],
+    ) -> BaseModel:
+        return await self._llm_api.parse_chat_async(
+            model_name=self._model_name,
+            messages=messages,
+            response_format=response_format,
         )

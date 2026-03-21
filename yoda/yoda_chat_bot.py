@@ -19,8 +19,14 @@ from yoda.mind.mind import Mind
 from yoda.mind.memory.memory import MemoryProvider
 from yoda.mind.memory.data.emotional_state import EmotionalState
 from yoda.mind.affect import AffectProvider
+from yoda.mind.agent.agent_provider import AgentProvider
+from yoda.mind.agent.session_provider import AgentSessionProvider
+from yoda.mind.agent.tools.ask_user_tool import AskUserTool
+from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
 from yoda.embodiment.telegram_bot import TelegramBot
 from yoda.api.storage_api import StorageApi
+from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.speech_api import SpeechApi
 from yoda.api.llm_api import LLMApi
 
@@ -80,16 +86,49 @@ def main() -> None:
     memory_provider = MemoryProvider(storage_api=storage_api)
     affect_provider = AffectProvider(EmotionalState(**emotions_settings))
 
+    scheduler_api = SchedulerApi(
+        redis_host=memory_settings.get("redis_host", "localhost"),
+        redis_port=memory_settings.get("redis_port", 6379),
+        redis_db=memory_settings.get("redis_db", 0),
+    )
+
+    tools = [
+        AskUserTool(),
+        SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api),
+        UpdateProfileTool(memory_provider=memory_provider),
+    ]
+    skills_dir = Path(__file__).parent / "mind" / "agent" / "skills"
+    session_provider = AgentSessionProvider(storage_api=storage_api)
+
+    agent_provider = AgentProvider(
+        language_provider=language_provider,
+        tools=tools,
+        skills_dir=skills_dir,
+        session_provider=session_provider,
+    )
+
     mind = Mind(
         language_provider=language_provider,
         vision_provider=vision_provider,
         audio_provider=audio_provider,
         memory_provider=memory_provider,
         affect_provider=affect_provider,
+        agent_provider=agent_provider,
     )
+
+    scheduler_api.set_delivery_callback(mind.deliver_scheduled_reminder)
+
+    async def cleanup_job_metadata(chat_id: int, job_id: str) -> None:
+        await storage_api.hdel(f"active_jobs:{chat_id}", job_id)
+
+    scheduler_api.set_cleanup_callback(cleanup_job_metadata)
+
+    async def on_app_start(_application):
+        scheduler_api.start()
+
     body = TelegramBot(telegram_settings, args.test)
 
-    body.wake_up(mind)
+    body.wake_up(mind, on_start=on_app_start)
 
 
 if __name__ == "__main__":

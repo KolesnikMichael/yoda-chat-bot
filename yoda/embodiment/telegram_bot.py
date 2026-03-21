@@ -56,9 +56,11 @@ class TelegramBot:
             return
         await self.mind.process_message_batch(chat_id=chat_id, batch=batch)
 
-    def wake_up(self, mind):
+    def wake_up(self, mind, on_start=None):
         self.mind = mind
         self.mind.bind_message_sender(self.send_message)
+        if on_start:
+            self.application.post_init = on_start
         self.telegram_api.run_polling(self.application)
 
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
