@@ -1,9 +1,16 @@
 - AffectProvider: should return current emotional state as a string, and MemoryCore should pass it to MemoryProvider and it should append it to the conversation as a system message
-- Intent is identified on each user message? If so, it's not efficient both token-wise (could we make Yoda signalling instead?), and quality wise (intent could be scattered across several messagess)
+- Intent could be scattered across several messagess [from different users], utilize batch?
 - There's some woodoo going on in Cognition's extract_user_text
 - Think about session recovery during application restart
 - ReAct loop doesn't survive tool crashes like exception when using ask_user
 - Calculating timezone can be done when user provides his current time
 - There are countries that do not use daylight saving
-
-
+- Choose between (https://www.firecrawl.dev/blog/best-open-source-web-crawler)
+  - Jina
+  - Crawl4AI (https://medium.com/@speaktoharisudhan/crawling-with-crawl4ai-the-open-source-scraping-beast-9d32e6946ad4)
+   - ScrapeGraphAI (https://scrapegraphai.com/blog/scrape-sites-easily)
+   - Playwright
+   - Crawlee
+- Understand BeautifulSoup's role
+- apscheduler.scheduler automatically removes obsolete jobs on startup, but they remain in "active_jobs"
+- Mind's _cleanup_temp_files is not async because it's static? Why is it here at all?

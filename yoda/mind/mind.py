@@ -40,105 +40,18 @@ class Mind:
         self.agent_provider = agent_provider
         self._message_sender = None
 
-    def bind_message_sender(self, message_sender) -> None:
-        self._message_sender = message_sender
-
-    async def process_message_batch(self, chat_id: int, batch: list[PendingMessage]) -> None:
-        if not batch:
-            return
-
-        chat_type = CognitionCore.determine_chat_type(
-            batch[0].user_id, chat_id)
-
-        unique_users = {msg.user_id: msg.user_info for msg in batch}
-        last_active = batch[-1].user_info.get("last_active", "")
-        await asyncio.gather(
-            *(self.memory_provider.update_sender_info(uid, chat_id, uinfo)
-              for uid, uinfo in unique_users.items()),
-            self.memory_provider.update_chat_info(
-                chat_id=chat_id, chat_type=chat_type, last_active=last_active),
-        )
-
-        perceived = await asyncio.gather(
-            *(self._perceive_message(msg, chat_type) for msg in batch)
-        )
-
-        emotional_state = self.affect_provider.get_emotional_state()
-        system_prompt = AffectCore.build_system_prompt(
-            emotional_state,
-            chat_type=chat_type,
-            now=f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}",
-        )
-        conversation = self.memory_provider.get_conversation(chat_id=chat_id)
-
-        messages = None
-        for entry in perceived:
-            conversation, messages = MemoryCore.add_conversation_line(
-                conversation=conversation,
-                chat_id=chat_id,
-                role=entry["role"],
-                line=entry["text"],
-                system_prompt=system_prompt,
-                timestamp=entry["timestamp"],
-            )
-        self.memory_provider.save_conversation(conversation)
-
-        intent = await self._classify_intent(chat_id, perceived)
-
-        if intent == "agent_resume" and self.agent_provider:
-            user_text = CognitionCore.extract_user_text(perceived)
-            await self._handle_agent_resume(
-                chat_id, user_text, system_prompt, conversation)
-
-        elif intent == "agent_task" and self.agent_provider:
-            user_id = batch[0].user_id
-            user_text = CognitionCore.extract_user_text(perceived)
-            await self._handle_agent_task(
-                chat_id, user_id, user_text, system_prompt, conversation)
-
-        elif CognitionCore.should_reply(chat_type) and messages:
-            await self._handle_chat_reply(
-                chat_id, messages, system_prompt, conversation)
-
-        self._cleanup_temp_files(batch)
-
-    async def deliver_scheduled_reminder(self, chat_id: int, reminder_text: str) -> None:
-        emotional_state = self.affect_provider.get_emotional_state()
-        system_prompt = AffectCore.build_system_prompt(
-            emotional_state,
-            chat_type="private",
-            now=f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}",
-        )
-        conversation = self.memory_provider.get_conversation(chat_id=chat_id)
-
-        line = f"SCHEDULED REMINDER for the user: {reminder_text}. Deliver this reminder naturally."
-        conversation, messages = MemoryCore.add_conversation_line(
-            conversation=conversation,
-            chat_id=chat_id,
-            role="system",
-            line=line,
-            system_prompt=system_prompt,
-            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
-        )
-        self.memory_provider.save_conversation(conversation)
-
-        if messages:
-            reply = await self.language_provider.reply_in_conversation(messages)
-            conversation, _ = MemoryCore.add_conversation_line(
-                conversation=conversation,
-                chat_id=chat_id,
-                role="assistant",
-                line=reply,
-                system_prompt=system_prompt,
-                timestamp=f"{dtm.datetime.now(dtm.UTC)}",
-            )
-            self.memory_provider.save_conversation(conversation)
-            if self._message_sender:
-                await self._message_sender(chat_id, reply)
-
-    async def _classify_intent(
-        self, chat_id: int, perceived: list[dict],
-    ) -> str:
+    @staticmethod
+    def _cleanup_temp_files(batch: list[PendingMessage]) -> None:
+        for msg in batch:
+            if msg.media_type == "voice" and msg.audio_file_path:
+                if os.path.exists(msg.audio_file_path):
+                    os.remove(msg.audio_file_path)
+            elif msg.media_type == "photo":
+                for path in msg.photo_file_paths:
+                    if os.path.exists(path):
+                        os.remove(path)
+                        
+    async def _classify_intent(self, chat_id: int, perceived: list[dict]) -> str:
         if self.agent_provider and await self.agent_provider.has_pending_session(chat_id):
             return "agent_resume"
 
@@ -153,7 +66,7 @@ class Mind:
             intent_messages = CognitionCore.build_intent_messages(user_text)
             result = await self.language_provider.parse_structured(
                 intent_messages, IntentClassification)
-            logger.info(f"Intent classification: '{user_text[:80]}' -> {result.intent}")
+            logger.debug(f"Intent classification: '{user_text[:80]}' -> {result.intent}")
             if result.intent in ("agent_task", "chat"):
                 return result.intent
         except Exception:
@@ -274,13 +187,98 @@ class Mind:
         else:
             return {"role": "system", "text": text, "timestamp": msg.timestamp}
 
-    @staticmethod
-    def _cleanup_temp_files(batch: list[PendingMessage]) -> None:
-        for msg in batch:
-            if msg.media_type == "voice" and msg.audio_file_path:
-                if os.path.exists(msg.audio_file_path):
-                    os.remove(msg.audio_file_path)
-            elif msg.media_type == "photo":
-                for path in msg.photo_file_paths:
-                    if os.path.exists(path):
-                        os.remove(path)
+    def bind_message_sender(self, message_sender) -> None:
+        self._message_sender = message_sender
+
+    async def process_message_batch(self, chat_id: int, batch: list[PendingMessage]) -> None:
+        if not batch:
+            return
+
+        chat_type = CognitionCore.determine_chat_type(
+            batch[0].user_id, chat_id)
+
+        unique_users = {msg.user_id: msg.user_info for msg in batch}
+        last_active = batch[-1].user_info.get("last_active", "")
+        await asyncio.gather(
+            *(self.memory_provider.update_sender_info(uid, chat_id, uinfo)
+              for uid, uinfo in unique_users.items()),
+            self.memory_provider.update_chat_info(
+                chat_id=chat_id, chat_type=chat_type, last_active=last_active),
+        )
+
+        perceived = await asyncio.gather(
+            *(self._perceive_message(msg, chat_type) for msg in batch)
+        )
+
+        emotional_state = self.affect_provider.get_emotional_state()
+        system_prompt = AffectCore.build_system_prompt(
+            emotional_state,
+            chat_type=chat_type,
+            now=f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}",
+        )
+        conversation = self.memory_provider.get_conversation(chat_id=chat_id)
+
+        messages = None
+        for entry in perceived:
+            conversation, messages = MemoryCore.add_conversation_line(
+                conversation=conversation,
+                chat_id=chat_id,
+                role=entry["role"],
+                line=entry["text"],
+                system_prompt=system_prompt,
+                timestamp=entry["timestamp"],
+            )
+        self.memory_provider.save_conversation(conversation)
+
+        intent = await self._classify_intent(chat_id, perceived)
+
+        if intent == "agent_resume" and self.agent_provider:
+            user_text = CognitionCore.extract_user_text(perceived)
+            await self._handle_agent_resume(
+                chat_id, user_text, system_prompt, conversation)
+
+        elif intent == "agent_task" and self.agent_provider:
+            user_id = batch[0].user_id
+            user_text = CognitionCore.extract_user_text(perceived)
+            await self._handle_agent_task(
+                chat_id, user_id, user_text, system_prompt, conversation)
+
+        elif CognitionCore.should_reply(chat_type) and messages:
+            await self._handle_chat_reply(
+                chat_id, messages, system_prompt, conversation)
+
+        self._cleanup_temp_files(batch)
+
+    async def deliver_scheduled_reminder(self, chat_id: int, reminder_text: str) -> None:
+        emotional_state = self.affect_provider.get_emotional_state()
+        system_prompt = AffectCore.build_system_prompt(
+            emotional_state,
+            chat_type="private",
+            now=f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}",
+        )
+        conversation = self.memory_provider.get_conversation(chat_id=chat_id)
+
+        line = f"SCHEDULED REMINDER for the user: {reminder_text}. Deliver this reminder naturally."
+        conversation, messages = MemoryCore.add_conversation_line(
+            conversation=conversation,
+            chat_id=chat_id,
+            role="system",
+            line=line,
+            system_prompt=system_prompt,
+            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+        )
+        self.memory_provider.save_conversation(conversation)
+
+        if messages:
+            reply = await self.language_provider.reply_in_conversation(messages)
+            conversation, _ = MemoryCore.add_conversation_line(
+                conversation=conversation,
+                chat_id=chat_id,
+                role="assistant",
+                line=reply,
+                system_prompt=system_prompt,
+                timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+            )
+            self.memory_provider.save_conversation(conversation)
+            if self._message_sender:
+                await self._message_sender(chat_id, reply)

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from datetime import datetime
@@ -63,6 +62,9 @@ class SchedulerApi:
             replace_existing=True,
         )
         logger.info(f"Scheduled one-time job {job_id} at {run_date} for chat {chat_id}")
+
+    def get_job_ids(self) -> set[str]:
+        return {job.id for job in self._scheduler.get_jobs()}
 
     def cancel(self, job_id: str) -> bool:
         try:

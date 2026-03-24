@@ -19,3 +19,9 @@ class StorageApi:
 
     async def hdel(self, key: str, field: str) -> int:
         return await asyncio.to_thread(self._client.hdel, key, field)
+
+    async def keys(self, pattern: str) -> list[str]:
+        return await asyncio.to_thread(self._client.keys, pattern)
+
+    async def hgetall(self, key: str) -> dict[str, str]:
+        return await asyncio.to_thread(self._client.hgetall, key)

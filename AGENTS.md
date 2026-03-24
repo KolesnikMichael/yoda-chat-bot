@@ -98,9 +98,10 @@ TBD
 **When running tests, prefer `python -m pytest` from the project root, using the interpreter in `.venv\Scripts\python.exe` or `.venv/bin/python`.**
 
 ## Coding Style and Patterns
-- Use f-string formatting for concatenation
 - It is preferable to use static methods for Core operations that don't need to be instantiated
 - It is preferable to use builder pattern for Providers 
 - It is preferable to follow "fail fast" principle for error handling
 - Use explicit type hints for all functions and methods
 - Use `asyncio.gather()` whenever two or more Providers/Portals are called and their inputs are independent
+- Use f-string formatting for concatenation
+- Use logger.debug for output with potentially sensitive data: user messages, profile, active_jobs

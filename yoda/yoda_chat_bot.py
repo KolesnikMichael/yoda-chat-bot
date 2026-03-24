@@ -1,3 +1,4 @@
+import asyncio
 import argparse
 import json
 import logging
@@ -23,12 +24,32 @@ from yoda.mind.agent.agent_provider import AgentProvider
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.tools.ask_user_tool import AskUserTool
 from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+from yoda.mind.agent.tools.list_jobs_tool import ListJobsTool
+from yoda.mind.agent.tools.cancel_job_tool import CancelJobTool
 from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
 from yoda.embodiment.telegram_bot import TelegramBot
 from yoda.api.storage_api import StorageApi
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.speech_api import SpeechApi
 from yoda.api.llm_api import LLMApi
+
+
+logger = logging.getLogger(__name__)
+
+
+async def reconcile_active_jobs(storage_api: StorageApi, scheduler_api: SchedulerApi) -> int:
+    live_ids = scheduler_api.get_job_ids()
+    all_keys = await storage_api.keys("active_jobs:*")
+    removed = 0
+    for key in all_keys:
+        entries = await storage_api.hgetall(key)
+        for job_id in entries:
+            if job_id not in live_ids:
+                await storage_api.hdel(key, job_id)
+                removed += 1
+    if removed:
+        logger.info(f"Reconciled active_jobs: removed {removed} stale entries")
+    return removed
 
 
 def parse_arguments():
@@ -38,17 +59,26 @@ def parse_arguments():
         description='Yoda\'s presence as a Telegram chat bot')
     parser.add_argument('-t', '--test', action='store_true',
                         help='run bot with test Telegram account')
+    parser.add_argument('-d', '--debug', action='store_true',
+                        help='turn on debug logging')
 
     return parser.parse_args()
 
 
 def main() -> None:
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.basicConfig(
-        format="%(asctime)s (%(levelname)s): %(name)s - %(message)s", level=logging.INFO)
-    logger = logging.getLogger(__name__)
-
     args = parse_arguments()
+    
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    if args.debug:
+        logging.basicConfig(
+            format="%(asctime)s (%(levelname)s): %(name)s - %(message)s", level=logging.DEBUG)
+    elif args.test:
+        logging.basicConfig(
+            format="%(asctime)s (%(levelname)s): %(name)s - %(message)s", level=logging.INFO)
+    else:
+        logging.basicConfig(
+            format="%(asctime)s (%(levelname)s): %(name)s - %(message)s", level=logging.INFO, filename="/var/log/yodabot/yodabot.log")
+  
     logger.info(f"Starting with arguments: {args}")
 
     with open('settings.json', 'r') as settings_file:
@@ -95,6 +125,8 @@ def main() -> None:
     tools = [
         AskUserTool(),
         SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api),
+        ListJobsTool(storage_api=storage_api),
+        CancelJobTool(scheduler_api=scheduler_api, storage_api=storage_api),
         UpdateProfileTool(memory_provider=memory_provider),
     ]
     skills_dir = Path(__file__).parent / "mind" / "agent" / "skills"
@@ -123,8 +155,18 @@ def main() -> None:
 
     scheduler_api.set_cleanup_callback(cleanup_job_metadata)
 
+    async def periodic_job_cleanup() -> None:
+        while True:
+            await asyncio.sleep(24 * 60 * 60)
+            try:
+                await reconcile_active_jobs(storage_api, scheduler_api)
+            except Exception:
+                logger.warning("Periodic job cleanup failed", exc_info=True)
+
     async def on_app_start(_application):
         scheduler_api.start()
+        await reconcile_active_jobs(storage_api, scheduler_api)
+        asyncio.create_task(periodic_job_cleanup())
 
     body = TelegramBot(telegram_settings, args.test)
 
