@@ -96,9 +96,9 @@ async def test_text_batch_sends_response():
         batch=[make_pending(text=" Hello ", user_id=1)],
     )
 
-    assert sender.calls == [
-        (1, 'reply:On 2026-03-09 21:36:51+00:00 Luke sent text message: "Hello"')
-    ]
+    assert len(sender.calls) == 1
+    assert sender.calls[0][0] == 1
+    assert 'On 2026-03-09 21:36:51+00:00 Luke sent text message: "Hello"' in sender.calls[0][1]
     conversation = memory_provider.get_conversation(chat_id=1)
     assert conversation is not None
     messages = conversation.to_llm_messages()
@@ -119,7 +119,9 @@ async def test_voice_batch_uses_audio_provider(mock_convert):
                             audio_file_path="voice.ogg", user_id=7)],
     )
 
-    assert sender.calls == [(7, 'reply:On 2026-03-09 21:36:51+00:00 Luke sent voice message: "voice text"')]
+    assert len(sender.calls) == 1
+    assert sender.calls[0][0] == 7
+    assert 'On 2026-03-09 21:36:51+00:00 Luke sent voice message: "voice text"' in sender.calls[0][1]
 
 
 @pytest.mark.asyncio

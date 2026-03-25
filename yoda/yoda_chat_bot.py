@@ -165,6 +165,7 @@ def main() -> None:
 
     async def on_app_start(_application):
         scheduler_api.start()
+        await asyncio.sleep(2) # let APScheduler process misfired jobs
         await reconcile_active_jobs(storage_api, scheduler_api)
         asyncio.create_task(periodic_job_cleanup())
 

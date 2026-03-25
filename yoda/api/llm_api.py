@@ -32,7 +32,7 @@ class LLMApi:
             response_format={"type": "json_object"},
         )
         content = response.choices[0].message.content
-        logger.info(f"LLM raw JSON response: {content[:1000]}")
+        logger.debug(f"LLM raw JSON response: {content[:1000]}")
         try:
             data = json.loads(content)
         except json.JSONDecodeError:

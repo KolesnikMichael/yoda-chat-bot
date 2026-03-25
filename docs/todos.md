@@ -5,12 +5,7 @@
 - ReAct loop doesn't survive tool crashes like exception when using ask_user
 - Calculating timezone can be done when user provides his current time
 - There are countries that do not use daylight saving
-- Choose between (https://www.firecrawl.dev/blog/best-open-source-web-crawler)
-  - Jina
-  - Crawl4AI (https://medium.com/@speaktoharisudhan/crawling-with-crawl4ai-the-open-source-scraping-beast-9d32e6946ad4)
-   - ScrapeGraphAI (https://scrapegraphai.com/blog/scrape-sites-easily)
-   - Playwright
-   - Crawlee
-- Understand BeautifulSoup's role
-- apscheduler.scheduler automatically removes obsolete jobs on startup, but they remain in "active_jobs"
+- Use Tavily Search & Extract for search_web skill
+- Trafilatura as another extraction option
+- Use Crawl4AI (https://medium.com/@speaktoharisudhan/crawling-with-crawl4ai-the-open-source-scraping-beast-9d32e6946ad4) for regular advanced scraping
 - Mind's _cleanup_temp_files is not async because it's static? Why is it here at all?

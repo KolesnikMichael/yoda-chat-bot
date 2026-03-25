@@ -126,9 +126,12 @@ class Mind:
         if result.clarification:
             line = f"Ask the user (rephrase naturally in your voice): {result.clarification}"
         elif result.answer:
-            line = f"Agent completed a task. Result: {result.answer}. Communicate this to the user naturally."
+            line = f"Agent completed a task. Result: {result.answer}. Communicate this to the user naturally"
         else:
             return
+
+        now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        line = f"{line}. Current time: {now}"
 
         conversation, messages = MemoryCore.add_conversation_line(
             conversation=conversation,
@@ -212,10 +215,7 @@ class Mind:
 
         emotional_state = self.affect_provider.get_emotional_state()
         system_prompt = AffectCore.build_system_prompt(
-            emotional_state,
-            chat_type=chat_type,
-            now=f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}",
-        )
+            emotional_state, chat_type=chat_type)
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
         messages = None
@@ -252,13 +252,11 @@ class Mind:
     async def deliver_scheduled_reminder(self, chat_id: int, reminder_text: str) -> None:
         emotional_state = self.affect_provider.get_emotional_state()
         system_prompt = AffectCore.build_system_prompt(
-            emotional_state,
-            chat_type="private",
-            now=f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}",
-        )
+            emotional_state, chat_type="private")
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
-        line = f"SCHEDULED REMINDER for the user: {reminder_text}. Deliver this reminder naturally."
+        now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        line = f"SCHEDULED REMINDER for the user: {reminder_text}. Deliver this reminder naturally. Current time: {now}"
         conversation, messages = MemoryCore.add_conversation_line(
             conversation=conversation,
             chat_id=chat_id,

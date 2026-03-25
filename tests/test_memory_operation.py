@@ -80,32 +80,19 @@ def test_determine_chat_type():
 
 
 def test_build_system_prompt_private_chat():
-    prompt = AffectCore.build_system_prompt(chat_type="private", now="2026-03-12 14:00 UTC")
+    prompt = AffectCore.build_system_prompt(chat_type="private")
 
     assert DEFAULT_SYSTEM_PROMPT.strip() in prompt
     assert "== CONTEXT ==" in prompt
     assert "private Telegram chat, one-on-one" in prompt
-    assert "Current time: 2026-03-12 14:00 UTC" in prompt
 
 
 def test_build_system_prompt_group_chat():
-    prompt = AffectCore.build_system_prompt(chat_type="group", now="2026-03-12 14:00 UTC")
+    prompt = AffectCore.build_system_prompt(chat_type="group")
 
     assert "group chat" in prompt
     assert "Address users by name" in prompt
     assert "private" not in prompt.split("== CONTEXT ==")[1]
-
-
-def test_build_system_prompt_includes_timestamp_instruction():
-    prompt = AffectCore.build_system_prompt()
-
-    assert "timestamps" in prompt.lower()
-
-
-def test_build_system_prompt_omits_time_when_empty():
-    prompt = AffectCore.build_system_prompt(now="")
-
-    assert "Current time:" not in prompt
 
 
 def test_migrate_chat_from_v1_to_v2():

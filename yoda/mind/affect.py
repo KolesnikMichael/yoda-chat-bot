@@ -7,7 +7,6 @@ class AffectCore:
     def build_system_prompt(
         emotional_state: EmotionalState | None = None,
         chat_type: str = "private",
-        now: str = "",
     ) -> str:
         context_lines: list[str] = []
 
@@ -22,11 +21,9 @@ class AffectCore:
                 "Call user by name only when you want to add some extra emphasis to your words.")
 
         context_lines.append(
-            "Messages include timestamps. Use them for time-aware greetings "
-            "and sensing conversation pace, but don't cite them explicitly unless relevant.")
-
-        if now:
-            context_lines.append(f"Current time: {now}")
+            "Messages include timestamps. Treat the timestamp of the last message as the current time. "
+            "Use timestamps for time-aware greetings and sensing conversation pace, "
+            "but don't cite them explicitly unless relevant.")
 
         context_block = "\n== CONTEXT ==\n" + "\n".join(context_lines)
         return DEFAULT_SYSTEM_PROMPT.strip() + "\n" + context_block
