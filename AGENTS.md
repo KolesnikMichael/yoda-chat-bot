@@ -3,8 +3,8 @@
 ## Context
 This project is a Telegram chatbot with LLM integration, memory, and planned emotional dynamics and agentic capabilities (web research, cron triggers, site watching, group chat).
 
-## Architectural Approach: IODA + Hexagonal Hybrid
-This project leverages the combination of two design patterns: IODA architecture for top-level workflows of the application, and Hexagonal architecture for agentic sub-workflows.
+## Architectural Approach: IODA + Hexagonal Architecture elements
+This project leverages the combination of two design patterns: IODA architecture for top-level workflows of the application, and HA's port/adapter pattern for agent tools.
 
 ### Top-level: IODA Architecture
 There are two key differences between IODA and other widely adopted Hexagonal, Onion and Clean architectures:

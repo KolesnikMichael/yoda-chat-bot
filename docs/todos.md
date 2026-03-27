@@ -1,11 +1,30 @@
 - AffectProvider: should return current emotional state as a string, and MemoryCore should pass it to MemoryProvider and it should append it to the conversation as a system message
-- Intent could be scattered across several messagess [from different users], utilize batch?
-- There's some woodoo going on in Cognition's extract_user_text
-- Think about session recovery during application restart
+- Intent could be scattered across several messagess [from different users]:
+  - But CognitionCore.extract_user_text keeps only the last one from the batch
+  - But CognitionCore.build_intent_messages accepts strings, not list
+  - But _handle_agent_resume and _handle_agent_task are fed with last message in the batch (and they accept just str)
+  - And CognitionCore could own Mind's _classify_intent
+  - And _classify_intent could return 'pass' to replace CognitionCore.should_reply
+  - And _classify_intent could have a better name, e.g. "decide_next_action"
+  - And _classify_intent returns "chat" but it's never handled. Last elif in Mind.process_message_batch is nonsense, should log WARNING or something
 - ReAct loop doesn't survive tool crashes like exception when using ask_user
-- Calculating timezone can be done when user provides his current time
+- Calculating timezone can be done when user provides his current time - add this hint to skill
 - There are countries that do not use daylight saving
 - Use Tavily Search & Extract for search_web skill
+- Consider adding fact-check skill utilizing just Tavily Search that can be applied by chat bot itself to improve factual accuracy/
 - Trafilatura as another extraction option
 - Use Crawl4AI (https://medium.com/@speaktoharisudhan/crawling-with-crawl4ai-the-open-source-scraping-beast-9d32e6946ad4) for regular advanced scraping
 - Mind's _cleanup_temp_files is not async because it's static? Why is it here at all?
+- Make periodic_job_cleanup sub-routine of general maintenance routine. Add sub-routine for updating chat and user profiles. Randomize sub-routines start time to distribute load. - Which module should own those sub-routines? Memory?
+- Evaluate incorporation of CoT/SGR into the skill for building piplelines
+- Extend context with reasoning history if not yet there. Is it needed? 
+- Why all attributes are self._ in AgentProvider
+- Move "private" methods to the end of modules
+- Why only delay_minutes in ScheduleMessageParams? Seems like "wake up in 1,5 hours" won't work
+- Why some tools don't have Terminal, and ListJobsTool is Terminal=False?
+- Docs: rename agent_module_design.md to AGENTS.md (?), fix Hexagonal mention to elements
+- Consider adding agent.py as sub-integration for agent entities
+- AgentContext: what's the difference between history and tools_used
+- ReactLoop._format_profile_context: not that much of information just yet. For digests there should be more
+- Why on Earth chat_type="private" in Mind.deliver_scheduled_reminder?
+- It seems that the only reason why system_prompt is passed to every add_conversation_line is because get_emotional_state is supposed to affect it. But emotional state will be regulated with system messages, not with the system prompt

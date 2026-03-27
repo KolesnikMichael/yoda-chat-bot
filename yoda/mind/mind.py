@@ -130,8 +130,7 @@ class Mind:
         else:
             return
 
-        now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
-        line = f"{line}. Current time: {now}"
+        line = f"{line}. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
 
         conversation, messages = MemoryCore.add_conversation_line(
             conversation=conversation,
@@ -255,8 +254,7 @@ class Mind:
             emotional_state, chat_type="private")
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
-        now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
-        line = f"SCHEDULED REMINDER for the user: {reminder_text}. Deliver this reminder naturally. Current time: {now}"
+        line = f"SCHEDULED REMINDER for the user: {reminder_text}. Deliver this reminder naturally. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
         conversation, messages = MemoryCore.add_conversation_line(
             conversation=conversation,
             chat_id=chat_id,

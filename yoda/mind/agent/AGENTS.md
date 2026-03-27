@@ -1,5 +1,4 @@
-
-# Agent Module — Design
+# Agent Module Design
 
 ## Architecture: IODA Runtime + Declarative Skills + Typed Tools
 
@@ -58,27 +57,18 @@ A Skill is a **declarative specification** — not code. It describes:
 - **Which tools** to use and in what workflow
 - **Completion criteria** (when the skill is done)
 
-### Skill spec format (example)
+### Skill's instructions example
 
 ```markdown
----
-name: deep_research
-description: Research a topic using multiple searches, scraping, and synthesis.
-required_inputs:
-  - topic: "The subject to research"
-tools:
-  - web_search
-  - browser_scrape
-max_iterations: 5
----
-# Deep Research
+# Search Web
 
 ## When to use
-User asks to investigate, research, or find detailed information about a topic.
+- User directly or implicitly asks you to provide information about a topic
+- You need to back up your next statement with up-to-date facts
 
 ## Workflow
 1. Search for the topic using `web_search`.
-2. If results are insufficient, scrape top URLs with `browser_scrape`.
+2. If results are insufficient, extract content from one or more most relevant URLs with `web_extract`.
 3. Synthesize findings into a coherent answer.
 4. If gaps remain and iterations allow, search for specific sub-topics.
 
