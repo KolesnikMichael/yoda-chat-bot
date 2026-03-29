@@ -53,7 +53,7 @@ class ListJobsTool(Tool):
             try:
                 utc_dt = datetime.fromisoformat(deliver_utc)
                 local_dt = utc_dt.astimezone(ZoneInfo(tz_name))
-                display_time = f"{local_dt.strftime('%Y-%m-%d %H:%M')} ({tz_name})"
+                display_time = local_dt.strftime("%Y-%m-%d %H:%M")
             except (ValueError, KeyError):
                 pass
             lines.append(

@@ -24,5 +24,10 @@ User asks to be reminded about something, to schedule a message, or to send a no
 4. If the tool returns success, set final_answer confirming the reminder.
 5. If the tool returns an error, explain the issue in final_answer.
 
+## Examples
+{"tool_calls": [{"tool_name": "schedule_message", "arguments": {"reminder_text": "call mom", "delay_minutes": 30}}], "reasoning": "scheduling a relative reminder"}
+{"tool_calls": [{"tool_name": "schedule_message", "arguments": {"reminder_text": "call mom", "year": 2026, "month": 3, "day": 21, "hour": 15, "minute": 0, "timezone": "Europe/Moscow"}}], "reasoning": "scheduling at absolute time"}
+{"tool_calls": [{"tool_name": "ask_user", "arguments": {"question": "What is your timezone?"}}], "reasoning": "need timezone for absolute time"}
+
 ## Completion
 Stop when: reminder is scheduled and confirmed, OR an unrecoverable error occurred, OR max iterations reached.

@@ -61,11 +61,17 @@ class AgentProvider:
             catalog_summaries=self._catalog_summaries,
         )
 
+        selection_msg = ReactLoop.build_selection_message(
+            task, self._catalog_summaries)
+        context = context.with_messages([selection_msg])
+
         decision = await self._llm_decide(context)
-        logger.info(f"Phase 1 decision: skill={decision.selected_skill}, "
-                     f"final={decision.final_answer}, reasoning={decision.reasoning}")
+        logger.info(
+            f"Phase 1 decision: skill={decision.selected_skill}, "
+            f"final={decision.final_answer}, reasoning={decision.reasoning}")
         decision = ReactLoop.validate_decision(
             decision, context, set(self._tools.keys()))
+        context = ReactLoop.append_assistant(context, decision)
 
         if decision.final_answer:
             return AgentResult(answer=decision.final_answer)
@@ -74,6 +80,8 @@ class AgentProvider:
             skill = SkillCatalog.load_skill(
                 self._skills_dir, decision.selected_skill)
             context = context.with_active_skill(skill)
+            activation_msg = ReactLoop.build_activation_message(skill)
+            context = context.with_messages(context.messages + [activation_msg])
 
         return await self._execute_loop(context)
 
@@ -82,14 +90,14 @@ class AgentProvider:
         if context is None:
             return AgentResult(answer="No pending session found.")
 
-        answer_result = ToolResult(
-            tool_name="ask_user", output=user_answer, success=True)
-        context = ReactLoop.observe(context, [answer_result])
+        answer_msg = {"role": "user", "content": f"User answered: {user_answer}"}
+        context = context.with_messages(context.messages + [answer_msg])
         return await self._execute_loop(context)
 
     async def _execute_loop(self, context: AgentContext) -> AgentResult:
         nudge_used = False
         last_success_output: str | None = None
+        decision: Decision | None = None
 
         while not ReactLoop.is_done(context):
             decision = await self._llm_decide(context)
@@ -99,6 +107,7 @@ class AgentProvider:
                 f"final={decision.final_answer}, reasoning={decision.reasoning}")
             decision = ReactLoop.validate_decision(
                 decision, context, set(self._tools.keys()))
+            context = ReactLoop.append_assistant(context, decision)
 
             if decision.final_answer:
                 break
@@ -106,13 +115,15 @@ class AgentProvider:
             if not decision.effective_tool_calls:
                 if not nudge_used:
                     logger.warning("LLM returned no tool_calls and no final_answer, nudging")
-                    nudge = ToolResult(
-                        tool_name="system",
-                        output="You must call a tool via tool_calls or set final_answer. "
-                               "Do not just describe your plan — act now.",
-                        success=True,
-                    )
-                    context = ReactLoop.observe(context, [nudge])
+                    nudge_msg = {
+                        "role": "user",
+                        "content": (
+                            "You must call a tool via tool_calls or set final_answer. "
+                            "Do not just describe your plan — act now."
+                        ),
+                    }
+                    context = context.with_messages(
+                        context.messages + [nudge_msg])
                     nudge_used = True
                     continue
                 logger.warning("LLM still returned no tool_calls after nudge, stopping loop")
@@ -122,7 +133,11 @@ class AgentProvider:
                 ToolCall(
                     tool_name=tc.tool_name,
                     arguments=tc.arguments,
-                    metadata={"chat_id": context.chat_id, "user_id": context.user_id},
+                    metadata={
+                        "chat_id": context.chat_id,
+                        "user_id": context.user_id,
+                        "profile_timezone": context.profile.timezone,
+                    },
                 )
                 for tc in decision.effective_tool_calls
             ]
@@ -134,7 +149,8 @@ class AgentProvider:
 
             suspended = next((r for r in results if r.suspend), None)
             if suspended:
-                context = ReactLoop.observe(context, list(results))
+                context = ReactLoop.append_tool_results(
+                    context, list(results))
                 await self._sessions.save(context)
                 return AgentResult(clarification=suspended.output)
 
@@ -149,15 +165,20 @@ class AgentProvider:
             )
             if terminal_completed:
                 logger.info("Terminal tool succeeded, finishing loop")
-                context = ReactLoop.observe(context, list(results))
+                context = ReactLoop.append_tool_results(
+                    context, list(results))
                 break
 
-            context = ReactLoop.observe(context, list(results))
+            context = ReactLoop.append_tool_results(context, list(results))
 
         await self._sessions.delete(context.chat_id)
 
-        final = decision.final_answer or last_success_output or "Task completed."
-        return AgentResult(answer=final, tools_used=context.tools_used)
+        final_answer = (
+            (decision.final_answer if decision else None)
+            or last_success_output
+            or "Task completed."
+        )
+        return AgentResult(answer=final_answer, tools_used=context.tools_used)
 
     async def _llm_decide(self, context: AgentContext) -> Decision:
         utc_now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"

@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 INTENT_CLASSIFICATION_PROMPT = (
-    "Classify the user's message intent. "
+    "Classify the user's intent from one or more messages. "
     "Respond with a JSON object: {\"intent\": \"agent_task\"} or {\"intent\": \"chat\"}.\n"
     "- \"agent_task\": user requests an action that requires tools "
     "(scheduling reminders, searching the web, setting timers, etc.)\n"
@@ -36,12 +36,31 @@ class CognitionCore:
 
     @staticmethod
     def extract_user_text(perceived_entries: list[dict]) -> str:
-        """Extract the last meaningful user text from perceived entries."""
-        for entry in reversed(perceived_entries):
-            text = entry.get("text", "")
-            if "sent text message:" in text or "sent voice message:" in text:
-                start = text.find('"')
-                end = text.rfind('"')
-                if start != -1 and end > start:
-                    return text[start + 1:end]
+        """Extract user-authored text from all perceived entries in batch order."""
+        parts: list[str] = []
+        for entry in perceived_entries:
+            line = entry.get("text", "")
+            chunk = CognitionCore._user_text_from_perceived_line(line)
+            if chunk:
+                parts.append(chunk)
+        return "\n".join(parts)
+
+    @staticmethod
+    def _user_text_from_perceived_line(line: str) -> str:
+        if not line:
+            return ""
+        if "sent text message:" in line or "sent voice message:" in line:
+            start = line.find('"')
+            end = line.rfind('"')
+            if start != -1 and end > start:
+                return line[start + 1:end]
+            return ""
+        if 'with caption "' in line:
+            prefix = 'with caption "'
+            i = line.find(prefix)
+            if i != -1:
+                start = i + len(prefix)
+                end = line.find('"', start)
+                if end != -1:
+                    return line[start:end]
         return ""

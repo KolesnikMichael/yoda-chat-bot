@@ -2,7 +2,7 @@
 
 ## Architecture: IODA Runtime + Declarative Skills + Typed Tools
 
-IODA governs the runtime (pipelines, tool execution, state). Skills are declarative specifications loaded at runtime. Tools are typed async adapters in code. Two-phase token optimization: compact skill catalog on every turn, full spec only for the selected skill.
+IODA governs the runtime (pipelines, tool execution, state). Skills are declarative specifications loaded at runtime. Tools are typed async adapters. Multi-turn conversation preserves LLM reasoning across phases.
 
 ---
 
@@ -11,7 +11,7 @@ IODA governs the runtime (pipelines, tool execution, state). Skills are declarat
 ```
 Mind (IODA Integration)
   → AgentProvider (IODA Façade + Integration)
-    → ReactLoop (IODA Core) — picks a skill from the catalog
+    → ReactLoop (IODA Core) — builds context, validates decisions
       → Skill Spec (declarative, loaded at runtime) — describes workflow for LLM
         → Tools (IODA Providers) — typed async adapters
 ```
@@ -22,8 +22,6 @@ Key principle: **IODA applies to the runtime, not to agent behavior.** The runti
 
 ## Internal Structure
 
-Current implementation + planned extensions:
-
 ```
 agent/
   core/
@@ -32,20 +30,47 @@ agent/
     catalog.py             # Core (sync): loads and indexes skill specs
     specs/
       schedule_message.md  # ✓ Implemented: one-time reminder scheduling
-      deep_research.md     # Planned: multi-step web research
-      quick_lookup.md      # Planned: simple search → answer
-      memory_recall.md     # Planned: query conversation history
+      manage_jobs.md       # ✓ Implemented: list/cancel scheduled jobs
+      search_web.md        # ✓ Implemented: web search + extract via Tavily
   tools/
     tool_port.py           # Port: abstract Tool interface with terminal flag
     ask_user_tool.py       # ✓ Implemented: suspends loop for clarification
     scheduler_tool.py      # ✓ Implemented: schedules jobs via APScheduler (terminal)
+    list_jobs_tool.py      # ✓ Implemented: lists active jobs from Redis
+    cancel_job_tool.py     # ✓ Implemented: cancels jobs via APScheduler + Redis
     update_profile_tool.py # ✓ Implemented: saves user profile fields via MemoryProvider
-    web_search_tool.py     # Planned: search API adapter
-    browser_tool.py        # Planned: page scraping adapter
-    memory_tool.py         # Planned: conversation memory adapter
+    web_search_tool.py     # ✓ Implemented: Tavily search API adapter
+    web_extract_tool.py    # ✓ Implemented: Tavily URL content extraction adapter
   session_provider.py      # Provider (async): persists/restores AgentContext via StorageApi
-  agent_provider.py        # Integration (async): orchestrates two-phase loop with suspend/resume
+  agent_provider.py        # Integration (async): orchestrates multi-turn loop with suspend/resume
 ```
+
+---
+
+## Multi-turn Conversation Model
+
+The agent accumulates a full conversation history (`AgentContext.messages`) across phases. The LLM sees its own prior responses, which provides continuity from skill selection through tool execution to final answer.
+
+### Message flow
+
+```
+[system]    Static prompt: executor role, JSON schema, tool schemas, profile
+[user]      "Task: ... \n Available skills: ... \n Select the best skill."
+[assistant] {"selected_skill": "search_web", "reasoning": "..."}
+[user]      "Skill 'search_web' activated. Workflow: ... Now execute."
+[assistant] {"tool_calls": [{"tool_name": "web_search", ...}], "reasoning": "..."}
+[system]    "[web_search] (OK) Found 5 results for ..."
+[assistant] {"final_answer": "...", "reasoning": "sufficient data"}
+```
+
+- **System prompt** is static: executor role, JSON schema, all tool schemas, user profile. Built fresh each LLM call (UTC time updates).
+- **Conversation messages** accumulate in `AgentContext.messages` and persist across iterations.
+- **Tool results** are injected as `role: "system"` messages.
+- **Assistant responses** (the LLM's structured JSON decisions) are preserved as `role: "assistant"` messages.
+
+### Phase transition
+
+Phase 1 (skill selection) → Phase 2 (execution) happens via conversation: the LLM's skill selection response is kept, then a `user` message activates the skill with its full spec and execution instruction.
 
 ---
 
@@ -55,26 +80,8 @@ A Skill is a **declarative specification** — not code. It describes:
 - **When** to apply (trigger conditions, user intent patterns)
 - **What inputs** are needed (may require clarification from user)
 - **Which tools** to use and in what workflow
+- **Examples** of tool_calls JSON for the LLM
 - **Completion criteria** (when the skill is done)
-
-### Skill's instructions example
-
-```markdown
-# Search Web
-
-## When to use
-- User directly or implicitly asks you to provide information about a topic
-- You need to back up your next statement with up-to-date facts
-
-## Workflow
-1. Search for the topic using `web_search`.
-2. If results are insufficient, extract content from one or more most relevant URLs with `web_extract`.
-3. Synthesize findings into a coherent answer.
-4. If gaps remain and iterations allow, search for specific sub-topics.
-
-## Completion
-Stop when: enough data for a comprehensive answer, OR max iterations reached.
-```
 
 ### Skill catalog
 
@@ -84,8 +91,6 @@ Stop when: enough data for a comprehensive answer, OR max iterations reached.
 
 1. **Selection phase**: LLM sees only the compact catalog (~50-80 tokens per skill). Picks the best skill for the task.
 2. **Execution phase**: full spec of the selected skill is loaded into context (~200-500 tokens). LLM follows the workflow using available tools.
-
-This avoids paying for all skill instructions on every turn.
 
 ---
 
@@ -97,43 +102,45 @@ Each tool implements the `Tool` port (`tool_port.py`) with a Pydantic `parameter
 
 ### Tool properties
 
-- **`terminal: bool`** (default `False`) — when a terminal tool succeeds, the ReAct loop exits immediately. Used for tools that complete the task (e.g. `schedule_message`). Non-terminal tools (e.g. `update_profile`, `web_search`) can be called multiple times with different arguments.
+- **`terminal: bool`** (default `False`) — when a terminal tool succeeds, the ReAct loop exits immediately. Used for tools that complete the task (e.g. `schedule_message`). Non-terminal tools (e.g. `update_profile`, `web_search`) can be called multiple times.
 
 ### Infrastructure tools
 
-These tools are available to all skills and handle cross-cutting concerns:
+Available to all skills:
 
-**`ask_user`** — control flow tool. For the LLM it looks like a regular tool; internally it returns a ToolResult with `suspend=True`, signalling the loop to save context and wait for user input. The actual message delivery is Mind's responsibility (through Yoda LLM, so the question is rephrased in character). This preserves full isolation: Executor doesn't know about Telegram or Yoda.
-
-**`update_profile`** — saves user profile fields (timezone, location, etc.) via MemoryProvider. Skills that learn new information about the user (e.g. via `ask_user`) should call `update_profile` alongside the main tool in the same `tool_calls` batch. Validates fields against a whitelist. Requires `user_id` and `chat_id` in tool metadata.
+- **`ask_user`** — suspends the loop, signals clarification needed. Mind delivers the question through Yoda's voice.
+- **`update_profile`** — saves user profile fields (timezone, location, etc.) via MemoryProvider. Can be batched with other tool calls.
 
 ### Tool rules
 
 - No business logic in adapters.
-- If result needs transformation, add a sync Core function and call it here.
-- Adapters may use Providers (e.g. `LanguageProvider` for summarisation).
 - Pydantic schema on each tool auto-generates the tool catalog for the LLM.
-- Tool metadata (`ToolCall.metadata`) carries runtime context (`chat_id`, `user_id`) that the LLM doesn't control.
+- Tool metadata (`ToolCall.metadata`) carries runtime context (`chat_id`, `user_id`) injected by AgentProvider.
 
 ---
 
 ## Core: react_loop.py
 
-Builds LLM context, validates the Decision, manages iteration limits. The LLM produces a structured `Decision` (via JSON mode + Pydantic parsing). ReactLoop validates it but doesn't contain reasoning logic — that's the LLM's job, guided by the skill spec.
+Builds LLM context from static system prompt + accumulated messages. Validates the structured `Decision` (via JSON mode + Pydantic parsing). Manages iteration limits.
 
-All tool observations (results) are injected as `role: "user"` messages — required by Mistral API (last message must be user role). The execution instruction includes concrete JSON examples for tool calls to guide the LLM's structured output.
+Key methods:
+- `build_context()` — returns `[system_prompt] + context.messages`
+- `build_selection_message()` — Phase 1 user message with task + catalog
+- `build_activation_message()` — Phase 2 transition with skill spec + execution instruction
+- `append_assistant()` — saves LLM Decision as assistant message
+- `append_tool_results()` — adds tool results as system messages, increments iteration
 
 ---
 
 ## Façade + Integration: agent_provider.py
 
-Orchestrates the two-phase loop with suspend/resume support. No business logic.
+Orchestrates the multi-turn loop with suspend/resume support. No business logic.
 
 ### Robustness mechanisms
 
-- **Nudge retry**: if the LLM returns neither `tool_calls` nor `final_answer` (describes intent in `reasoning` but doesn't act), a system observation is injected ("You must call a tool or set final_answer") and the LLM gets one more attempt.
-- **Terminal tool auto-exit**: when a tool with `terminal=True` succeeds, the loop breaks immediately — prevents the LLM from re-calling the same tool.
-- **Tool metadata injection**: `chat_id` and `user_id` are added to every `ToolCall.metadata` automatically, so tools can access runtime context without the LLM needing to provide it.
+- **Nudge retry**: if the LLM returns neither `tool_calls` nor `final_answer`, a user message is appended ("You must call a tool or set final_answer") and the LLM gets one more attempt. The model sees its own empty response before the nudge.
+- **Terminal tool auto-exit**: when a tool with `terminal=True` succeeds, the loop breaks immediately.
+- **Tool metadata injection**: `chat_id`, `user_id`, `profile_timezone` are added to every `ToolCall.metadata` automatically.
 
 ---
 
@@ -143,75 +150,42 @@ Typed tools are the **security boundary**. Even if the LLM is manipulated via pr
 - It can only call predefined tools with validated Pydantic parameters
 - No `bash` or arbitrary code execution tool exists
 - Each tool adapter validates its inputs before calling external services
-- Skill specs are loaded from the project's filesystem (trusted source), not from user input or community registries
-
-### Threat mitigations
-
-| Threat | Mitigation |
-|---|---|
-| Prompt injection via user message | LLM sees user text in a separate role; system prompt + skill spec have higher priority |
-| Malicious skill spec | Skills loaded only from project filesystem, not user-contributed |
-| Tool parameter manipulation | Pydantic validation on every tool call; invalid params → ToolResult(success=False) |
-| Data exfiltration via tools | No generic HTTP tool; each tool has a narrow, specific purpose |
+- Skill specs are loaded from the project's filesystem (trusted source), not from user input
 
 ---
 
 ## Adding New Capabilities
 
-### New skill (e.g. "monitor website")
-1. Create `skills/specs/monitor_website.md` with frontmatter + instructions.
+### New skill
+1. Create `skills/specs/<name>.md` with frontmatter + instructions + examples.
 2. No code changes — catalog picks it up automatically at startup.
 
-### New tool (e.g. "web search")
-1. Create `tools/web_search_tool.py` implementing `Tool` with a Pydantic params schema.
+### New tool
+1. Create `tools/<name>_tool.py` implementing `Tool` with a Pydantic params schema.
 2. In `yoda_chat_bot.py`, instantiate and inject into `AgentProvider`.
 3. Reference the tool name in skill specs that need it.
-
-### New skill + new tool
-1. Create the tool adapter first (code).
-2. Create the skill spec referencing it (markdown).
-3. Wire the tool in `yoda_chat_bot.py`.
-
----
-
-## Anti-patterns
-
-| Anti-pattern | Fix |
-|---|---|
-| Business logic in `agent_provider.py` | Move to `react_loop.py` (validation) or skill spec (workflow) |
-| Tool adapter with free-text parameters | Use Pydantic model with constrained fields |
-| Skill spec referencing non-existent tool | `catalog.py` validates tool references at load time |
-| All skill specs loaded into every LLM call | Two-phase: catalog first, full spec only for selected skill |
-| Hardcoded workflow in Python instead of skill spec | If the workflow is LLM-driven, it belongs in a skill spec |
 
 ---
 
 ## Dual LLM Roles: Yoda vs Executor
 
-The system uses two separate LLM roles with distinct responsibilities:
-
 | | **Yoda (conversational)** | **Executor (agentic)** |
 |---|---|---|
 | System prompt | Personality, style, emotions | Neutral, instrumental |
-| Context | Conversation (full chat history) | AgentContext (task + tool results) |
+| Context | Conversation (full chat history) | AgentContext (multi-turn messages) |
 | Output | Reply to user in Yoda's voice | Structured AgentResult |
 | Calls tools | No | Yes |
 | Knows about skills | No | Yes |
 
-The two LLMs don't know about each other. They communicate via Conversation (Data), mediated by Mind (Integration). Yoda LLM receives agent output as a system message in Conversation. It doesn't know an agent produced it — it just sees contextual information and responds in character. For clarifications, Yoda rephrases the Executor's question in its own voice.
-
-Benefits:
-- **Token efficiency**: Executor doesn't pay for Yoda's personality prompt. Yoda doesn't pay for tool schemas / skill specs.
-- **Separation of concerns**: Executor focuses on task execution. Yoda focuses on natural conversation.
-- **Testability**: each role tested independently — mock tools for Executor, mock conversation for Yoda.
+The two LLMs don't know about each other. They communicate via Conversation (Data), mediated by Mind (Integration).
 
 ### Intent classification
 
 Mind classifies intent via LLM with awareness of pending agent sessions:
 - `"chat"` — Yoda answers directly
 - `"agent_task"` — full delegation to Executor via `AgentProvider.run()`
-- `"agent_resume"` — pending session exists for this chat, user's message is an answer to Executor's question → `AgentProvider.resume()` (shortcut: no LLM call needed)
-- `"augmented_chat"` — (planned) Yoda needs context (quick single-tool lookup, no full ReAct cycle). Mind calls a tool directly, injects result, Yoda responds.
+- `"agent_resume"` — pending session exists, user's message is an answer → `AgentProvider.resume()`
+- `"augmented_chat"` — (planned) Yoda needs quick context from a single tool, no full ReAct cycle
 
 ---
 
@@ -221,51 +195,20 @@ Mind classifies intent via LLM with awareness of pending agent sessions:
 
 Each `AgentProvider.run()` creates its own `AgentContext`. Guarantees:
 - **No cross-user contamination**: parallel calls for different chats get independent contexts
-- **Immutability per iteration**: `observe()` returns a new AgentContext, never mutates
+- **Immutability per step**: `append_assistant()` / `append_tool_results()` return new AgentContext, never mutate
 - **Stateless tools**: tools receive only their `ToolCall`, never a reference to AgentContext
 
-### Context management
+### Persistence via `AgentSessionProvider`
 
-AgentContext.history grows with each iteration. Three mechanisms to control it:
-
-**Token budget** (planned): `ReactLoop.build_context()` respects model's context limit. When history exceeds budget:
-- Summarize older ToolResults (one short LLM call)
-- Or sliding window: keep first + last N results, drop middle
-
-**Persistence** via `AgentSessionProvider` (async, uses StorageApi):
-- **Clarification flow** — when `ask_user` tool suspends the loop, `AgentProvider` saves AgentContext (including `user_id`) to Redis via `AgentSessionProvider.save()`. On `resume()`, context is loaded via `AgentSessionProvider.load()`. After final answer, session is deleted.
-- **Cron / monitoring** (planned) — periodic tasks. Each run creates a new AgentContext, but may reference previous results stored in long-term memory.
-- **Session timeout** (planned) — pending sessions expire after a configurable TTL (e.g. 30 minutes). CognitionCore checks session existence before classifying intent as `"agent_resume"`.
-
-**Timeout / cancellation** (planned): protection against hung LLM calls or tools:
-- `AgentProvider.run()` has overall timeout
-- Each tool call wrapped in `asyncio.wait_for()`
-- On timeout → `AgentResult(error="timeout")` → Mind decides what to tell the user
+- **Clarification flow** — when `ask_user` suspends the loop, `AgentProvider` saves AgentContext (including full messages) to Redis. On `resume()`, context is restored and the conversation continues.
+- **Session cleanup** — after final answer, session is deleted.
 
 ### Memory scope hierarchy
 
 | Scope | Lifetime | Stores | Location |
 |---|---|---|---|
 | **Tool** | Single `execute()` call | Nothing (stateless) | — |
-| **Skill execution** | One ReAct cycle | Tool results, iteration state | AgentContext |
+| **Skill execution** | One ReAct cycle | Messages, iteration state | AgentContext |
 | **Conversation** | Entire chat | Messages, injected agent results | Conversation + MemoryProvider |
 | **User profile** | Permanent | Facts, preferences, timezone | UserProfile + StorageApi |
-| **Active jobs** | Until delivered (once) or cancelled (recurring) | Job metadata (type, description, timezone) | `active_jobs:<chat_id>` in Redis |
-
-AgentContext (skill scope) is created and destroyed inside `AgentProvider.run()`. Its result is projected into Conversation (conversation scope) via Mind.
-
-### Scheduled job lifecycle
-
-Jobs are stored in two places: APScheduler's Redis job store (execution) and `active_jobs:<chat_id>` (metadata for listing/management).
-
-1. **Created** by `scheduler_tool.py` → `SchedulerApi.schedule_once()` + metadata saved to `active_jobs:<chat_id>`
-2. **Fired** by APScheduler → module-level `_fire_job()` (async, picklable) → delivery callback → Mind
-3. **Cleaned up**: for `type=once`, metadata is auto-deleted from `active_jobs` after delivery. For `type=recurring` (planned), metadata persists until explicit cancellation.
-
----
-
-## References
-
-- SGR Agent Core (vamplabAI/sgr-agent-core) — structured output for Decision, Pydantic tool schemas
-- OpenClaw (openclaw/openclaw) — skill catalog/discovery model, two-level skill/tool separation
-- Discussion: agent_systems_skills_and_environment_engineering.md — CFS/RFS framing, skill ecosystem concepts
+| **Active jobs** | Until delivered or cancelled | Job metadata | `active_jobs:<chat_id>` in Redis |

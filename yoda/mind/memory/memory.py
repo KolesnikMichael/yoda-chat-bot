@@ -53,29 +53,29 @@ class MemoryCore:
 
 class MemoryProvider:
     def __init__(self, storage_api):
-        self.storage_api = storage_api
-        self.conversations: dict[str, Conversation] = {}
+        self._storage_api = storage_api
+        self._conversations: dict[str, Conversation] = {}
 
     def get_conversation(self, chat_id: int) -> Conversation | None:
         key = MemoryCore.conversation_key(chat_id)
-        return self.conversations.get(key)
+        return self._conversations.get(key)
 
     def save_conversation(self, conversation: Conversation) -> None:
         key = MemoryCore.conversation_key(conversation.chat_id)
-        self.conversations[key] = conversation
+        self._conversations[key] = conversation
 
     async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
-        current_user_info_raw = await self.storage_api.hget("users", str(user_id))
+        current_user_info_raw = await self._storage_api.hget("users", str(user_id))
         if current_user_info_raw:
             current_user_info = json.loads(current_user_info_raw)
         else:
             current_user_info = {"known_since": user_info.get("last_active")}
             logger.info(f"Registered user {user_id}")
 
-        await self.storage_api.hset("users", str(user_id), json.dumps({**current_user_info, **user_info}))
+        await self._storage_api.hset("users", str(user_id), json.dumps({**current_user_info, **user_info}))
 
     async def update_chat_info(self, chat_id: int, chat_type: str, last_active: str) -> None:
-        current_chat_info_raw = await self.storage_api.hget("chats", str(chat_id))
+        current_chat_info_raw = await self._storage_api.hget("chats", str(chat_id))
         if current_chat_info_raw:
             current_chat_info = json.loads(current_chat_info_raw)
             current_schema_version = current_chat_info.get("schema_version", 1)
@@ -93,11 +93,11 @@ class MemoryProvider:
             logger.info(f"Registered chat {chat_id}")
 
         current_chat_info["last_active"] = last_active
-        await self.storage_api.hset("chats", str(chat_id), json.dumps(current_chat_info))
+        await self._storage_api.hset("chats", str(chat_id), json.dumps(current_chat_info))
 
     async def get_user_profile(self, user_id: int, chat_id: int) -> UserProfile:
         user_profile_id = f"{user_id}@{chat_id}"
-        raw = await self.storage_api.hget("user_profiles", user_profile_id)
+        raw = await self._storage_api.hget("user_profiles", user_profile_id)
         if raw:
             data = json.loads(raw)
             interests = data.pop("interests", [])
@@ -112,7 +112,7 @@ class MemoryProvider:
 
     async def update_user_profile(self, user_id: int, chat_id: int, user_profile: dict) -> None:
         user_profile_id = f"{user_id}@{chat_id}"
-        current_user_profile_raw = await self.storage_api.hget("user_profiles", user_profile_id)
+        current_user_profile_raw = await self._storage_api.hget("user_profiles", user_profile_id)
 
         if current_user_profile_raw:
             current_user_profile = json.loads(current_user_profile_raw)
@@ -122,4 +122,4 @@ class MemoryProvider:
         current_user_profile = {**current_user_profile, **user_profile}
         current_user_profile["updated_on"] = dtm.datetime.now(
             dtm.UTC).isoformat()
-        await self.storage_api.hset("user_profiles", user_profile_id, json.dumps(current_user_profile))
+        await self._storage_api.hset("user_profiles", user_profile_id, json.dumps(current_user_profile))

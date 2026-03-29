@@ -1,8 +1,11 @@
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
     Decision,
+    SkillSpec,
+    SkillSummary,
     ToolResult,
 )
+from yoda.mind.memory.data.user_profile import UserProfile
 
 EXECUTOR_SYSTEM_PROMPT = (
     "You are an executor agent. Your job is to complete tasks using available tools. "
@@ -25,18 +28,8 @@ SELECTION_INSTRUCTION = (
 )
 
 EXECUTION_INSTRUCTION = (
-    "Follow the active skill's workflow.\n"
-    "CRITICAL: Every response MUST contain either tool_calls OR final_answer. "
-    "Never return both as null — that is an invalid response.\n"
-    "Do NOT just describe what you plan to do in reasoning — actually DO it by setting tool_calls.\n\n"
-    "Example — calling schedule_message with a relative delay:\n"
-    '{"tool_calls": [{"tool_name": "schedule_message", "arguments": {"reminder_text": "call mom", "delay_minutes": 30}}], "reasoning": "scheduling a reminder in 30 minutes"}\n\n'
-    "Example — calling schedule_message with an absolute time:\n"
-    '{"tool_calls": [{"tool_name": "schedule_message", "arguments": {"reminder_text": "call mom", "year": 2026, "month": 3, "day": 21, "hour": 15, "minute": 0, "timezone": "Europe/Moscow"}}], "reasoning": "scheduling at specific time"}\n\n'
-    "Example — asking the user:\n"
-    '{"tool_calls": [{"tool_name": "ask_user", "arguments": {"question": "What is your timezone?"}}], "reasoning": "need timezone for absolute time"}\n\n'
-    "Example — done:\n"
-    '{"final_answer": "Reminder set for 30 minutes from now.", "reasoning": "confirmed"}'
+    "Now execute the skill workflow. "
+    "Each response must contain tool_calls or final_answer."
 )
 
 
@@ -49,31 +42,75 @@ class ReactLoop:
         tool_schemas: list[dict],
         utc_now: str,
     ) -> list[dict]:
-        messages: list[dict] = []
+        system = _build_system_prompt(tool_schemas, context.profile, utc_now)
+        return [{"role": "system", "content": system}] + list(context.messages)
 
-        system_parts = [EXECUTOR_SYSTEM_PROMPT.format(utc_now=utc_now)]
-
-        if context.active_skill is None:
-            system_parts.append(_format_catalog(context))
-            system_parts.append(SELECTION_INSTRUCTION)
+    @staticmethod
+    def build_selection_message(
+        task: str,
+        catalog_summaries: list[SkillSummary],
+    ) -> dict:
+        parts = [f"Task: {task}"]
+        if catalog_summaries:
+            lines = ["Available skills:"]
+            for s in catalog_summaries:
+                lines.append(f"- {s.name}: {s.description}")
+            parts.append("\n".join(lines))
         else:
-            system_parts.append(_format_active_skill(context))
-            system_parts.append(_format_tool_schemas(tool_schemas))
-            system_parts.append(_format_profile_context(context))
-            system_parts.append(EXECUTION_INSTRUCTION)
+            parts.append("No skills available.")
+        parts.append(SELECTION_INSTRUCTION)
+        return {"role": "user", "content": "\n\n".join(parts)}
 
-        messages.append({"role": "system", "content": "\n\n".join(system_parts)})
-        messages.append({"role": "user", "content": f"Task: {context.task}"})
+    @staticmethod
+    def build_activation_message(skill: SkillSpec) -> dict:
+        parts = [
+            f"Skill '{skill.name}' activated.",
+            f"Description: {skill.description}",
+        ]
+        if skill.required_inputs:
+            inputs_str = ", ".join(
+                f"{k} ({v})" for k, v in skill.required_inputs.items()
+            )
+            parts.append(f"Required inputs: {inputs_str}")
+        parts.append(f"Workflow:\n{skill.instructions}")
+        parts.append(EXECUTION_INSTRUCTION)
+        return {"role": "user", "content": "\n\n".join(parts)}
 
-        for result in context.history:
-            if result.tool_name == "ask_user":
-                content = f"User answered: {result.output}"
+    @staticmethod
+    def append_assistant(
+        context: AgentContext, decision: Decision,
+    ) -> AgentContext:
+        msg = {"role": "assistant", "content": decision.model_dump_json()}
+        return context.with_messages(context.messages + [msg])
+
+    @staticmethod
+    def append_tool_results(
+        context: AgentContext, results: list[ToolResult],
+    ) -> AgentContext:
+        new_messages = list(context.messages)
+        new_tools_used = list(context.tools_used)
+
+        for r in results:
+            if r.tool_name == "ask_user":
+                content = f"User was asked: {r.output}"
             else:
-                status = "OK" if result.success else "FAILED"
-                content = f"[{result.tool_name}] ({status}) {result.output}"
-            messages.append({"role": "user", "content": content})
+                status = "OK" if r.success else "FAILED"
+                content = f"[{r.tool_name}] ({status}) {r.output}"
+            new_messages.append({"role": "system", "content": content})
+            if r.tool_name not in new_tools_used:
+                new_tools_used.append(r.tool_name)
 
-        return messages
+        return AgentContext(
+            task=context.task,
+            profile=context.profile,
+            chat_id=context.chat_id,
+            user_id=context.user_id,
+            catalog_summaries=context.catalog_summaries,
+            active_skill=context.active_skill,
+            messages=new_messages,
+            iteration=context.iteration + 1,
+            tools_used=new_tools_used,
+        )
 
     @staticmethod
     def validate_decision(
@@ -102,26 +139,6 @@ class ReactLoop:
         return decision
 
     @staticmethod
-    def observe(context: AgentContext, results: list[ToolResult]) -> AgentContext:
-        new_history = list(context.history) + results
-        new_tools_used = list(context.tools_used)
-        for r in results:
-            if r.tool_name not in new_tools_used:
-                new_tools_used.append(r.tool_name)
-
-        return AgentContext(
-            task=context.task,
-            profile=context.profile,
-            chat_id=context.chat_id,
-            user_id=context.user_id,
-            catalog_summaries=context.catalog_summaries,
-            active_skill=context.active_skill,
-            history=new_history,
-            iteration=context.iteration + 1,
-            tools_used=new_tools_used,
-        )
-
-    @staticmethod
     def is_done(context: AgentContext) -> bool:
         max_iter = (
             context.active_skill.max_iterations
@@ -131,25 +148,15 @@ class ReactLoop:
         return context.iteration >= max_iter
 
 
-def _format_catalog(context: AgentContext) -> str:
-    if not context.catalog_summaries:
-        return "No skills available."
-    lines = ["Available skills:"]
-    for s in context.catalog_summaries:
-        lines.append(f"- {s.name}: {s.description}")
-    return "\n".join(lines)
-
-
-def _format_active_skill(context: AgentContext) -> str:
-    skill = context.active_skill
-    parts = [f"Active skill: {skill.name}", f"Description: {skill.description}"]
-    if skill.required_inputs:
-        inputs_str = ", ".join(
-            f"{k} ({v})" for k, v in skill.required_inputs.items()
-        )
-        parts.append(f"Required inputs: {inputs_str}")
-    parts.append(f"Workflow:\n{skill.instructions}")
-    return "\n".join(parts)
+def _build_system_prompt(
+    tool_schemas: list[dict],
+    profile: UserProfile,
+    utc_now: str,
+) -> str:
+    parts = [EXECUTOR_SYSTEM_PROMPT.format(utc_now=utc_now)]
+    parts.append(_format_tool_schemas(tool_schemas))
+    parts.append(_format_profile_context(profile))
+    return "\n\n".join(parts)
 
 
 def _format_tool_schemas(tool_schemas: list[dict]) -> str:
@@ -169,15 +176,14 @@ def _format_tool_schemas(tool_schemas: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _format_profile_context(context: AgentContext) -> str:
-    p = context.profile
+def _format_profile_context(profile: UserProfile) -> str:
     parts = ["User profile context:"]
-    if p.timezone:
-        parts.append(f"  timezone: {p.timezone}")
-    if p.location:
-        parts.append(f"  location: {p.location}")
-    if p.nickname:
-        parts.append(f"  name: {p.nickname}")
+    if profile.timezone:
+        parts.append(f"  timezone: {profile.timezone}")
+    if profile.location:
+        parts.append(f"  location: {profile.location}")
+    if profile.nickname:
+        parts.append(f"  name: {profile.nickname}")
     if len(parts) == 1:
         parts.append("  (no timezone or location on file)")
     return "\n".join(parts)

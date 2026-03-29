@@ -32,6 +32,9 @@ from yoda.api.storage_api import StorageApi
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.speech_api import SpeechApi
 from yoda.api.llm_api import LLMApi
+from yoda.api.tavily_api import TavilyApi
+from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
+from yoda.mind.agent.tools.web_search_tool import WebSearchTool
 
 
 logger = logging.getLogger(__name__)
@@ -102,6 +105,14 @@ def main() -> None:
         raise ValueError(
             f"Settings missing required key: {missing_key}") from e
 
+    try:
+        tavily_api_key = (
+            settings_json["agent"]["tools"]["web_search"]["tavily_api_key"]
+        )
+    except KeyError as e:
+        raise ValueError(
+            f"Settings missing Tavily key: {e.args[0]}") from e
+
     language_provider = LanguageProvider(
         settings=language_settings, llm_api=LLMApi(api_key=language_api_key))
     vision_provider = VisionProvider(
@@ -122,12 +133,16 @@ def main() -> None:
         redis_db=memory_settings.get("redis_db", 0),
     )
 
+    tavily_api = TavilyApi(api_key=tavily_api_key)
+
     tools = [
         AskUserTool(),
         SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api),
         ListJobsTool(storage_api=storage_api),
         CancelJobTool(scheduler_api=scheduler_api, storage_api=storage_api),
         UpdateProfileTool(memory_provider=memory_provider),
+        WebSearchTool(tavily_api=tavily_api),
+        WebExtractTool(tavily_api=tavily_api),
     ]
     skills_dir = Path(__file__).parent / "mind" / "agent" / "skills"
     session_provider = AgentSessionProvider(storage_api=storage_api)

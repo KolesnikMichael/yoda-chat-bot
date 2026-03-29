@@ -131,7 +131,7 @@ async def test_scheduler_tool_delay_minutes():
             "reminder_text": "wake up",
             "delay_minutes": 30,
         },
-        metadata={"chat_id": 42},
+        metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
     )
 
     result = await tool.execute(call)
@@ -141,6 +141,36 @@ async def test_scheduler_tool_delay_minutes():
     assert "30 minutes" in result.output
     assert len(scheduler_api.scheduled) == 1
     assert scheduler_api.scheduled[0]["chat_id"] == 42
+
+    job_keys = [k for k in storage_api.data if k.startswith("active_jobs:")]
+    assert len(job_keys) == 1
+    stored = json.loads(list(storage_api.data[job_keys[0]].values())[0])
+    assert stored["timezone"] == "Europe/Moscow"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_tool_delay_minutes_utc_without_profile_timezone():
+    from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api)
+
+    call = ToolCall(
+        tool_name="schedule_message",
+        arguments={
+            "reminder_text": "wake up",
+            "delay_minutes": 15,
+        },
+        metadata={"chat_id": 42},
+    )
+
+    result = await tool.execute(call)
+
+    assert result.success is True
+    job_keys = [k for k in storage_api.data if k.startswith("active_jobs:")]
+    stored = json.loads(list(storage_api.data[job_keys[0]].values())[0])
+    assert stored["timezone"] == "UTC"
 
 
 @pytest.mark.asyncio
@@ -418,6 +448,10 @@ async def test_list_jobs_returns_formatted_list():
     assert "call mom" in result.output
     assert "reminder_42_bbb" in result.output
     assert "buy milk" in result.output
+    assert "(Europe/Moscow)" not in result.output
+    assert "(UTC)" not in result.output
+    assert "2030-06-15 14:00" in result.output
+    assert "2030-07-01 09:00" in result.output
 
 
 @pytest.mark.asyncio
@@ -478,3 +512,233 @@ async def test_cancel_job_nonexistent():
 
     assert result.success is False
     assert "not found" in result.output
+
+
+# --- Tavily / WebSearchTool / WebExtractTool tests ---
+
+
+class FakeTavilyApi:
+    def __init__(self):
+        self.search_response: dict | None = None
+        self.extract_response: dict | None = None
+        self.search_error: Exception | None = None
+        self.extract_error: Exception | None = None
+        self.last_search_kwargs: dict | None = None
+        self.last_extract_urls: list[str] | None = None
+
+    async def search(
+        self,
+        query: str,
+        *,
+        max_results: int = 5,
+        search_depth: str = "basic",
+        topic: str = "general",
+    ):
+        self.last_search_kwargs = {
+            "query": query,
+            "max_results": max_results,
+            "search_depth": search_depth,
+            "topic": topic,
+        }
+        if self.search_error:
+            raise self.search_error
+        return self.search_response if self.search_response is not None else {"results": []}
+
+    async def extract(self, urls: list[str]):
+        self.last_extract_urls = urls
+        if self.extract_error:
+            raise self.extract_error
+        return self.extract_response if self.extract_response is not None else {"results": [], "failed_results": []}
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_success():
+    from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+
+    fake = FakeTavilyApi()
+    fake.search_response = {
+        "results": [
+            {
+                "title": "Example",
+                "url": "https://example.com",
+                "content": "Snippet text here.",
+                "score": 0.91,
+            },
+        ],
+    }
+    tool = WebSearchTool(tavily_api=fake)
+
+    call = ToolCall(
+        tool_name="web_search",
+        arguments={"query": "test query", "max_results": 3},
+    )
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "test query" in result.output
+    assert "Example" in result.output
+    assert "https://example.com" in result.output
+    assert "Snippet text" in result.output
+    assert fake.last_search_kwargs["query"] == "test query"
+    assert fake.last_search_kwargs["max_results"] == 3
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_empty_results():
+    from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+
+    fake = FakeTavilyApi()
+    fake.search_response = {"results": []}
+    tool = WebSearchTool(tavily_api=fake)
+
+    call = ToolCall(tool_name="web_search", arguments={"query": "nothing"})
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "No results" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_api_error():
+    from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+
+    fake = FakeTavilyApi()
+    fake.search_error = RuntimeError("network down")
+    tool = WebSearchTool(tavily_api=fake)
+
+    call = ToolCall(tool_name="web_search", arguments={"query": "x"})
+    result = await tool.execute(call)
+
+    assert result.success is False
+    assert "Search failed" in result.output
+    assert "network down" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_invalid_params():
+    from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+
+    tool = WebSearchTool(tavily_api=FakeTavilyApi())
+    call = ToolCall(tool_name="web_search", arguments={})
+
+    result = await tool.execute(call)
+
+    assert result.success is False
+    assert "Invalid parameters" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_extract_tool_success():
+    from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
+
+    fake = FakeTavilyApi()
+    fake.extract_response = {
+        "results": [
+            {"url": "https://a.com", "raw_content": "Hello world"},
+        ],
+        "failed_results": [],
+    }
+    tool = WebExtractTool(tavily_api=fake)
+
+    call = ToolCall(
+        tool_name="web_extract",
+        arguments={"urls": ["https://a.com"]},
+    )
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "https://a.com" in result.output
+    assert "Hello world" in result.output
+    assert fake.last_extract_urls == ["https://a.com"]
+
+
+@pytest.mark.asyncio
+async def test_web_extract_tool_partial_failure():
+    from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
+
+    fake = FakeTavilyApi()
+    fake.extract_response = {
+        "results": [{"url": "https://ok.com", "raw_content": "OK"}],
+        "failed_results": [{"url": "https://bad.com", "error": "timeout"}],
+    }
+    tool = WebExtractTool(tavily_api=fake)
+
+    call = ToolCall(
+        tool_name="web_extract",
+        arguments={"urls": ["https://ok.com", "https://bad.com"]},
+    )
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "OK" in result.output
+    assert "Failed URLs" in result.output
+    assert "bad.com" in result.output
+    assert "timeout" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_extract_tool_truncates_long_content():
+    from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
+
+    long_text = "x" * 3000
+    fake = FakeTavilyApi()
+    fake.extract_response = {
+        "results": [{"url": "https://long.com", "raw_content": long_text}],
+        "failed_results": [],
+    }
+    tool = WebExtractTool(tavily_api=fake)
+
+    call = ToolCall(
+        tool_name="web_extract",
+        arguments={"urls": ["https://long.com"]},
+    )
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "…" in result.output
+    assert len(result.output) < len(long_text) + 200
+
+
+@pytest.mark.asyncio
+async def test_web_extract_tool_empty_urls_invalid():
+    from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
+
+    tool = WebExtractTool(tavily_api=FakeTavilyApi())
+    call = ToolCall(tool_name="web_extract", arguments={"urls": []})
+
+    result = await tool.execute(call)
+
+    assert result.success is False
+    assert "Invalid parameters" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_extract_tool_too_many_urls():
+    from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
+
+    tool = WebExtractTool(tavily_api=FakeTavilyApi())
+    urls = [f"https://x{i}.com" for i in range(21)]
+    call = ToolCall(tool_name="web_extract", arguments={"urls": urls})
+
+    result = await tool.execute(call)
+
+    assert result.success is False
+    assert "20" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_extract_tool_api_error():
+    from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
+
+    fake = FakeTavilyApi()
+    fake.extract_error = RuntimeError("extract failed")
+    tool = WebExtractTool(tavily_api=fake)
+
+    call = ToolCall(
+        tool_name="web_extract",
+        arguments={"urls": ["https://a.com"]},
+    )
+    result = await tool.execute(call)
+
+    assert result.success is False
+    assert "Extract failed" in result.output

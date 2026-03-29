@@ -3,6 +3,7 @@ import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
+FILE_CACHE_DIR = "./.file_cache"
 
 class TelegramApi:
     def build_application(self, token: str) -> Application:
@@ -17,11 +18,11 @@ class TelegramApi:
     async def send_message(self, bot, chat_id: int, message: str) -> None:
         await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
 
-    async def download_voice_to_cache(self, message, cache_dir: str = "./.file_cache") -> str:
+    async def download_voice_to_cache(self, message, cache_dir: str = FILE_CACHE_DIR) -> str:
         voice_file = await message.voice.get_file()
         return await voice_file.download_to_drive(custom_path=f"{cache_dir}/voice_{time.time()}.ogg")
 
-    async def download_photo_to_cache(self, message, cache_dir: str = "./.file_cache") -> str:
+    async def download_photo_to_cache(self, message, cache_dir: str = FILE_CACHE_DIR) -> str:
         photo_file = await message.photo[-1].get_file()
         return await photo_file.download_to_drive(custom_path=f"{cache_dir}/photo_{time.time()}.jpg")
 

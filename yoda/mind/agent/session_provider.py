@@ -7,7 +7,6 @@ from yoda.mind.agent.data.agent_data import (
     AgentContext,
     SkillSpec,
     SkillSummary,
-    ToolResult,
 )
 from yoda.mind.memory.data.user_profile import UserProfile
 
@@ -28,7 +27,7 @@ class AgentSessionProvider:
             "user_id": context.user_id,
             "catalog_summaries": [asdict(s) for s in context.catalog_summaries],
             "active_skill": asdict(context.active_skill) if context.active_skill else None,
-            "history": [asdict(r) for r in context.history],
+            "messages": context.messages,
             "iteration": context.iteration,
             "tools_used": context.tools_used,
         }
@@ -45,7 +44,6 @@ class AgentSessionProvider:
         profile = UserProfile(**data["profile"])
         catalog_summaries = [SkillSummary(**s) for s in data["catalog_summaries"]]
         active_skill = SkillSpec(**data["active_skill"]) if data["active_skill"] else None
-        history = [ToolResult(**r) for r in data["history"]]
 
         return AgentContext(
             task=data["task"],
@@ -54,7 +52,7 @@ class AgentSessionProvider:
             user_id=data.get("user_id", 0),
             catalog_summaries=catalog_summaries,
             active_skill=active_skill,
-            history=history,
+            messages=data.get("messages", []),
             iteration=data["iteration"],
             tools_used=data["tools_used"],
         )

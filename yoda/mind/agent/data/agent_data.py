@@ -70,7 +70,7 @@ class AgentContext:
     user_id: int = 0
     catalog_summaries: list[SkillSummary] = field(default_factory=list)
     active_skill: SkillSpec | None = None
-    history: list[ToolResult] = field(default_factory=list)
+    messages: list[dict] = field(default_factory=list)
     iteration: int = 0
     tools_used: list[str] = field(default_factory=list)
 
@@ -82,9 +82,22 @@ class AgentContext:
             user_id=self.user_id,
             catalog_summaries=self.catalog_summaries,
             active_skill=skill,
-            history=self.history,
+            messages=list(self.messages),
             iteration=self.iteration,
-            tools_used=self.tools_used,
+            tools_used=list(self.tools_used),
+        )
+
+    def with_messages(self, messages: list[dict]) -> AgentContext:
+        return AgentContext(
+            task=self.task,
+            profile=self.profile,
+            chat_id=self.chat_id,
+            user_id=self.user_id,
+            catalog_summaries=self.catalog_summaries,
+            active_skill=self.active_skill,
+            messages=messages,
+            iteration=self.iteration,
+            tools_used=list(self.tools_used),
         )
 
 

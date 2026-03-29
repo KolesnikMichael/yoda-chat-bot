@@ -54,13 +54,16 @@ class SchedulerTool(Tool):
                 success=False,
             )
 
+        tz_for_meta = self._effective_timezone_name(params, call)
+
         if params.delay_minutes is not None:
-            utc_dt, display_str = self._resolve_relative(params)
+            utc_dt, display_str = self._resolve_relative(params, tz_for_meta)
         elif params.year is not None and params.timezone is not None:
             result = self._resolve_absolute(params)
             if isinstance(result, ToolResult):
                 return result
             utc_dt, display_str = result
+            tz_for_meta = params.timezone
         else:
             return ToolResult(
                 tool_name=self.name,
@@ -90,7 +93,7 @@ class SchedulerTool(Tool):
             job_type="once",
             description=params.reminder_text,
             deliver_at_utc=utc_dt.isoformat(),
-            timezone=params.timezone or "UTC",
+            timezone=tz_for_meta,
         )
 
         return ToolResult(
@@ -100,9 +103,35 @@ class SchedulerTool(Tool):
         )
 
     @staticmethod
-    def _resolve_relative(params: ScheduleMessageParams) -> tuple[datetime, str]:
-        utc_dt = datetime.now(ZoneInfo("UTC")) + timedelta(minutes=params.delay_minutes)
-        return utc_dt, f"in {params.delay_minutes} minutes"
+    def _effective_timezone_name(
+        params: ScheduleMessageParams, call: ToolCall
+    ) -> str:
+        raw = (
+            params.timezone
+            or (call.metadata.get("profile_timezone") or "").strip()
+            or None
+        )
+        if raw is None:
+            return "UTC"
+        try:
+            ZoneInfo(raw)
+            return raw
+        except (KeyError, ValueError):
+            return "UTC"
+
+    @staticmethod
+    def _resolve_relative(
+        params: ScheduleMessageParams, tz_name: str
+    ) -> tuple[datetime, str]:
+        utc_dt = datetime.now(ZoneInfo("UTC")) + timedelta(
+            minutes=params.delay_minutes
+        )
+        try:
+            local_dt = utc_dt.astimezone(ZoneInfo(tz_name))
+            local_part = f" at {local_dt.strftime('%Y-%m-%d %H:%M')}"
+        except (KeyError, ValueError):
+            local_part = ""
+        return utc_dt, f"in {params.delay_minutes} minutes{local_part}"
 
     @staticmethod
     def _resolve_absolute(params: ScheduleMessageParams) -> tuple[datetime, str] | ToolResult:

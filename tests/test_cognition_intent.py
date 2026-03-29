@@ -10,6 +10,7 @@ def test_build_intent_messages_structure():
     assert messages[1]["content"] == "remind me to call mom"
     assert "agent_task" in messages[0]["content"]
     assert "chat" in messages[0]["content"]
+    assert "one or more messages" in messages[0]["content"]
 
 
 def test_extract_user_text_from_text_message():
@@ -34,7 +35,7 @@ def test_extract_user_text_from_voice_message():
     assert text == "call mom later"
 
 
-def test_extract_user_text_takes_last_entry():
+def test_extract_user_text_joins_multiple_text_messages():
     perceived = [
         {"role": "system", "text": 'On 2026-03-20 Luke sent text message: "first"',
          "timestamp": "2026-03-20"},
@@ -44,7 +45,7 @@ def test_extract_user_text_takes_last_entry():
 
     text = CognitionCore.extract_user_text(perceived)
 
-    assert text == "second"
+    assert text == "first\nsecond"
 
 
 def test_extract_user_text_empty_for_photo_only():
@@ -56,6 +57,47 @@ def test_extract_user_text_empty_for_photo_only():
     text = CognitionCore.extract_user_text(perceived)
 
     assert text == ""
+
+
+def test_extract_user_text_includes_photo_caption():
+    perceived = [
+        {
+            "role": "system",
+            "text": (
+                'On 2026-03-20 Luke sent 1 image(s) with caption "remind me at 5" :\n'
+                "[Photo 1]: a cat"
+            ),
+            "timestamp": "2026-03-20",
+        },
+    ]
+
+    text = CognitionCore.extract_user_text(perceived)
+
+    assert text == "remind me at 5"
+
+
+def test_extract_user_text_mixed_text_photo_caption_voice():
+    perceived = [
+        {"role": "system", "text": 'On 2026-03-20 Luke sent text message: "please"',
+         "timestamp": "2026-03-20"},
+        {
+            "role": "system",
+            "text": (
+                'On 2026-03-20 Luke sent 1 image(s) with caption "see this" :\n'
+                "[Photo 1]: desc"
+            ),
+            "timestamp": "2026-03-20",
+        },
+        {
+            "role": "system",
+            "text": 'On 2026-03-20 Luke sent voice message: "schedule it for 6pm"',
+            "timestamp": "2026-03-20",
+        },
+    ]
+
+    text = CognitionCore.extract_user_text(perceived)
+
+    assert text == "please\nsee this\nschedule it for 6pm"
 
 
 def test_extract_user_text_empty_for_no_entries():

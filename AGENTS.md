@@ -98,10 +98,10 @@ TBD
 **When running tests, prefer `python -m pytest` from the project root, using the interpreter in `.venv\Scripts\python.exe` or `.venv/bin/python`.**
 
 ## Coding Style and Patterns
-- It is preferable to use static methods for Core operations that don't need to be instantiated
-- It is preferable to use builder pattern for Providers 
-- It is preferable to follow "fail fast" principle for error handling
+- Methods that don't need to be instantiated should have @staticmethod decorator
+- When naming private fields and methods use PEP8 standard: "_<name>"
 - Use explicit type hints for all functions and methods
-- Use `asyncio.gather()` whenever two or more Providers/Portals are called and their inputs are independent
 - Use f-string formatting for concatenation
+- When validating settings/configs/outputs don't try to squeeze out anything, follow "fail fast" principle
 - Use logger.debug for output with potentially sensitive data: user messages, profile, active_jobs
+- Use `asyncio.gather()` whenever two or more Providers/Portals are called and their inputs are independent

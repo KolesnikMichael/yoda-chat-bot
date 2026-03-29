@@ -40,155 +40,6 @@ class Mind:
         self.agent_provider = agent_provider
         self._message_sender = None
 
-    @staticmethod
-    def _cleanup_temp_files(batch: list[PendingMessage]) -> None:
-        for msg in batch:
-            if msg.media_type == "voice" and msg.audio_file_path:
-                if os.path.exists(msg.audio_file_path):
-                    os.remove(msg.audio_file_path)
-            elif msg.media_type == "photo":
-                for path in msg.photo_file_paths:
-                    if os.path.exists(path):
-                        os.remove(path)
-                        
-    async def _classify_intent(self, chat_id: int, perceived: list[dict]) -> str:
-        if self.agent_provider and await self.agent_provider.has_pending_session(chat_id):
-            return "agent_resume"
-
-        if not self.agent_provider:
-            return "chat"
-
-        user_text = CognitionCore.extract_user_text(perceived)
-        if not user_text:
-            return "chat"
-
-        try:
-            intent_messages = CognitionCore.build_intent_messages(user_text)
-            result = await self.language_provider.parse_structured(
-                intent_messages, IntentClassification)
-            logger.debug(f"Intent classification: '{user_text[:80]}' -> {result.intent}")
-            if result.intent in ("agent_task", "chat"):
-                return result.intent
-        except Exception:
-            logger.warning("Intent classification failed, defaulting to chat", exc_info=True)
-
-        return "chat"
-
-    async def _handle_chat_reply(
-        self,
-        chat_id: int,
-        messages: list[dict],
-        system_prompt: str,
-        conversation,
-    ) -> None:
-        reply = await self.language_provider.reply_in_conversation(messages)
-        reply_timestamp = f"{dtm.datetime.now(dtm.UTC)}"
-        conversation, _ = MemoryCore.add_conversation_line(
-            conversation=conversation,
-            chat_id=chat_id,
-            role="assistant",
-            line=reply,
-            system_prompt=system_prompt,
-            timestamp=reply_timestamp,
-        )
-        self.memory_provider.save_conversation(conversation)
-        if self._message_sender:
-            await self._message_sender(chat_id, reply)
-
-    async def _handle_agent_task(
-        self,
-        chat_id: int,
-        user_id: int,
-        user_text: str,
-        system_prompt: str,
-        conversation,
-    ) -> None:
-        profile = await self.memory_provider.get_user_profile(user_id, chat_id)
-        result = await self.agent_provider.run(
-            task=user_text, profile=profile, chat_id=chat_id, user_id=user_id)
-        await self._handle_agent_result(
-            chat_id, result, system_prompt, conversation)
-
-    async def _handle_agent_resume(
-        self,
-        chat_id: int,
-        user_text: str,
-        system_prompt: str,
-        conversation,
-    ) -> None:
-        result = await self.agent_provider.resume(chat_id, user_text)
-        await self._handle_agent_result(
-            chat_id, result, system_prompt, conversation)
-
-    async def _handle_agent_result(
-        self, chat_id: int, result, system_prompt: str, conversation,
-    ) -> None:
-        if result.clarification:
-            line = f"Ask the user (rephrase naturally in your voice): {result.clarification}"
-        elif result.answer:
-            line = f"Agent completed a task. Result: {result.answer}. Communicate this to the user naturally"
-        else:
-            return
-
-        line = f"{line}. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
-
-        conversation, messages = MemoryCore.add_conversation_line(
-            conversation=conversation,
-            chat_id=chat_id,
-            role="system",
-            line=line,
-            system_prompt=system_prompt,
-            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
-        )
-        self.memory_provider.save_conversation(conversation)
-
-        if messages:
-            reply = await self.language_provider.reply_in_conversation(messages)
-            conversation, _ = MemoryCore.add_conversation_line(
-                conversation=conversation,
-                chat_id=chat_id,
-                role="assistant",
-                line=reply,
-                system_prompt=system_prompt,
-                timestamp=f"{dtm.datetime.now(dtm.UTC)}",
-            )
-            self.memory_provider.save_conversation(conversation)
-            if self._message_sender:
-                await self._message_sender(chat_id, reply)
-
-    async def _perceive_message(self, msg: PendingMessage, chat_type: str) -> dict:
-        if msg.media_type == "text":
-            text = CognitionCore.normalize_user_text(msg.text)
-            sender = msg.user_info.get("first_name", "User")
-            text = f'On {msg.timestamp} {sender} sent text message: "{text}"'
-
-        if msg.media_type == "voice":
-            wav_path = await asyncio.to_thread(
-                AudioCore.convert_ogg_to_wav, Path(msg.audio_file_path))
-            text = await self.audio_provider.speech_to_text(audio_file_path=wav_path)
-            text = CognitionCore.normalize_user_text(text)
-            sender = msg.user_info.get("first_name", "User")
-            text = f'On {msg.timestamp} {sender} sent voice message: "{text}"'
-            if os.path.exists(wav_path):
-                os.remove(wav_path)
-
-        if msg.media_type == "photo":
-            descriptions = await asyncio.gather(
-                *(self.vision_provider.image_to_description(p)
-                  for p in msg.photo_file_paths)
-            )
-            combined = "\n".join(
-                f"[Photo {i+1}]: {desc}" for i, desc in enumerate(descriptions)
-            )
-            caption_part = f' with caption "{msg.caption}" ' if msg.caption else ""
-            sender = msg.user_info.get("first_name", "User")
-            text = f"On {msg.timestamp} {sender} sent {len(descriptions)} image(s){caption_part}:\n{combined}"
-
-        if text is None:
-            raise ValueError(f"Unknown media type: {msg.media_type}")
-        else:
-            return {"role": "system", "text": text, "timestamp": msg.timestamp}
-
     def bind_message_sender(self, message_sender) -> None:
         self._message_sender = message_sender
 
@@ -278,3 +129,154 @@ class Mind:
             self.memory_provider.save_conversation(conversation)
             if self._message_sender:
                 await self._message_sender(chat_id, reply)
+
+    @staticmethod
+    def _cleanup_temp_files(batch: list[PendingMessage]) -> None:
+        for msg in batch:
+            if msg.media_type == "voice" and msg.audio_file_path:
+                if os.path.exists(msg.audio_file_path):
+                    os.remove(msg.audio_file_path)
+            elif msg.media_type == "photo":
+                for path in msg.photo_file_paths:
+                    if os.path.exists(path):
+                        os.remove(path)
+                        
+    async def _classify_intent(self, chat_id: int, perceived: list[dict]) -> str:
+        if self.agent_provider and await self.agent_provider.has_pending_session(chat_id):
+            return "agent_resume"
+
+        if not self.agent_provider:
+            return "chat"
+
+        user_text = CognitionCore.extract_user_text(perceived)
+        if not user_text:
+            return "chat"
+
+        try:
+            intent_messages = CognitionCore.build_intent_messages(user_text)
+            result = await self.language_provider.parse_structured(
+                intent_messages, IntentClassification)
+            logger.debug(f"Intent classification: '{user_text[:80]}' -> {result.intent}")
+            if result.intent in ("agent_task", "chat"):
+                return result.intent
+        except Exception:
+            logger.warning("Intent classification failed, defaulting to chat", exc_info=True)
+
+        return "chat"
+
+    async def _perceive_message(self, msg: PendingMessage, chat_type: str) -> dict:
+        if msg.media_type == "text":
+            text = CognitionCore.normalize_user_text(msg.text)
+            sender = msg.user_info.get("first_name", "User")
+            text = f'On {msg.timestamp} {sender} sent text message: "{text}"'
+
+        if msg.media_type == "voice":
+            wav_path = await asyncio.to_thread(
+                AudioCore.convert_ogg_to_wav, Path(msg.audio_file_path))
+            text = await self.audio_provider.speech_to_text(audio_file_path=wav_path)
+            text = CognitionCore.normalize_user_text(text)
+            sender = msg.user_info.get("first_name", "User")
+            text = f'On {msg.timestamp} {sender} sent voice message: "{text}"'
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+
+        if msg.media_type == "photo":
+            descriptions = await asyncio.gather(
+                *(self.vision_provider.image_to_description(p)
+                  for p in msg.photo_file_paths)
+            )
+            combined = "\n".join(
+                f"[Photo {i+1}]: {desc}" for i, desc in enumerate(descriptions)
+            )
+            caption_part = f' with caption "{msg.caption}"' if msg.caption else ""
+            sender = msg.user_info.get("first_name", "User")
+            text = f"On {msg.timestamp} {sender} sent {len(descriptions)} image(s){caption_part}:\n{combined}"
+
+        if text is None:
+            raise ValueError(f"Unknown media type: {msg.media_type}")
+        else:
+            return {"role": "system", "text": text, "timestamp": msg.timestamp}
+        
+    async def _handle_chat_reply(
+        self,
+        chat_id: int,
+        messages: list[dict],
+        system_prompt: str,
+        conversation,
+    ) -> None:
+        reply = await self.language_provider.reply_in_conversation(messages)
+        reply_timestamp = f"{dtm.datetime.now(dtm.UTC)}"
+        conversation, _ = MemoryCore.add_conversation_line(
+            conversation=conversation,
+            chat_id=chat_id,
+            role="assistant",
+            line=reply,
+            system_prompt=system_prompt,
+            timestamp=reply_timestamp,
+        )
+        self.memory_provider.save_conversation(conversation)
+        if self._message_sender:
+            await self._message_sender(chat_id, reply)
+
+    async def _handle_agent_task(
+        self,
+        chat_id: int,
+        user_id: int,
+        user_text: str,
+        system_prompt: str,
+        conversation,
+    ) -> None:
+        profile = await self.memory_provider.get_user_profile(user_id, chat_id)
+        result = await self.agent_provider.run(
+            task=user_text, profile=profile, chat_id=chat_id, user_id=user_id)
+        await self._handle_agent_result(
+            chat_id, result, system_prompt, conversation)
+
+    async def _handle_agent_resume(
+        self,
+        chat_id: int,
+        user_text: str,
+        system_prompt: str,
+        conversation,
+    ) -> None:
+        result = await self.agent_provider.resume(chat_id, user_text)
+        await self._handle_agent_result(
+            chat_id, result, system_prompt, conversation)
+
+    async def _handle_agent_result(
+        self, chat_id: int, result, system_prompt: str, conversation,
+    ) -> None:
+        if result.clarification:
+            line = f"Ask the user (rephrase naturally in your voice): {result.clarification}"
+        elif result.answer:
+            line = f"Agent completed a task. Result: {result.answer}. Communicate this to the user naturally"
+        else:
+            return
+
+        line = f"{line}. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+
+        conversation, messages = MemoryCore.add_conversation_line(
+            conversation=conversation,
+            chat_id=chat_id,
+            role="system",
+            line=line,
+            system_prompt=system_prompt,
+            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+        )
+        self.memory_provider.save_conversation(conversation)
+
+        if messages:
+            reply = await self.language_provider.reply_in_conversation(messages)
+            conversation, _ = MemoryCore.add_conversation_line(
+                conversation=conversation,
+                chat_id=chat_id,
+                role="assistant",
+                line=reply,
+                system_prompt=system_prompt,
+                timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+            )
+            self.memory_provider.save_conversation(conversation)
+            if self._message_sender:
+                await self._message_sender(chat_id, reply)
+
+        

@@ -4,7 +4,6 @@ from yoda.mind.agent.data.agent_data import (
     AgentContext,
     SkillSpec,
     SkillSummary,
-    ToolResult,
 )
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.memory.data.user_profile import UserProfile
@@ -44,7 +43,13 @@ def _make_context() -> AgentContext:
             instructions="Do it",
             max_iterations=3,
         ),
-        history=[ToolResult(tool_name="ask_user", output="Europe/Moscow", success=True)],
+        messages=[
+            {"role": "user", "content": "Task: remind me to call mom"},
+            {"role": "assistant", "content": '{"selected_skill": "schedule_message"}'},
+            {"role": "user", "content": "Skill activated."},
+            {"role": "assistant", "content": '{"tool_calls": []}'},
+            {"role": "user", "content": "User was asked: What timezone?"},
+        ],
         iteration=1,
         tools_used=["ask_user"],
     )
@@ -65,8 +70,9 @@ async def test_save_and_load_roundtrip():
     assert loaded.profile.timezone == "Europe/Moscow"
     assert loaded.profile.nickname == "Luke"
     assert loaded.active_skill.name == "schedule_message"
-    assert len(loaded.history) == 1
-    assert loaded.history[0].tool_name == "ask_user"
+    assert len(loaded.messages) == 5
+    assert loaded.messages[0]["role"] == "user"
+    assert loaded.messages[1]["role"] == "assistant"
     assert loaded.iteration == 1
     assert loaded.tools_used == ["ask_user"]
 

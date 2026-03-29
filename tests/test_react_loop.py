@@ -39,119 +39,194 @@ def _make_context(**overrides) -> AgentContext:
     return AgentContext(**(defaults | overrides))
 
 
-def test_build_context_selection_phase_includes_catalog():
-    context = _make_context()
-    messages = ReactLoop.build_context(context, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
+# --- build_context ---
 
-    system_msg = messages[0]["content"]
-    assert "schedule_message" in system_msg
-    assert "web_search" in system_msg
-    assert "Select the best skill" in system_msg
+def test_build_context_returns_system_plus_messages():
+    ctx = _make_context(messages=[
+        {"role": "user", "content": "Task: test"},
+        {"role": "assistant", "content": '{"reasoning": "ok"}'},
+    ])
+    result = ReactLoop.build_context(ctx, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
 
-
-def test_build_context_execution_phase_includes_skill_and_tools():
-    context = _make_context(active_skill=SKILL_SPEC)
-    messages = ReactLoop.build_context(context, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
-
-    system_msg = messages[0]["content"]
-    assert "Active skill: schedule_message" in system_msg
-    assert "reminder_text" in system_msg
-    assert "Follow the active skill" in system_msg
+    assert result[0]["role"] == "system"
+    assert result[1] == {"role": "user", "content": "Task: test"}
+    assert result[2]["role"] == "assistant"
+    assert len(result) == 3
 
 
-def test_build_context_includes_profile_timezone():
-    context = _make_context(active_skill=SKILL_SPEC)
-    messages = ReactLoop.build_context(context, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
+def test_build_context_system_prompt_has_tools_and_profile():
+    ctx = _make_context()
+    result = ReactLoop.build_context(ctx, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
 
-    system_msg = messages[0]["content"]
-    assert "Europe/Moscow" in system_msg
+    system = result[0]["content"]
+    assert "schedule_message" in system
+    assert "ask_user" in system
+    assert "Europe/Moscow" in system
+    assert "2026-03-20 15:00 UTC" in system
 
 
-def test_build_context_notes_missing_timezone():
-    context = _make_context(
-        active_skill=SKILL_SPEC,
-        profile=UserProfile(),
+def test_build_context_system_prompt_notes_missing_timezone():
+    ctx = _make_context(profile=UserProfile())
+    result = ReactLoop.build_context(ctx, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
+
+    system = result[0]["content"]
+    assert "no timezone or location on file" in system
+
+
+# --- build_selection_message ---
+
+def test_build_selection_message_contains_task_and_catalog():
+    msg = ReactLoop.build_selection_message("find weather", CATALOG)
+
+    assert msg["role"] == "user"
+    assert "find weather" in msg["content"]
+    assert "schedule_message" in msg["content"]
+    assert "web_search" in msg["content"]
+    assert "Select the best skill" in msg["content"]
+
+
+def test_build_selection_message_empty_catalog():
+    msg = ReactLoop.build_selection_message("test", [])
+
+    assert "No skills available" in msg["content"]
+
+
+# --- build_activation_message ---
+
+def test_build_activation_message_contains_skill_spec():
+    msg = ReactLoop.build_activation_message(SKILL_SPEC)
+
+    assert msg["role"] == "user"
+    assert "schedule_message" in msg["content"]
+    assert "Schedule a reminder" in msg["content"]
+    assert "reminder_text" in msg["content"]
+    assert "Call schedule_message" in msg["content"]
+    assert "execute" in msg["content"].lower()
+
+
+# --- append_assistant ---
+
+def test_append_assistant_adds_message():
+    ctx = _make_context(messages=[
+        {"role": "user", "content": "Task: test"},
+    ])
+    decision = Decision(
+        selected_skill="schedule_message",
+        reasoning="selecting skill",
     )
-    messages = ReactLoop.build_context(context, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
 
-    system_msg = messages[0]["content"]
-    assert "no timezone or location on file" in system_msg
+    new_ctx = ReactLoop.append_assistant(ctx, decision)
+
+    assert len(new_ctx.messages) == 2
+    assert new_ctx.messages[1]["role"] == "assistant"
+    assert "schedule_message" in new_ctx.messages[1]["content"]
 
 
-def test_build_context_includes_history():
-    context = _make_context(
-        active_skill=SKILL_SPEC,
-        history=[ToolResult(tool_name="ask_user", output="Europe/Moscow", success=True)],
-    )
-    messages = ReactLoop.build_context(context, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
+def test_append_assistant_does_not_mutate_original():
+    ctx = _make_context(messages=[
+        {"role": "user", "content": "Task: test"},
+    ])
+    decision = Decision(reasoning="test")
 
-    history_msgs = [m for m in messages if "User answered:" in m["content"]]
-    assert len(history_msgs) == 1
-    assert "Europe/Moscow" in history_msgs[0]["content"]
+    new_ctx = ReactLoop.append_assistant(ctx, decision)
 
+    assert len(ctx.messages) == 1
+    assert len(new_ctx.messages) == 2
+    assert new_ctx is not ctx
+
+
+# --- append_tool_results ---
+
+def test_append_tool_results_adds_messages_and_increments():
+    ctx = _make_context(active_skill=SKILL_SPEC, messages=[
+        {"role": "user", "content": "Task: test"},
+    ])
+    results = [
+        ToolResult(tool_name="schedule_message", output="OK", success=True),
+    ]
+
+    new_ctx = ReactLoop.append_tool_results(ctx, results)
+
+    assert new_ctx.iteration == 1
+    assert len(new_ctx.messages) == 2
+    assert new_ctx.messages[1]["role"] == "system"
+    assert "[schedule_message] (OK)" in new_ctx.messages[1]["content"]
+    assert "schedule_message" in new_ctx.tools_used
+
+
+def test_append_tool_results_does_not_mutate_original():
+    ctx = _make_context(active_skill=SKILL_SPEC)
+    results = [ToolResult(tool_name="schedule_message", output="OK", success=True)]
+
+    new_ctx = ReactLoop.append_tool_results(ctx, results)
+
+    assert ctx.iteration == 0
+    assert len(ctx.messages) == 0
+    assert new_ctx is not ctx
+
+
+def test_append_tool_results_ask_user_format():
+    ctx = _make_context(active_skill=SKILL_SPEC)
+    results = [ToolResult(tool_name="ask_user", output="What timezone?", success=True)]
+
+    new_ctx = ReactLoop.append_tool_results(ctx, results)
+
+    assert "User was asked: What timezone?" in new_ctx.messages[0]["content"]
+
+
+def test_append_tool_results_failed_tool():
+    ctx = _make_context(active_skill=SKILL_SPEC)
+    results = [ToolResult(tool_name="schedule_message", output="error", success=False)]
+
+    new_ctx = ReactLoop.append_tool_results(ctx, results)
+
+    assert "(FAILED)" in new_ctx.messages[0]["content"]
+
+
+# --- validate_decision ---
 
 def test_validate_decision_rejects_unknown_skill():
-    context = _make_context()
+    ctx = _make_context()
     decision = Decision(selected_skill="nonexistent_skill")
 
     validated = ReactLoop.validate_decision(
-        decision, context, {"schedule_message", "ask_user"})
+        decision, ctx, {"schedule_message", "ask_user"})
 
     assert validated.final_answer is not None
     assert "Unknown skill" in validated.final_answer
 
 
 def test_validate_decision_passes_valid_skill():
-    context = _make_context()
+    ctx = _make_context()
     decision = Decision(selected_skill="schedule_message")
 
     validated = ReactLoop.validate_decision(
-        decision, context, {"schedule_message", "ask_user"})
+        decision, ctx, {"schedule_message", "ask_user"})
 
     assert validated.selected_skill == "schedule_message"
     assert validated.final_answer is None
 
 
 def test_validate_decision_rejects_unknown_tool():
-    context = _make_context(active_skill=SKILL_SPEC)
+    ctx = _make_context(active_skill=SKILL_SPEC)
     decision = Decision(tool_calls=[
         ToolCallRequest(tool_name="nonexistent_tool", arguments={}),
     ])
 
     validated = ReactLoop.validate_decision(
-        decision, context, {"schedule_message", "ask_user"})
+        decision, ctx, {"schedule_message", "ask_user"})
 
     assert validated.final_answer is not None
     assert "Unknown tool" in validated.final_answer
 
 
-def test_observe_increments_iteration_and_appends_history():
-    context = _make_context(active_skill=SKILL_SPEC)
-    results = [ToolResult(tool_name="schedule_message", output="OK", success=True)]
-
-    new_context = ReactLoop.observe(context, results)
-
-    assert new_context.iteration == 1
-    assert len(new_context.history) == 1
-    assert "schedule_message" in new_context.tools_used
-
-
-def test_observe_does_not_mutate_original():
-    context = _make_context(active_skill=SKILL_SPEC)
-    results = [ToolResult(tool_name="schedule_message", output="OK", success=True)]
-
-    new_context = ReactLoop.observe(context, results)
-
-    assert context.iteration == 0
-    assert len(context.history) == 0
-    assert new_context is not context
-
+# --- is_done ---
 
 def test_is_done_respects_max_iterations():
-    context = _make_context(active_skill=SKILL_SPEC, iteration=3)
-    assert ReactLoop.is_done(context) is True
+    ctx = _make_context(active_skill=SKILL_SPEC, iteration=3)
+    assert ReactLoop.is_done(ctx) is True
 
 
 def test_is_done_false_within_limit():
-    context = _make_context(active_skill=SKILL_SPEC, iteration=2)
-    assert ReactLoop.is_done(context) is False
+    ctx = _make_context(active_skill=SKILL_SPEC, iteration=2)
+    assert ReactLoop.is_done(ctx) is False

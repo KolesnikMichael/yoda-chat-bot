@@ -14,7 +14,7 @@ class FakeMemoryProvider:
     def __init__(self):
         self.sender_updates = []
         self.chat_updates = []
-        self.conversations: dict[str, Conversation] = {}
+        self._conversations: dict[str, Conversation] = {}
 
     async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
         self.sender_updates.append((user_id, chat_id, user_info))
@@ -24,11 +24,11 @@ class FakeMemoryProvider:
 
     def get_conversation(self, chat_id: int) -> Conversation | None:
         key = MemoryCore.conversation_key(chat_id)
-        return self.conversations.get(key)
+        return self._conversations.get(key)
 
     def save_conversation(self, conversation: Conversation) -> None:
         key = MemoryCore.conversation_key(conversation.chat_id)
-        self.conversations[key] = conversation
+        self._conversations[key] = conversation
 
 
 class FakeLanguageProvider:
