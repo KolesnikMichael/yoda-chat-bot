@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+import yoda.api.scheduler_api as scheduler_module
 from yoda.mind.agent.data.agent_data import ToolCall, ToolResult
 from yoda.mind.agent.tools.ask_user_tool import AskUserTool
 
@@ -33,11 +34,12 @@ class FakeSchedulerApi:
         self.scheduled = []
         self._live_job_ids: set[str] = set()
 
-    def schedule_once(self, job_id, run_date, chat_id, text):
+    def schedule_once(self, job_id, run_date, chat_id, user_id, text):
         self.scheduled.append({
             "job_id": job_id,
             "run_date": run_date,
             "chat_id": chat_id,
+            "user_id": user_id,
             "text": text,
         })
         self._live_job_ids.add(job_id)
@@ -108,6 +110,7 @@ async def test_scheduler_tool_schedules_reminder():
     assert len(scheduler_api.scheduled) == 1
     job = scheduler_api.scheduled[0]
     assert job["chat_id"] == 42
+    assert job["user_id"] == 0
     assert job["text"] == "call mom"
 
     job_keys = [k for k in storage_api.data if k.startswith("active_jobs:")]
@@ -115,6 +118,7 @@ async def test_scheduler_tool_schedules_reminder():
     stored = json.loads(list(storage_api.data[job_keys[0]].values())[0])
     assert stored["description"] == "call mom"
     assert stored["type"] == "once"
+    assert stored["user_id"] == 0
 
 
 @pytest.mark.asyncio
@@ -131,7 +135,7 @@ async def test_scheduler_tool_delay_minutes():
             "reminder_text": "wake up",
             "delay_minutes": 30,
         },
-        metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        metadata={"chat_id": 42, "user_id": 777, "profile_timezone": "Europe/Moscow"},
     )
 
     result = await tool.execute(call)
@@ -141,11 +145,13 @@ async def test_scheduler_tool_delay_minutes():
     assert "30 minutes" in result.output
     assert len(scheduler_api.scheduled) == 1
     assert scheduler_api.scheduled[0]["chat_id"] == 42
+    assert scheduler_api.scheduled[0]["user_id"] == 777
 
     job_keys = [k for k in storage_api.data if k.startswith("active_jobs:")]
     assert len(job_keys) == 1
     stored = json.loads(list(storage_api.data[job_keys[0]].values())[0])
     assert stored["timezone"] == "Europe/Moscow"
+    assert stored["user_id"] == 777
 
 
 @pytest.mark.asyncio
@@ -286,6 +292,28 @@ async def test_scheduler_tool_rejects_invalid_date():
 
     assert result.success is False
     assert "date" in result.output.lower() or "Invalid" in result.output
+
+
+@pytest.mark.asyncio
+async def test_fire_job_passes_user_id_and_cleans_up_once():
+    delivered = []
+    cleaned = []
+
+    async def delivery(chat_id, user_id, text):
+        delivered.append((chat_id, user_id, text))
+
+    async def cleanup(chat_id, job_id):
+        cleaned.append((chat_id, job_id))
+
+    scheduler_module._delivery_callback = delivery
+    scheduler_module._cleanup_callback = cleanup
+
+    await scheduler_module._fire_job(42, 777, "call mom", "job_1", "once")
+
+    assert delivered == [(42, 777, "call mom")]
+    assert cleaned == [(42, "job_1")]
+    scheduler_module._delivery_callback = None
+    scheduler_module._cleanup_callback = None
 
 
 # --- UpdateProfileTool tests ---

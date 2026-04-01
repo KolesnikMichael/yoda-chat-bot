@@ -1,50 +1,19 @@
 import pytest
 
 from yoda.mind.affect import AffectProvider
-from yoda.mind.memory.memory import MemoryCore
-from yoda.mind.memory.data.conversation import Conversation
-from yoda.mind.memory.data.pending_message import PendingMessage
-from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.mind import Mind
+from yoda.mind.memory.data.pending_message import PendingMessage
 from yoda.mind.agent.data.agent_data import AgentResult
-from yoda.mind.cognition import IntentClassification
+from yoda.mind.perception.perception import Perception
 
-
-class FakeMemoryProvider:
-    def __init__(self):
-        self.sender_updates = []
-        self.chat_updates = []
-        self._conversations: dict[str, Conversation] = {}
-
-    async def update_sender_info(self, user_id, chat_id, user_info):
-        self.sender_updates.append((user_id, chat_id, user_info))
-
-    async def update_chat_info(self, chat_id, chat_type, last_active):
-        self.chat_updates.append((chat_id, chat_type, last_active))
-
-    def get_conversation(self, chat_id):
-        key = MemoryCore.conversation_key(chat_id)
-        return self._conversations.get(key)
-
-    def save_conversation(self, conversation):
-        key = MemoryCore.conversation_key(conversation.chat_id)
-        self._conversations[key] = conversation
-
-    async def get_user_profile(self, user_id, chat_id):
-        return UserProfile(timezone="Europe/Moscow")
-
-
-class FakeLanguageProvider:
-    def __init__(self, intent="chat"):
-        self._intent = intent
-        self.reply_calls = []
-
-    async def reply_in_conversation(self, conversation):
-        self.reply_calls.append(conversation)
-        return f"reply:{conversation[-1]['content']}"
-
-    async def parse_structured(self, messages, response_format):
-        return IntentClassification(intent=self._intent)
+from tests.fakes import (
+    FakeAudioProvider,
+    FakeCognitionProvider,
+    FakeLanguageProvider,
+    FakeMemoryProvider,
+    FakeSender,
+    FakeVisionProvider,
+)
 
 
 class FakeAgentProvider:
@@ -66,14 +35,6 @@ class FakeAgentProvider:
         return self._result
 
 
-class FakeSender:
-    def __init__(self):
-        self.calls = []
-
-    async def __call__(self, chat_id, message):
-        self.calls.append((chat_id, message))
-
-
 def _make_pending(text="Hello", user_id=1) -> PendingMessage:
     return PendingMessage(
         user_id=user_id,
@@ -88,17 +49,25 @@ def _make_pending(text="Hello", user_id=1) -> PendingMessage:
     )
 
 
+def _default_perception() -> Perception:
+    return Perception(
+        audio_provider=FakeAudioProvider(),
+        vision_provider=FakeVisionProvider(),
+    )
+
+
 def _build_mind(intent="chat", agent_result=None, has_session=False):
-    lang = FakeLanguageProvider(intent=intent)
+    lang = FakeLanguageProvider()
+    cognition = FakeCognitionProvider(intent=intent)
     agent = FakeAgentProvider(result=agent_result, has_session=has_session)
     memory = FakeMemoryProvider()
     sender = FakeSender()
     mind = Mind(
         language_provider=lang,
-        vision_provider=None,
-        audio_provider=None,
+        perception=_default_perception(),
         memory_provider=memory,
         affect_provider=AffectProvider(),
+        cognition_provider=cognition,
         agent_provider=agent,
     )
     mind.bind_message_sender(sender)
@@ -163,15 +132,15 @@ async def test_agent_clarification_prompts_user():
 
 @pytest.mark.asyncio
 async def test_no_agent_provider_defaults_to_chat():
-    lang = FakeLanguageProvider(intent="agent_task")
+    lang = FakeLanguageProvider()
     memory = FakeMemoryProvider()
     sender = FakeSender()
     mind = Mind(
         language_provider=lang,
-        vision_provider=None,
-        audio_provider=None,
+        perception=_default_perception(),
         memory_provider=memory,
         affect_provider=AffectProvider(),
+        cognition_provider=None,
     )
     mind.bind_message_sender(sender)
 
@@ -188,14 +157,14 @@ async def test_deliver_scheduled_reminder():
     sender = FakeSender()
     mind = Mind(
         language_provider=lang,
-        vision_provider=None,
-        audio_provider=None,
+        perception=_default_perception(),
         memory_provider=memory,
         affect_provider=AffectProvider(),
+        cognition_provider=None,
     )
     mind.bind_message_sender(sender)
 
-    await mind.deliver_scheduled_reminder(42, "call mom")
+    await mind.deliver_scheduled_reminder(42, 42, "call mom")
 
     assert len(sender.calls) == 1
     assert "call mom" in sender.calls[0][1]
@@ -203,3 +172,25 @@ async def test_deliver_scheduled_reminder():
     assert conversation is not None
     system_msgs = [m for m in conversation.messages if m.role == "system"]
     assert any("call mom" in m.text for m in system_msgs)
+    assert "private Telegram chat" in conversation.messages[0].text
+
+
+@pytest.mark.asyncio
+async def test_deliver_scheduled_reminder_group_prompt():
+    lang = FakeLanguageProvider()
+    memory = FakeMemoryProvider()
+    sender = FakeSender()
+    mind = Mind(
+        language_provider=lang,
+        perception=_default_perception(),
+        memory_provider=memory,
+        affect_provider=AffectProvider(),
+        cognition_provider=None,
+    )
+    mind.bind_message_sender(sender)
+
+    await mind.deliver_scheduled_reminder(1000, 42, "team sync")
+
+    conversation = memory.get_conversation(1000)
+    assert conversation is not None
+    assert "Telegram group chat" in conversation.messages[0].text

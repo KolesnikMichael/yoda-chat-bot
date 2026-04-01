@@ -1,4 +1,10 @@
+import logging
+
 from pydantic import BaseModel
+
+from yoda.mind.perception.language import LanguageProvider
+
+logger = logging.getLogger(__name__)
 
 INTENT_CLASSIFICATION_PROMPT = (
     "Classify the user's intent from one or more messages. "
@@ -64,3 +70,20 @@ class CognitionCore:
                 if end != -1:
                     return line[start:end]
         return ""
+
+
+class CognitionProvider:
+    """Provider (async): LLM-based intent classification for agent routing."""
+
+    def __init__(self, language_provider: LanguageProvider):
+        self._llm = language_provider
+
+    async def classify_intent(self, user_text: str) -> str:
+        intent_messages = CognitionCore.build_intent_messages(user_text)
+        result = await self._llm.parse_structured(
+            intent_messages, IntentClassification)
+        logger.debug(
+            f"Intent classification: '{user_text[:80]}' -> {result.intent}")
+        if result.intent in ("agent_task", "chat"):
+            return result.intent
+        return "pass"

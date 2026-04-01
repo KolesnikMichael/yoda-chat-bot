@@ -12,11 +12,11 @@ _delivery_callback: Callable[..., Coroutine[Any, Any, None]] | None = None
 _cleanup_callback: Callable[..., Coroutine[Any, Any, None]] | None = None
 
 
-async def _fire_job(chat_id: int, text: str, job_id: str, job_type: str) -> None:
+async def _fire_job(chat_id: int, user_id: int, text: str, job_id: str, job_type: str) -> None:
     if _delivery_callback is None:
         logger.error("Delivery callback not set, cannot deliver scheduled message")
         return
-    await _delivery_callback(chat_id, text)
+    await _delivery_callback(chat_id, user_id, text)
     if _cleanup_callback and job_type == "once":
         await _cleanup_callback(chat_id, job_id)
 
@@ -51,17 +51,18 @@ class SchedulerApi:
         job_id: str,
         run_date: datetime,
         chat_id: int,
+        user_id: int,
         text: str,
     ) -> None:
         self._scheduler.add_job(
             func=_fire_job,
             trigger="date",
             run_date=run_date,
-            args=[chat_id, text, job_id, "once"],
+            args=[chat_id, user_id, text, job_id, "once"],
             id=job_id,
             replace_existing=True,
         )
-        logger.info(f"Scheduled one-time job {job_id} at {run_date} for chat {chat_id}")
+        logger.info(f"Scheduled one-time job {job_id} at {run_date} for user {user_id} in chat {chat_id}")
 
     def get_job_ids(self) -> set[str]:
         return {job.id for job in self._scheduler.get_jobs()}

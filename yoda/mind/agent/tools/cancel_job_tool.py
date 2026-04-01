@@ -18,7 +18,6 @@ class CancelJobParams(BaseModel):
 class CancelJobTool(Tool):
     name = "cancel_job"
     parameters_schema = CancelJobParams
-    terminal = False
 
     def __init__(self, scheduler_api: SchedulerApi, storage_api: StorageApi):
         self._scheduler_api = scheduler_api

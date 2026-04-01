@@ -9,6 +9,7 @@ IODA governs the runtime (pipelines, tool execution, state). Skills are declarat
 ## Architectural Layers
 
 ```
+Perception (Integration)
 Mind (IODA Integration)
   → AgentProvider (IODA Façade + Integration)
     → ReactLoop (IODA Core) — builds context, validates decisions
@@ -181,7 +182,7 @@ The two LLMs don't know about each other. They communicate via Conversation (Dat
 
 ### Intent classification
 
-Mind classifies intent via LLM with awareness of pending agent sessions:
+Mind routes by pending agent session, then delegates LLM classification to `CognitionProvider`:
 - `"chat"` — Yoda answers directly
 - `"agent_task"` — full delegation to Executor via `AgentProvider.run()`
 - `"agent_resume"` — pending session exists, user's message is an answer → `AgentProvider.resume()`

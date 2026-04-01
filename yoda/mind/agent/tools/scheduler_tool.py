@@ -53,6 +53,7 @@ class SchedulerTool(Tool):
                 output="Missing chat_id in metadata",
                 success=False,
             )
+        user_id = call.metadata.get("user_id", 0)
 
         tz_for_meta = self._effective_timezone_name(params, call)
 
@@ -84,6 +85,7 @@ class SchedulerTool(Tool):
             job_id=job_id,
             run_date=utc_dt,
             chat_id=chat_id,
+            user_id=user_id,
             text=params.reminder_text,
         )
 
@@ -94,6 +96,7 @@ class SchedulerTool(Tool):
             description=params.reminder_text,
             deliver_at_utc=utc_dt.isoformat(),
             timezone=tz_for_meta,
+            user_id=user_id,
         )
 
         return ToolResult(
@@ -170,6 +173,7 @@ class SchedulerTool(Tool):
         description: str,
         deliver_at_utc: str,
         timezone: str,
+        user_id: int,
     ) -> None:
         metadata = json.dumps({
             "job_id": job_id,
@@ -177,6 +181,7 @@ class SchedulerTool(Tool):
             "description": description,
             "deliver_at_utc": deliver_at_utc,
             "timezone": timezone,
+            "user_id": user_id,
         })
         key = f"{ACTIVE_JOBS_KEY_PREFIX}:{chat_id}"
         await self._storage_api.hset(key, job_id, metadata)

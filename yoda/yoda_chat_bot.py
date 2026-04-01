@@ -16,6 +16,8 @@ os.environ["PATH"] += os.pathsep + str(_project_root / "bin")
 from yoda.mind.perception.vision import VisionProvider
 from yoda.mind.perception.language import LanguageProvider
 from yoda.mind.perception.audio import AudioProvider
+from yoda.mind.perception.perception import Perception
+from yoda.mind.cognition import CognitionProvider
 from yoda.mind.mind import Mind
 from yoda.mind.memory.memory import MemoryProvider
 from yoda.mind.memory.data.emotional_state import EmotionalState
@@ -154,12 +156,18 @@ def main() -> None:
         session_provider=session_provider,
     )
 
+    perception = Perception(
+        audio_provider=audio_provider,
+        vision_provider=vision_provider,
+    )
+    cognition_provider = CognitionProvider(language_provider=language_provider)
+
     mind = Mind(
         language_provider=language_provider,
-        vision_provider=vision_provider,
-        audio_provider=audio_provider,
+        perception=perception,
         memory_provider=memory_provider,
         affect_provider=affect_provider,
+        cognition_provider=cognition_provider,
         agent_provider=agent_provider,
     )
 

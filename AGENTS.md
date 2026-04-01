@@ -25,7 +25,8 @@ There are two key differences between IODA and other widely adopted Hexagonal, O
 **Key rules:**
 - **No functional dependencies between Operations.** If Op A needs data from Op B — the Integration passes it explicitly as a parameter.
 - **An Integration may call other Integrations** to compose complex workflows from simpler pipelines. Each sub-Integration follows the same rules: no business logic, only calls and awaits.
-- Class naming convention: `*Core` for Core operations, `*Provider` for Providers, `*Portal` for Portals. This makes the IODA sub-type immediately visible from the class name.
+- Class naming convention for **Operations**: `*Core` for Core operations, `*Provider` for Providers, `*Portal` for Portals. This makes the IODA sub-type immediately visible from the class name.
+- Class naming convention for **Integrations**: use a **bare noun** (e.g. `Mind`, `Perception`) — no `*Core`, `*Provider`, or `*Portal` suffix. That keeps Integrations visually distinct from the three Operation sub-types.
 
 ### Inside Agent Module: IODA Runtime + Declarative Skills
 The agent module uses IODA for the runtime (pipelines, tool execution, state) and declarative skill specs for behavior. Skills are markdown files loaded at runtime. Tools are typed async adapters with an optional `terminal` flag (loop auto-exits after a terminal tool succeeds). Two-phase token optimization: compact skill catalog on every turn, full spec only for the selected skill. Infrastructure tools (`ask_user`, `update_profile`) are available to all skills.
@@ -50,11 +51,12 @@ embodiment/
 mind/
   mind.py               # Integration (async): orchestrates Mind pipelines
 
-  perception/             
+  perception/
+    perception.py       # Integration (async): orchestrates text/voice/photo into perceived lines
     language.py         # Provider (async): uses LLM API for completions
     audio.py            # Provider (async): uses Google library for speech-to-text conversion
     vision.py           # Provider (async): uses vision AI model API for image-to-text conversion
-    
+
   memory/
     memory.py           # MemoryCore (sync, static): extracts facts, builds profile;
                         # MemoryProvider (async): owns in-memory conversations and storage API
@@ -65,7 +67,8 @@ mind/
       message.py        # Data: Message { role, text, media_type, timestamp }
       emotional_state.py  # Data: EmotionalState { glad, mad, sad, scared }
       
-  cognition.py          # CognitionCore (sync, static): operates on messages and conversations, make decisions
+  cognition.py          # CognitionCore (sync, static): text normalization, chat type, intent message builders;
+                        # CognitionProvider (async): LLM intent classification (agent_task / chat / pass)
   affect.py             # AffectCore (sync, static): updates mood, decays, influences system prompt;
                         # AffectProvider (async): owns EmotionalState, can use external context later
 

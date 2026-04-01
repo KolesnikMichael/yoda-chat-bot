@@ -25,7 +25,6 @@ class WebSearchParams(BaseModel):
 class WebSearchTool(Tool):
     name = "web_search"
     parameters_schema = WebSearchParams
-    terminal = False
 
     def __init__(self, tavily_api: TavilyApi) -> None:
         self._tavily_api = tavily_api

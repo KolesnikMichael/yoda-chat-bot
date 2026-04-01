@@ -22,7 +22,6 @@ class WebExtractParams(BaseModel):
 class WebExtractTool(Tool):
     name = "web_extract"
     parameters_schema = WebExtractParams
-    terminal = False
 
     def __init__(self, tavily_api: TavilyApi) -> None:
         self._tavily_api = tavily_api

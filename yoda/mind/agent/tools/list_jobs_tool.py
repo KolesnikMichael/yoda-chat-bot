@@ -20,7 +20,6 @@ class ListJobsParams(BaseModel):
 class ListJobsTool(Tool):
     name = "list_jobs"
     parameters_schema = ListJobsParams
-    terminal = False
 
     def __init__(self, storage_api: StorageApi):
         self._storage_api = storage_api

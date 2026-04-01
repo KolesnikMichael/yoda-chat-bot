@@ -20,9 +20,13 @@ User asks to be reminded about something, to schedule a message, or to send a no
 2. Choose the scheduling mode:
    - **Relative delay** ("in 30 minutes", "через час"): call `schedule_message` with `delay_minutes`. No timezone needed.
    - **Absolute time** ("at 3 PM tomorrow", "завтра в 15:00"): requires timezone. Check user profile. If timezone is missing, call `ask_user` to ask for it. Then call `schedule_message` with year/month/day/hour/minute/timezone.
-3. When you learn new user information (timezone, location) via ask_user, call `update_profile` to save it. You can call `update_profile` and `schedule_message` together in the same tool_calls.
-4. If the tool returns success, set final_answer confirming the reminder.
-5. If the tool returns an error, explain the issue in final_answer.
+3. Build `reminder_text` with the right addressee semantics:
+   - If user asks to remind a specific person ("напомни мне", "remind me"), include the addressee in `reminder_text` when needed for group clarity.
+   - If user asks to remind everyone ("напомни нам", "remind us"), use group wording in `reminder_text` and avoid targeting one user.
+   - In private chats, keep `reminder_text` concise and natural.
+4. When you learn new user information (timezone, location) via ask_user, call `update_profile` to save it. You can call `update_profile` and `schedule_message` together in the same tool_calls.
+5. If the tool returns success, set final_answer confirming the reminder.
+6. If the tool returns an error, explain the issue in final_answer.
 
 ## Examples
 {"tool_calls": [{"tool_name": "schedule_message", "arguments": {"reminder_text": "call mom", "delay_minutes": 30}}], "reasoning": "scheduling a relative reminder"}
