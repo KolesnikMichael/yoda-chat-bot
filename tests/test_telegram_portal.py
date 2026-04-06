@@ -43,7 +43,6 @@ def build_update(text: str = "hello", caption: str = "", media_group_id: str | N
         username="obiwan",
         first_name="Obi",
         last_name="Wan",
-        language_code="en",
     )
     chat = SimpleNamespace(id=chat_id)
     message = SimpleNamespace(

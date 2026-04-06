@@ -1,4 +1,4 @@
-from yoda.mind.agent.core.react_loop import ReactLoop
+from yoda.mind.agent.core.react_loop import INFRA_TOOLS, ReactLoop
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
     Decision,
@@ -39,38 +39,70 @@ def _make_context(**overrides) -> AgentContext:
     return AgentContext(**(defaults | overrides))
 
 
+# --- build_system_message ---
+
+def test_build_system_message_has_role_schema_and_profile():
+    profile = UserProfile(timezone="Europe/Moscow")
+    msg = ReactLoop.build_system_message(profile)
+
+    assert msg["role"] == "system"
+    content = msg["content"]
+    assert "executor agent" in content
+    assert "selected_skill" in content
+    assert "Europe/Moscow" in content
+    assert "schedule_message" not in content
+    assert "UTC" not in content
+
+
+def test_build_system_message_notes_missing_timezone():
+    msg = ReactLoop.build_system_message(UserProfile())
+
+    assert "no timezone or location on file" in msg["content"]
+
+
 # --- build_context ---
 
-def test_build_context_returns_system_plus_messages():
+def test_build_context_appends_time_after_messages():
+    system = ReactLoop.build_system_message(UserProfile(timezone="Europe/Moscow"))
     ctx = _make_context(messages=[
+        system,
         {"role": "user", "content": "Task: test"},
         {"role": "assistant", "content": '{"reasoning": "ok"}'},
     ])
-    result = ReactLoop.build_context(ctx, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
+    result = ReactLoop.build_context(ctx, "2026-03-20 15:00 UTC")
 
-    assert result[0]["role"] == "system"
+    assert result[0] == system
     assert result[1] == {"role": "user", "content": "Task: test"}
     assert result[2]["role"] == "assistant"
-    assert len(result) == 3
+    assert result[3]["role"] == "system"
+    assert "2026-03-20 15:00 UTC" in result[3]["content"]
+    assert len(result) == 4
 
 
-def test_build_context_system_prompt_has_tools_and_profile():
-    ctx = _make_context()
-    result = ReactLoop.build_context(ctx, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
+# --- filter_tool_schemas ---
 
-    system = result[0]["content"]
-    assert "schedule_message" in system
-    assert "ask_user" in system
-    assert "Europe/Moscow" in system
-    assert "2026-03-20 15:00 UTC" in system
+def test_filter_tool_schemas_includes_skill_and_infra_tools():
+    skill = SkillSpec(
+        name="s",
+        description="d",
+        required_inputs={},
+        tools=["schedule_message"],
+        instructions="x",
+    )
+    filtered = ReactLoop.filter_tool_schemas(TOOL_SCHEMAS, skill)
+
+    names = {s["name"] for s in filtered}
+    assert names == {"schedule_message", "ask_user"}
+    assert names <= (set(skill.tools) | set(INFRA_TOOLS))
 
 
-def test_build_context_system_prompt_notes_missing_timezone():
-    ctx = _make_context(profile=UserProfile())
-    result = ReactLoop.build_context(ctx, TOOL_SCHEMAS, "2026-03-20 15:00 UTC")
-
-    system = result[0]["content"]
-    assert "no timezone or location on file" in system
+def test_filter_tool_schemas_excludes_tools_not_in_skill():
+    extra = TOOL_SCHEMAS + [
+        {"name": "other_tool", "parameters": {}, "required": []},
+    ]
+    filtered = ReactLoop.filter_tool_schemas(extra, SKILL_SPEC)
+    names = {s["name"] for s in filtered}
+    assert "other_tool" not in names
 
 
 # --- build_selection_message ---
@@ -93,8 +125,8 @@ def test_build_selection_message_empty_catalog():
 
 # --- build_activation_message ---
 
-def test_build_activation_message_contains_skill_spec():
-    msg = ReactLoop.build_activation_message(SKILL_SPEC)
+def test_build_activation_message_contains_skill_spec_and_tools():
+    msg = ReactLoop.build_activation_message(SKILL_SPEC, TOOL_SCHEMAS)
 
     assert msg["role"] == "user"
     assert "schedule_message" in msg["content"]
@@ -102,6 +134,8 @@ def test_build_activation_message_contains_skill_spec():
     assert "reminder_text" in msg["content"]
     assert "Call schedule_message" in msg["content"]
     assert "execute" in msg["content"].lower()
+    assert "Available tools:" in msg["content"]
+    assert "ask_user" in msg["content"]
 
 
 # --- append_assistant ---

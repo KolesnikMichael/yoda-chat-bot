@@ -242,3 +242,19 @@ async def test_empty_batch_is_noop():
     await mind.process_message_batch(chat_id=1, batch=[])
 
     assert sender.calls == []
+
+
+def test_capabilities_block_included_in_system_prompt():
+    descriptions = ["Search the web", "Schedule reminders"]
+    mind = build_mind(public_skill_descriptions=descriptions)
+    sender = FakeSender()
+    mind.bind_message_sender(sender)
+
+    assert "CAPABILITIES" in mind._capabilities_block
+    assert "Search the web" in mind._capabilities_block
+    assert "Schedule reminders" in mind._capabilities_block
+
+
+def test_capabilities_block_empty_when_no_skills():
+    mind = build_mind()
+    assert mind._capabilities_block == ""

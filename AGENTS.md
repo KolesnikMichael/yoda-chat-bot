@@ -1,110 +1,54 @@
-# IODA architecture guide, coding style and more for Yoda chatbot
+# Yoda Chatbot
 
-## Context
-This project is a Telegram chatbot with LLM integration, memory, and planned emotional dynamics and agentic capabilities (web research, cron triggers, site watching, group chat).
+Telegram chatbot with LLM integration, memory, emotional dynamics, and agentic capabilities.
 
-## Architectural Approach: IODA + Hexagonal Architecture elements
-This project leverages the combination of two design patterns: IODA architecture for top-level workflows of the application, and HA's port/adapter pattern for agent tools.
+## Architecture: IODA
 
-### Top-level: IODA Architecture
-There are two key differences between IODA and other widely adopted Hexagonal, Onion and Clean architectures:
- - IODA focuses more on minimizing functional depedencies by strictly following this principle: "Functions can be either Integrations or Operations". Integration function is a function composed only of calls to functions in the same code base. Operation function is a function composed only of calls to functions in another code base (i.e. standard/external library functions, etc)."
- - IODA less strictly follows dependency inversion principle: "inner" Operations may depend on "outside" data or external services.
+Every class belongs to exactly one IODA category. Enforce by naming convention:
 
-**IODA separates concerns using these four categories:**
+| Category | Naming | What it does | Constraints |
+|---|---|---|---|
+| Integration | bare noun (`Mind`, `Perception`) | Orchestrates data flow between Operations | Only calls Operations/Integrations + await. **No business logic.** |
+| Core | `*Core` | Sync, static. Pure logic, transforms, decisions | Depends only on Data. |
+| Provider | `*Provider` | Async. Adapts infrastructure (DB, LLM, scheduler) | May depend on API. |
+| Portal | `*Portal` | Async. Adapts user-facing interfaces | May depend on API. |
+| Data | — | DTOs, dataclasses | Minimal logic (accessors, consistency). No functional deps. |
+| API | — | Async façades for external services | Side effects. Mocked in tests. |
 
----
-| Layer | Role | Rules |
-|-------|------|-------|
-| **I** — Integration | Orchestrates pipelines, composes workflows | Only calls to Operations or other Integrations and then awaits. Pure data flow. No business logic. |
-| **O** — Operation | Divides into three sub-types: </br> **Core** (sync, static): pure logic, transformations, decisions — independent of the environment, </br> **Portal** (async): adapters facing other software or users, </br> **Provider** (async): adapters facing services or infrastructure like databases or system timer. | Core depends only on Data. Portals and Providers may also depend on API. Operations cannot depend on other Operations or Integrations. |
-| **D** — Data | Data structures / DTOs to be used by Operations to exchange data | Minimal logic only (data consistency, accessors). No dependencies on functional modules. |
-| **A** — API | Represents services/infrastructure outside the application | All `async def`. Always behind a thin façade. Side effects. Mocked in tests. |
----
+**Hard rules:**
+- Operations (Core/Provider/Portal) **never** depend on other Operations or Integrations.
+- If Operation A needs data from Operation B, the Integration passes it as a parameter.
+- A file may contain both a Core and Provider class (e.g. `memory.py` → `MemoryCore` + `MemoryProvider`).
 
-**Key rules:**
-- **No functional dependencies between Operations.** If Op A needs data from Op B — the Integration passes it explicitly as a parameter.
-- **An Integration may call other Integrations** to compose complex workflows from simpler pipelines. Each sub-Integration follows the same rules: no business logic, only calls and awaits.
-- Class naming convention for **Operations**: `*Core` for Core operations, `*Provider` for Providers, `*Portal` for Portals. This makes the IODA sub-type immediately visible from the class name.
-- Class naming convention for **Integrations**: use a **bare noun** (e.g. `Mind`, `Perception`) — no `*Core`, `*Provider`, or `*Portal` suffix. That keeps Integrations visually distinct from the three Operation sub-types.
+## Project layout
 
-### Inside Agent Module: IODA Runtime + Declarative Skills
-The agent module uses IODA for the runtime (pipelines, tool execution, state) and declarative skill specs for behavior. Skills are markdown files loaded at runtime. Tools are typed async adapters with an optional `terminal` flag (loop auto-exits after a terminal tool succeeds). Two-phase token optimization: compact skill catalog on every turn, full spec only for the selected skill. Infrastructure tools (`ask_user`, `update_profile`) are available to all skills.
-
-## Project Structure
-Project structure follows anthropomorphic separation of concerns rather than following IODA categories. For example, memory.py combines Operation and Provider functions.
+Anthropomorphic separation of concerns — not by IODA category:
 
 ```
-yoda_chat_bot.py        # Wires everything, starts event loop. Then binds embodiment to mind (async)
-
-api/
-  llm_api.py            # API (async): facade for LLM APIs (language, vision, structured output)
-  speech_api.py         # API (async): speech-to-text conversion using Google library
-  storage_api.py        # API (async): API for Redis storage
-  telegram_api.py       # API (async): facade for Telegram API
-  scheduler_api.py      # API (async): facade for APScheduler (AsyncIOScheduler + RedisJobStore),
-                        #   module-level _fire_job callback (async, picklable for Redis job store)
-
-embodiment/
-  telegram_bot.py       # Portal (async): receives updates (text/audio/photo), sends replies
-
-mind/
-  mind.py               # Integration (async): orchestrates Mind pipelines
-
-  perception/
-    perception.py       # Integration (async): orchestrates text/voice/photo into perceived lines
-    language.py         # Provider (async): uses LLM API for completions
-    audio.py            # Provider (async): uses Google library for speech-to-text conversion
-    vision.py           # Provider (async): uses vision AI model API for image-to-text conversion
-
-  memory/
-    memory.py           # MemoryCore (sync, static): extracts facts, builds profile;
-                        # MemoryProvider (async): owns in-memory conversations and storage API
-                        
-    data/
-      user_profile.py   # Data: UserProfile { facts, preferences, emotion }
-      conversation.py   # Data: Conversation { user_id, chat_id, messages: [Message] }
-      message.py        # Data: Message { role, text, media_type, timestamp }
-      emotional_state.py  # Data: EmotionalState { glad, mad, sad, scared }
-      
-  cognition.py          # CognitionCore (sync, static): text normalization, chat type, intent message builders;
-                        # CognitionProvider (async): LLM intent classification (agent_task / chat / pass)
-  affect.py             # AffectCore (sync, static): updates mood, decays, influences system prompt;
-                        # AffectProvider (async): owns EmotionalState, can use external context later
-
-  agent/
-    agent_provider.py   # Integration (async): orchestrates two-phase ReAct loop with suspend/resume
-    session_provider.py # Provider (async): persists/restores AgentContext via StorageApi
-    core/
-      react_loop.py     # Core (sync, static): builds LLM context, validates Decision, manages state
-    data/
-      agent_data.py     # Data: SkillSummary, SkillSpec, ToolCall, ToolResult, Decision, AgentContext, AgentResult
-    skills/
-      catalog.py        # Core (sync, static): loads and indexes skill specs from markdown files
-      specs/
-        schedule_message.md  # Skill spec: schedule one-time reminder messages
-    tools/
-      tool_port.py      # Port: abstract Tool interface with Pydantic schema and terminal flag
-      ask_user_tool.py  # Virtual tool: suspends loop, signals clarification needed
-      scheduler_tool.py # Provider (async): schedules jobs via SchedulerApi (terminal)
-      update_profile_tool.py # Provider (async): saves user profile fields via MemoryProvider
+yoda/
+  yoda_chat_bot.py    # Wiring + startup
+  api/                # External service façades (LLM, Telegram, Redis, Tavily, scheduler, speech)
+  embodiment/         # Telegram portal (receives updates, sends replies)
+  mind/
+    mind.py           # Top-level Integration: routes intents, orchestrates pipelines
+    perception/       # Text/voice/photo intake
+    memory/           # Conversation + user profile persistence, data models
+    cognition.py      # Intent classification (agent_task / chat / pass), text normalization
+    affect.py         # Emotional state updates, mood influence on prompts
+    agent/            # Agentic capabilities → see agent/AGENTS.md
 ```
-## Core Pipelines
 
-TBD
+## Coding style
+
+- `@staticmethod` on methods that don't need instance state
+- Private names: `_name` (PEP 8)
+- Explicit type hints on all functions and methods
+- f-strings for concatenation
+- Fail fast on config/validation — no lenient fallbacks
+- `logger.debug` for anything with user data (messages, profile, jobs)
+- `asyncio.gather()` when 2+ Providers/Portals have independent inputs
 
 ## Workflow
-- Use TDD where applicable and reasonable
-- Run tests before proposing any changes for review
 
-### How to run tests
-**When running tests, prefer `python -m pytest` from the project root, using the interpreter in `.venv\Scripts\python.exe` or `.venv/bin/python`.**
-
-## Coding Style and Patterns
-- Methods that don't need to be instantiated should have @staticmethod decorator
-- When naming private fields and methods use PEP8 standard: "_<name>"
-- Use explicit type hints for all functions and methods
-- Use f-string formatting for concatenation
-- When validating settings/configs/outputs don't try to squeeze out anything, follow "fail fast" principle
-- Use logger.debug for output with potentially sensitive data: user messages, profile, active_jobs
-- Use `asyncio.gather()` whenever two or more Providers/Portals are called and their inputs are independent
+- TDD where applicable and reasonable
+- Run tests before proposing changes: `python -m pytest` from project root (venv: `.venv/bin/python`)

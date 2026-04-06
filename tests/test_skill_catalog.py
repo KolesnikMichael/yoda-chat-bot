@@ -58,3 +58,27 @@ def test_validate_tools_no_warnings_when_all_present():
 def test_load_catalog_from_nonexistent_dir():
     catalog = SkillCatalog.load_catalog(Path("/nonexistent/path"))
     assert catalog == []
+
+
+def test_load_catalog_reads_public_field():
+    catalog = SkillCatalog.load_catalog(FIXTURES_DIR)
+
+    private = next(s for s in catalog if s.name == "private_skill")
+    assert private.public is False
+
+    test = next(s for s in catalog if s.name == "test_skill")
+    assert test.public is True
+
+
+def test_public_summaries_filters_private():
+    catalog = SkillCatalog.load_catalog(FIXTURES_DIR)
+
+    public = SkillCatalog.public_summaries(catalog)
+    names = {s.name for s in public}
+    assert "test_skill" in names
+    assert "no_tools_skill" in names
+    assert "private_skill" not in names
+
+
+def test_public_summaries_empty_catalog():
+    assert SkillCatalog.public_summaries([]) == []

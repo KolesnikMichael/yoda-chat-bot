@@ -35,8 +35,11 @@ from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.speech_api import SpeechApi
 from yoda.api.llm_api import LLMApi
 from yoda.api.tavily_api import TavilyApi
+from yoda.mind.agent.tools.get_user_data_tool import GetUserDataTool
+from yoda.mind.agent.tools.delete_user_data_tool import DeleteUserDataTool
 from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
 from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+from yoda.mind.agent.skills.catalog import SkillCatalog
 
 
 logger = logging.getLogger(__name__)
@@ -145,9 +148,19 @@ def main() -> None:
         UpdateProfileTool(memory_provider=memory_provider),
         WebSearchTool(tavily_api=tavily_api),
         WebExtractTool(tavily_api=tavily_api),
+        GetUserDataTool(storage_api=storage_api),
+        DeleteUserDataTool(
+            storage_api=storage_api,
+            scheduler_api=scheduler_api,
+            memory_provider=memory_provider,
+        ),
     ]
     skills_dir = Path(__file__).parent / "mind" / "agent" / "skills"
     session_provider = AgentSessionProvider(storage_api=storage_api)
+    public_skill_descriptions = [
+        s.description for s in SkillCatalog.public_summaries(
+            SkillCatalog.load_catalog(skills_dir))
+    ]
 
     agent_provider = AgentProvider(
         language_provider=language_provider,
@@ -169,6 +182,7 @@ def main() -> None:
         affect_provider=affect_provider,
         cognition_provider=cognition_provider,
         agent_provider=agent_provider,
+        public_skill_descriptions=public_skill_descriptions,
     )
 
     scheduler_api.set_delivery_callback(mind.deliver_scheduled_reminder)

@@ -23,11 +23,16 @@ class SkillCatalog:
                 summaries.append(SkillSummary(
                     name=frontmatter["name"],
                     description=frontmatter.get("description", ""),
+                    public=frontmatter.get("public", True),
                 ))
             else:
                 logger.warning(f"Skipping skill spec without name: {md_file}")
 
         return summaries
+
+    @staticmethod
+    def public_summaries(catalog: list[SkillSummary]) -> list[SkillSummary]:
+        return [s for s in catalog if s.public]
 
     @staticmethod
     def load_skill(skills_dir: Path, skill_name: str) -> SkillSpec:

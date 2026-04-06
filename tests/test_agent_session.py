@@ -32,7 +32,7 @@ class FakeStorageApi:
 def _make_context() -> AgentContext:
     return AgentContext(
         task="remind me to call mom",
-        profile=UserProfile(timezone="Europe/Moscow", nickname="Luke"),
+        profile=UserProfile(timezone="Europe/Moscow", preferred_name="Luke"),
         chat_id=42,
         catalog_summaries=[SkillSummary(name="schedule_message", description="Schedule")],
         active_skill=SkillSpec(
@@ -68,7 +68,7 @@ async def test_save_and_load_roundtrip():
     assert loaded.task == context.task
     assert loaded.chat_id == context.chat_id
     assert loaded.profile.timezone == "Europe/Moscow"
-    assert loaded.profile.nickname == "Luke"
+    assert loaded.profile.preferred_name == "Luke"
     assert loaded.active_skill.name == "schedule_message"
     assert len(loaded.messages) == 5
     assert loaded.messages[0]["role"] == "user"

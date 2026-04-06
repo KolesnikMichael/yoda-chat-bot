@@ -61,16 +61,17 @@ class AgentProvider:
             catalog_summaries=self._catalog_summaries,
         )
 
+        system_msg = ReactLoop.build_system_message(profile)
         selection_msg = ReactLoop.build_selection_message(
             task, self._catalog_summaries)
-        context = context.with_messages([selection_msg])
+        context = context.with_messages([system_msg, selection_msg])
 
         decision = await self._llm_decide(context)
         logger.info(
             f"Phase 1 decision: skill={decision.selected_skill}, "
             f"final={decision.final_answer}, reasoning={decision.reasoning}")
         decision = ReactLoop.validate_decision(
-            decision, context, set(self._tools.keys()))
+            decision, context, self._available_tools_for_validation(context))
         context = ReactLoop.append_assistant(context, decision)
 
         if decision.final_answer:
@@ -80,7 +81,10 @@ class AgentProvider:
             skill = SkillCatalog.load_skill(
                 self._skills_dir, decision.selected_skill)
             context = context.with_active_skill(skill)
-            activation_msg = ReactLoop.build_activation_message(skill)
+            filtered_schemas = ReactLoop.filter_tool_schemas(
+                self._tool_schemas, skill)
+            activation_msg = ReactLoop.build_activation_message(
+                skill, filtered_schemas)
             context = context.with_messages(context.messages + [activation_msg])
 
         return await self._execute_loop(context)
@@ -106,7 +110,7 @@ class AgentProvider:
                 f"tools={[tc.tool_name for tc in decision.effective_tool_calls]}, "
                 f"final={decision.final_answer}, reasoning={decision.reasoning}")
             decision = ReactLoop.validate_decision(
-                decision, context, set(self._tools.keys()))
+                decision, context, self._available_tools_for_validation(context))
             context = ReactLoop.append_assistant(context, decision)
 
             if decision.final_answer:
@@ -180,8 +184,15 @@ class AgentProvider:
         )
         return AgentResult(answer=final_answer, tools_used=context.tools_used)
 
+    def _available_tools_for_validation(self, context: AgentContext) -> set[str]:
+        if context.active_skill is None:
+            return set(self._tools.keys())
+        return (
+            ReactLoop.allowed_tool_names_for_skill(context.active_skill)
+            & set(self._tools.keys())
+        )
+
     async def _llm_decide(self, context: AgentContext) -> Decision:
         utc_now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
-        messages = ReactLoop.build_context(
-            context, self._tool_schemas, utc_now)
+        messages = ReactLoop.build_context(context, utc_now)
         return await self._llm.parse_structured(messages, Decision)

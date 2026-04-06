@@ -1,18 +1,17 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 
 @dataclass
 class UserProfile:
-    nickname: str = ""
-    preferred_language: str = ""
+    preferred_name: str = ""
     gender: str = ""
-    birthday: str = ""
-    age: str = ""
     location: str = ""
     timezone: str = ""
-    education: str = ""
     occupation: str = ""
     interests: list[str] = field(default_factory=list)
-    miscellaneous: list[str] = field(default_factory=list)
-    schema_version: int = 1
+    facts: list[str] = field(default_factory=list)
+    schema_version: int = 2
     updated_on: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)

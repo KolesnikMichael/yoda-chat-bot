@@ -11,8 +11,8 @@ class FakeMemoryProvider:
         self.chat_updates: list[tuple] = []
         self._conversations: dict[str, Conversation] = {}
 
-    async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
-        self.sender_updates.append((user_id, chat_id, user_info))
+    async def update_sender_info(self, user_id: int, user_info: dict) -> None:
+        self.sender_updates.append((user_id, user_info))
 
     async def update_chat_info(self, chat_id: int, chat_type: str, last_active: str) -> None:
         self.chat_updates.append((chat_id, chat_type, last_active))

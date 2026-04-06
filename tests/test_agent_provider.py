@@ -1,13 +1,10 @@
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 
 from yoda.mind.agent.agent_provider import AgentProvider
 from yoda.mind.agent.data.agent_data import (
-    AgentContext,
     Decision,
-    SkillSummary,
     ToolCallRequest,
     ToolResult,
 )
@@ -63,8 +60,10 @@ class FakeLanguageProvider:
     def __init__(self, decisions: list[Decision]):
         self._decisions = list(decisions)
         self._call_index = 0
+        self.messages_log: list[list[dict]] = []
 
     async def parse_structured(self, messages, response_format):
+        self.messages_log.append(list(messages))
         decision = self._decisions[self._call_index]
         self._call_index += 1
         return decision
@@ -73,17 +72,18 @@ class FakeLanguageProvider:
 def _build_provider(
     decisions: list[Decision],
     tools: list[Tool] | None = None,
-) -> AgentProvider:
+) -> tuple[AgentProvider, FakeLanguageProvider]:
     if tools is None:
         tools = [AskUserTool(), FakeTool()]
     llm = FakeLanguageProvider(decisions)
     session_provider = AgentSessionProvider(storage_api=FakeStorageApi())
-    return AgentProvider(
+    provider = AgentProvider(
         language_provider=llm,
         tools=tools,
         skills_dir=FIXTURES_DIR,
         session_provider=session_provider,
     )
+    return provider, llm
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,7 @@ async def test_full_flow_select_skill_and_use_tool():
         Decision(final_answer="Here is the answer"),
     ]
 
-    provider = _build_provider(decisions)
+    provider, llm = _build_provider(decisions)
     result = await provider.run(
         task="search for something",
         profile=UserProfile(),
@@ -105,6 +105,34 @@ async def test_full_flow_select_skill_and_use_tool():
 
     assert result.answer == "Here is the answer"
     assert "web_search" in result.tools_used
+    assert len(llm.messages_log) == 3
+
+
+@pytest.mark.asyncio
+async def test_llm_context_static_system_and_tools_in_activation():
+    """Phase 1: system prompt has no tool catalog; Phase 2: tools in activation user message."""
+    decisions = [
+        Decision(selected_skill="test_skill"),
+        Decision(tool_calls=[
+            ToolCallRequest(tool_name="web_search", arguments={"query": "q"}),
+        ]),
+        Decision(final_answer="done"),
+    ]
+    provider, llm = _build_provider(decisions)
+    await provider.run(task="t", profile=UserProfile(), chat_id=7)
+
+    phase1 = llm.messages_log[0]
+    assert phase1[0]["role"] == "system"
+    assert "executor agent" in phase1[0]["content"]
+    assert "Available tools:" not in phase1[0]["content"]
+    assert phase1[-1]["role"] == "system"
+    assert "Current UTC time:" in phase1[-1]["content"]
+
+    phase2 = llm.messages_log[1]
+    activation = next(
+        m for m in phase2 if m["role"] == "user" and "activated" in m["content"])
+    assert "Available tools:" in activation["content"]
+    assert "web_search" in activation["content"]
 
 
 @pytest.mark.asyncio
@@ -113,7 +141,7 @@ async def test_no_matching_skill_returns_final_answer():
         Decision(final_answer="I cannot help with that"),
     ]
 
-    provider = _build_provider(decisions)
+    provider, _ = _build_provider(decisions)
     result = await provider.run(
         task="do something impossible",
         profile=UserProfile(),
@@ -132,7 +160,7 @@ async def test_suspend_on_ask_user():
         ]),
     ]
 
-    provider = _build_provider(decisions)
+    provider, _ = _build_provider(decisions)
     result = await provider.run(
         task="remind me about something",
         profile=UserProfile(),
@@ -154,7 +182,7 @@ async def test_resume_after_suspend():
         Decision(final_answer="Reminder set for Moscow time"),
     ]
 
-    provider = _build_provider(decisions)
+    provider, _ = _build_provider(decisions)
 
     result1 = await provider.run(
         task="remind me",
@@ -171,7 +199,7 @@ async def test_resume_after_suspend():
 
 @pytest.mark.asyncio
 async def test_resume_without_session():
-    provider = _build_provider([])
+    provider, _ = _build_provider([])
     result = await provider.resume(999, "some answer")
 
     assert result.answer == "No pending session found."

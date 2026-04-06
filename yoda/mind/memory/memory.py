@@ -2,15 +2,14 @@ import datetime as dtm
 import json
 import logging
 
-from yoda.api.storage_api import StorageApi
-
+from .data.chat import Chat
 from .data.conversation import Conversation
 from .data.system_prompt import DEFAULT_SYSTEM_PROMPT
+from .data.user import User
 from .data.user_profile import UserProfile
+from .migration import migrate
 
 logger = logging.getLogger(__name__)
-
-CHAT_SCHEMA_VERSION = 2
 
 
 class MemoryCore:
@@ -36,20 +35,6 @@ class MemoryCore:
         conversation.add_message(role=role, text=line, timestamp=timestamp)
         return conversation, conversation.to_llm_messages()
 
-    @staticmethod
-    def migrate_chat(chat_info: dict, current_version: int, chat_type: str) -> dict:
-        migrated = chat_info
-        for version in range(current_version, CHAT_SCHEMA_VERSION):
-            if version == 1:
-                delta = {
-                    "chat_type": chat_type,
-                    "history": [],
-                    "conversation": {"users": [], "messages": []},
-                    "schema_version": version + 1,
-                }
-                migrated = {**migrated, **delta}
-        return migrated
-
 
 class MemoryProvider:
     def __init__(self, storage_api):
@@ -64,62 +49,63 @@ class MemoryProvider:
         key = MemoryCore.conversation_key(conversation.chat_id)
         self._conversations[key] = conversation
 
-    async def update_sender_info(self, user_id: int, chat_id: int, user_info: dict) -> None:
-        current_user_info_raw = await self._storage_api.hget("users", str(user_id))
-        if current_user_info_raw:
-            current_user_info = json.loads(current_user_info_raw)
+    def forget_conversation(self, chat_id: int) -> None:
+        key = MemoryCore.conversation_key(chat_id)
+        self._conversations.pop(key, None)
+
+    async def update_sender_info(self, user_id: int, user_info: dict) -> None:
+        raw = await self._storage_api.hget("users", str(user_id))
+        if raw:
+            data = migrate("users", json.loads(raw))
+            user = User(**{k: v for k, v in data.items() if k in User.__dataclass_fields__})
         else:
-            current_user_info = {"known_since": user_info.get("last_active")}
+            user = User(known_since=user_info.get("last_active", ""))
             logger.info(f"Registered user {user_id}")
 
-        await self._storage_api.hset("users", str(user_id), json.dumps({**current_user_info, **user_info}))
+        for field in ("username", "first_name", "last_name", "last_active"):
+            if field in user_info:
+                setattr(user, field, user_info[field])
+
+        await self._storage_api.hset("users", str(user_id), json.dumps(user.to_dict()))
 
     async def update_chat_info(self, chat_id: int, chat_type: str, last_active: str) -> None:
-        current_chat_info_raw = await self._storage_api.hget("chats", str(chat_id))
-        if current_chat_info_raw:
-            current_chat_info = json.loads(current_chat_info_raw)
-            current_schema_version = current_chat_info.get("schema_version", 1)
-            if current_schema_version < CHAT_SCHEMA_VERSION:
-                current_chat_info = MemoryCore.migrate_chat(
-                    current_chat_info, current_schema_version, chat_type)
+        raw = await self._storage_api.hget("chats", str(chat_id))
+        if raw:
+            data = migrate("chats", json.loads(raw))
+            chat = Chat(**{k: v for k, v in data.items() if k in Chat.__dataclass_fields__})
         else:
-            current_chat_info = {
-                "chat_type": chat_type,
-                "history": [],
-                "conversation": {"users": [], "messages": []},
-                "last_active": "",
-                "schema_version": CHAT_SCHEMA_VERSION,
-            }
+            chat = Chat(chat_type=chat_type)
             logger.info(f"Registered chat {chat_id}")
 
-        current_chat_info["last_active"] = last_active
-        await self._storage_api.hset("chats", str(chat_id), json.dumps(current_chat_info))
+        chat.last_active = last_active
+        chat.updated_on = dtm.datetime.now(dtm.UTC).isoformat()
+        await self._storage_api.hset("chats", str(chat_id), json.dumps(chat.to_dict()))
 
     async def get_user_profile(self, user_id: int, chat_id: int) -> UserProfile:
         user_profile_id = f"{user_id}@{chat_id}"
         raw = await self._storage_api.hget("user_profiles", user_profile_id)
         if raw:
-            data = json.loads(raw)
-            interests = data.pop("interests", [])
-            miscellaneous = data.pop("miscellaneous", [])
+            data = migrate("user_profiles", json.loads(raw))
             return UserProfile(
-                **{k: v for k, v in data.items() if k in UserProfile.__dataclass_fields__
-                   and k not in ("interests", "miscellaneous")},
-                interests=interests,
-                miscellaneous=miscellaneous,
+                **{k: v for k, v in data.items() if k in UserProfile.__dataclass_fields__}
             )
         return UserProfile()
 
     async def update_user_profile(self, user_id: int, chat_id: int, user_profile: dict) -> None:
         user_profile_id = f"{user_id}@{chat_id}"
-        current_user_profile_raw = await self._storage_api.hget("user_profiles", user_profile_id)
+        raw = await self._storage_api.hget("user_profiles", user_profile_id)
 
-        if current_user_profile_raw:
-            current_user_profile = json.loads(current_user_profile_raw)
+        if raw:
+            data = migrate("user_profiles", json.loads(raw))
+            current = UserProfile(
+                **{k: v for k, v in data.items() if k in UserProfile.__dataclass_fields__}
+            )
         else:
-            current_user_profile = UserProfile().__dict__
+            current = UserProfile()
 
-        current_user_profile = {**current_user_profile, **user_profile}
-        current_user_profile["updated_on"] = dtm.datetime.now(
-            dtm.UTC).isoformat()
-        await self._storage_api.hset("user_profiles", user_profile_id, json.dumps(current_user_profile))
+        for k, v in user_profile.items():
+            if k in UserProfile.__dataclass_fields__:
+                setattr(current, k, v)
+
+        current.updated_on = dtm.datetime.now(dtm.UTC).isoformat()
+        await self._storage_api.hset("user_profiles", user_profile_id, json.dumps(current.to_dict()))

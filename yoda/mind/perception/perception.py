@@ -22,7 +22,7 @@ class Perception:
         self._audio = audio_provider
         self._vision = vision_provider
 
-    async def perceive_message(self, msg: PendingMessage, _chat_type: str) -> dict:
+    async def perceive_message(self, msg: PendingMessage) -> dict:
         text: str | None = None
         if msg.media_type == "text":
             text = CognitionCore.normalize_user_text(msg.text)

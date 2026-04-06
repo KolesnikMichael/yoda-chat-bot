@@ -9,9 +9,9 @@ from yoda.mind.agent.tools.tool_port import Tool
 logger = logging.getLogger(__name__)
 
 ALLOWED_FIELDS = {
-    "nickname", "preferred_language", "gender", "birthday", "age",
-    "location", "timezone", "education", "occupation",
-    "interests", "miscellaneous",
+    "preferred_name", "gender",
+    "location", "timezone", "occupation",
+    "interests", "facts",
 }
 
 

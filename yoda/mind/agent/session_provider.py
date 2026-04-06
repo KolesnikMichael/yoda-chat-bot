@@ -9,6 +9,7 @@ from yoda.mind.agent.data.agent_data import (
     SkillSummary,
 )
 from yoda.mind.memory.data.user_profile import UserProfile
+from yoda.mind.memory.migration import migrate
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,10 @@ class AgentSessionProvider:
             return None
 
         data = json.loads(raw)
-        profile = UserProfile(**data["profile"])
+        profile_data = migrate("user_profiles", data["profile"])
+        profile = UserProfile(
+            **{k: v for k, v in profile_data.items() if k in UserProfile.__dataclass_fields__}
+        )
         catalog_summaries = [SkillSummary(**s) for s in data["catalog_summaries"]]
         active_skill = SkillSpec(**data["active_skill"]) if data["active_skill"] else None
 

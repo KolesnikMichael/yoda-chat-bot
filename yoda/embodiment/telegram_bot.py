@@ -127,7 +127,6 @@ class TelegramBot:
             "username": message.from_user.username,
             "first_name": message.from_user.first_name,
             "last_name": message.from_user.last_name,
-            "language_code": message.from_user.language_code,
             "last_active": timestamp,
         }
         return message.from_user.id, message.chat.id, user_info, timestamp

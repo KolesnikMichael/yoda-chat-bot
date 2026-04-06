@@ -9,8 +9,7 @@ from yoda.mind.memory.data.user_profile import UserProfile
 
 EXECUTOR_SYSTEM_PROMPT = (
     "You are an executor agent. Your job is to complete tasks using available tools. "
-    "Be precise, follow the skill workflow, and produce structured decisions.\n"
-    "Current UTC time: {utc_now}\n\n"
+    "Be precise, follow the skill workflow, and produce structured decisions.\n\n"
     "You MUST respond with a JSON object matching this schema:\n"
     '{{\n'
     '  "selected_skill": "skill_name or null",\n'
@@ -32,18 +31,25 @@ EXECUTION_INSTRUCTION = (
     "Each response must contain tool_calls or final_answer."
 )
 
+INFRA_TOOLS = frozenset({"ask_user", "update_profile"})
+
 
 class ReactLoop:
     """Core (sync): builds LLM context, validates Decision, manages state."""
 
     @staticmethod
-    def build_context(
-        context: AgentContext,
-        tool_schemas: list[dict],
-        utc_now: str,
-    ) -> list[dict]:
-        system = _build_system_prompt(tool_schemas, context.profile, utc_now)
-        return [{"role": "system", "content": system}] + list(context.messages)
+    def build_system_message(profile: UserProfile) -> dict:
+        """Static system prompt: role, JSON schema, profile. No tools, no time."""
+        content = "\n\n".join([
+            EXECUTOR_SYSTEM_PROMPT,
+            _format_profile_context(profile),
+        ])
+        return {"role": "system", "content": content}
+
+    @staticmethod
+    def build_context(context: AgentContext, utc_now: str) -> list[dict]:
+        time_msg = {"role": "system", "content": f"Current UTC time: {utc_now}"}
+        return list(context.messages) + [time_msg]
 
     @staticmethod
     def build_selection_message(
@@ -62,7 +68,20 @@ class ReactLoop:
         return {"role": "user", "content": "\n\n".join(parts)}
 
     @staticmethod
-    def build_activation_message(skill: SkillSpec) -> dict:
+    def filter_tool_schemas(
+        all_schemas: list[dict], skill: SkillSpec,
+    ) -> list[dict]:
+        relevant = set(skill.tools) | set(INFRA_TOOLS)
+        return [s for s in all_schemas if s["name"] in relevant]
+
+    @staticmethod
+    def allowed_tool_names_for_skill(skill: SkillSpec) -> set[str]:
+        return set(skill.tools) | set(INFRA_TOOLS)
+
+    @staticmethod
+    def build_activation_message(
+        skill: SkillSpec, tool_schemas: list[dict],
+    ) -> dict:
         parts = [
             f"Skill '{skill.name}' activated.",
             f"Description: {skill.description}",
@@ -72,6 +91,7 @@ class ReactLoop:
                 f"{k} ({v})" for k, v in skill.required_inputs.items()
             )
             parts.append(f"Required inputs: {inputs_str}")
+        parts.append(_format_tool_schemas(tool_schemas))
         parts.append(f"Workflow:\n{skill.instructions}")
         parts.append(EXECUTION_INSTRUCTION)
         return {"role": "user", "content": "\n\n".join(parts)}
@@ -148,17 +168,6 @@ class ReactLoop:
         return context.iteration >= max_iter
 
 
-def _build_system_prompt(
-    tool_schemas: list[dict],
-    profile: UserProfile,
-    utc_now: str,
-) -> str:
-    parts = [EXECUTOR_SYSTEM_PROMPT.format(utc_now=utc_now)]
-    parts.append(_format_tool_schemas(tool_schemas))
-    parts.append(_format_profile_context(profile))
-    return "\n\n".join(parts)
-
-
 def _format_tool_schemas(tool_schemas: list[dict]) -> str:
     if not tool_schemas:
         return "No tools available."
@@ -182,8 +191,8 @@ def _format_profile_context(profile: UserProfile) -> str:
         parts.append(f"  timezone: {profile.timezone}")
     if profile.location:
         parts.append(f"  location: {profile.location}")
-    if profile.nickname:
-        parts.append(f"  name: {profile.nickname}")
+    if profile.preferred_name:
+        parts.append(f"  name: {profile.preferred_name}")
     if len(parts) == 1:
         parts.append("  (no timezone or location on file)")
     return "\n".join(parts)

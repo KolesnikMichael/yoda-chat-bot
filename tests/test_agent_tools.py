@@ -81,6 +81,14 @@ class FakeStorageApi:
         return dict(self.data.get(key, {}))
 
 
+class SpyMemoryProvider:
+    def __init__(self) -> None:
+        self.forget_calls: list[int] = []
+
+    def forget_conversation(self, chat_id: int) -> None:
+        self.forget_calls.append(chat_id)
+
+
 @pytest.mark.asyncio
 async def test_scheduler_tool_schedules_reminder():
     from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
@@ -770,3 +778,161 @@ async def test_web_extract_tool_api_error():
 
     assert result.success is False
     assert "Extract failed" in result.output
+
+
+# --- GetUserDataTool tests ---
+
+@pytest.mark.asyncio
+async def test_get_user_data_returns_all_data():
+    from yoda.mind.agent.tools.get_user_data_tool import GetUserDataTool
+
+    storage = FakeStorageApi()
+    await storage.hset("users", "100", json.dumps({"username": "mike", "first_name": "Mike"}))
+    await storage.hset("user_profiles", "100@42", json.dumps({"timezone": "Europe/Moscow"}))
+    await storage.hset("user_profiles", "100@99", json.dumps({"timezone": "UTC"}))
+    await storage.hset("user_profiles", "200@42", json.dumps({"timezone": "US/Eastern"}))
+    await storage.hset("active_jobs:42", "reminder_42_abc",
+                        json.dumps({"user_id": 100, "description": "call mom", "deliver_at_utc": "2030-01-01T12:00:00"}))
+    await storage.hset("active_jobs:99", "reminder_99_xyz",
+                        json.dumps({"user_id": 100, "description": "buy milk", "deliver_at_utc": "2030-02-01T09:00:00"}))
+    await storage.hset("active_jobs:42", "reminder_42_other",
+                        json.dumps({"user_id": 200, "description": "not mine", "deliver_at_utc": "2030-03-01T10:00:00"}))
+    await storage.hset("chats", "100", json.dumps({"chat_type": "private", "last_active": "now"}))
+
+    tool = GetUserDataTool(storage_api=storage)
+    call = ToolCall(tool_name="get_user_data", arguments={}, metadata={"user_id": 100})
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "Private chat metadata" in result.output
+    assert "mike" in result.output
+    assert "100@42" in result.output or "chat 42" in result.output
+    assert "100@99" in result.output or "chat 99" in result.output
+    assert "200@42" not in result.output
+    assert "call mom" in result.output
+    assert "buy milk" in result.output
+    assert "not mine" not in result.output
+
+
+@pytest.mark.asyncio
+async def test_get_user_data_no_data():
+    from yoda.mind.agent.tools.get_user_data_tool import GetUserDataTool
+
+    storage = FakeStorageApi()
+    tool = GetUserDataTool(storage_api=storage)
+    call = ToolCall(tool_name="get_user_data", arguments={}, metadata={"user_id": 999})
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "No data" in result.output
+
+
+@pytest.mark.asyncio
+async def test_get_user_data_missing_user_id():
+    from yoda.mind.agent.tools.get_user_data_tool import GetUserDataTool
+
+    tool = GetUserDataTool(storage_api=FakeStorageApi())
+    call = ToolCall(tool_name="get_user_data", arguments={})
+    result = await tool.execute(call)
+
+    assert result.success is False
+    assert "user_id" in result.output
+
+
+# --- DeleteUserDataTool tests ---
+
+@pytest.mark.asyncio
+async def test_delete_user_data_removes_everything():
+    from yoda.mind.agent.tools.delete_user_data_tool import DeleteUserDataTool
+
+    storage = FakeStorageApi()
+    scheduler = FakeSchedulerApi()
+
+    await storage.hset("users", "100", json.dumps({"username": "mike"}))
+    await storage.hset("users", "200", json.dumps({"username": "other"}))
+    await storage.hset("user_profiles", "100@42", json.dumps({"timezone": "UTC"}))
+    await storage.hset("user_profiles", "100@99", json.dumps({"timezone": "UTC"}))
+    await storage.hset("user_profiles", "200@42", json.dumps({"timezone": "UTC"}))
+    await storage.hset("active_jobs:42", "job_a",
+                        json.dumps({"user_id": 100, "description": "a"}))
+    await storage.hset("active_jobs:99", "job_b",
+                        json.dumps({"user_id": 100, "description": "b"}))
+    await storage.hset("active_jobs:42", "job_c",
+                        json.dumps({"user_id": 200, "description": "c"}))
+    await storage.hset("chats", "100", json.dumps({"chat_type": "private"}))
+    scheduler._live_job_ids = {"job_a", "job_b", "job_c"}
+
+    memory = SpyMemoryProvider()
+    tool = DeleteUserDataTool(
+        storage_api=storage, scheduler_api=scheduler, memory_provider=memory)
+    call = ToolCall(
+        tool_name="delete_user_data",
+        arguments={},
+        metadata={"user_id": 100, "chat_id": 42},
+    )
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "user record" in result.output
+    assert "2 profile(s)" in result.output
+    assert "2 scheduled job(s)" in result.output
+    assert "private chat metadata" in result.output
+    assert memory.forget_calls == [100]
+
+    assert await storage.hget("users", "100") is None
+    assert await storage.hget("users", "200") is not None
+    assert await storage.hget("user_profiles", "100@42") is None
+    assert await storage.hget("user_profiles", "100@99") is None
+    assert await storage.hget("user_profiles", "200@42") is not None
+    assert await storage.hget("active_jobs:42", "job_a") is None
+    assert await storage.hget("active_jobs:99", "job_b") is None
+    assert await storage.hget("active_jobs:42", "job_c") is not None
+    assert await storage.hget("chats", "100") is None
+    assert "job_a" not in scheduler._live_job_ids
+    assert "job_b" not in scheduler._live_job_ids
+    assert "job_c" in scheduler._live_job_ids
+
+
+@pytest.mark.asyncio
+async def test_delete_user_data_no_data():
+    from yoda.mind.agent.tools.delete_user_data_tool import DeleteUserDataTool
+
+    storage = FakeStorageApi()
+    scheduler = FakeSchedulerApi()
+    memory = SpyMemoryProvider()
+    tool = DeleteUserDataTool(
+        storage_api=storage, scheduler_api=scheduler, memory_provider=memory)
+    call = ToolCall(tool_name="delete_user_data", arguments={}, metadata={"user_id": 999})
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert "No data" in result.output
+    assert memory.forget_calls == [999]
+
+
+@pytest.mark.asyncio
+async def test_delete_user_data_missing_user_id():
+    from yoda.mind.agent.tools.delete_user_data_tool import DeleteUserDataTool
+
+    tool = DeleteUserDataTool(
+        storage_api=FakeStorageApi(),
+        scheduler_api=FakeSchedulerApi(),
+        memory_provider=SpyMemoryProvider(),
+    )
+    call = ToolCall(tool_name="delete_user_data", arguments={})
+    result = await tool.execute(call)
+
+    assert result.success is False
+    assert "user_id" in result.output
+
+
+@pytest.mark.asyncio
+async def test_delete_user_data_is_terminal():
+    from yoda.mind.agent.tools.delete_user_data_tool import DeleteUserDataTool
+
+    tool = DeleteUserDataTool(
+        storage_api=FakeStorageApi(),
+        scheduler_api=FakeSchedulerApi(),
+        memory_provider=SpyMemoryProvider(),
+    )
+    assert tool.terminal is True

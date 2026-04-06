@@ -29,6 +29,7 @@ class Mind:
         affect_provider: AffectProvider,
         cognition_provider: CognitionProvider | None = None,
         agent_provider: AgentProvider | None = None,
+        public_skill_descriptions: list[str] | None = None,
     ):
         self.language_provider = language_provider
         self.perception = perception
@@ -37,6 +38,19 @@ class Mind:
         self.cognition_provider = cognition_provider
         self.agent_provider = agent_provider
         self._message_sender = None
+        self._capabilities_block = self._build_capabilities_block(
+            public_skill_descriptions or [])
+
+    @staticmethod
+    def _build_capabilities_block(descriptions: list[str]) -> str:
+        if not descriptions:
+            return ""
+        lines = ["\n== CAPABILITIES ==",
+                 "You have these skills you can perform when asked:"]
+        lines.extend(f"- {d}" for d in descriptions)
+        lines.append(
+            "If the user asks what you can do, describe these naturally in your voice.")
+        return "\n".join(lines)
 
     def bind_message_sender(self, message_sender) -> None:
         self._message_sender = message_sender
@@ -51,19 +65,19 @@ class Mind:
         unique_users = {msg.user_id: msg.user_info for msg in batch}
         last_active = batch[-1].user_info.get("last_active", "")
         await asyncio.gather(
-            *(self.memory_provider.update_sender_info(uid, chat_id, uinfo)
+            *(self.memory_provider.update_sender_info(uid, uinfo)
               for uid, uinfo in unique_users.items()),
             self.memory_provider.update_chat_info(
                 chat_id=chat_id, chat_type=chat_type, last_active=last_active),
         )
 
         perceived = await asyncio.gather(
-            *(self.perception.perceive_message(msg, chat_type) for msg in batch)
+            *(self.perception.perceive_message(msg) for msg in batch)
         )
 
         emotional_state = self.affect_provider.get_emotional_state()
         system_prompt = AffectCore.build_system_prompt(
-            emotional_state, chat_type=chat_type)
+            emotional_state, chat_type=chat_type) + self._capabilities_block
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
         messages = None

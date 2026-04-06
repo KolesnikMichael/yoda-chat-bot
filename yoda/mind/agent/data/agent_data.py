@@ -13,6 +13,7 @@ from yoda.mind.memory.data.user_profile import UserProfile
 class SkillSummary:
     name: str
     description: str
+    public: bool = True
 
 
 @dataclass
