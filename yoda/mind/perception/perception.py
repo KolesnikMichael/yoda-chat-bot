@@ -56,4 +56,10 @@ class Perception:
 
         if text is None:
             raise ValueError(f"Unknown media type: {msg.media_type}")
-        return {"role": "system", "text": text, "timestamp": msg.timestamp}
+        return {
+            "role": "system",
+            "text": text,
+            "timestamp": msg.timestamp,
+            "message_id": msg.message_id,
+            "user_id": msg.user_id,
+        }

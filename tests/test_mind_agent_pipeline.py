@@ -35,9 +35,10 @@ class FakeAgentProvider:
         return self._result
 
 
-def _make_pending(text="Hello", user_id=1) -> PendingMessage:
+def _make_pending(text="Hello", user_id=1, message_id: int = 100) -> PendingMessage:
     return PendingMessage(
         user_id=user_id,
+        message_id=message_id,
         user_info={"first_name": "Luke", "last_active": "now"},
         media_type="text",
         text=text,

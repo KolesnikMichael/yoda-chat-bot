@@ -32,13 +32,14 @@ def build_mind(**overrides) -> Mind:
 
 
 def make_pending(media_type: str = "text", text: str = "Hello",
-                 user_id: int = 1, first_name: str = "Luke",
+                 user_id: int = 1, message_id: int = 1, first_name: str = "Luke",
                  photo_file_paths: list[str] | None = None,
                  caption: str = "", audio_file_path: str = "",
                  media_group_id: str | None = None,
                  timestamp: str = "2026-03-09 21:36:51+00:00") -> PendingMessage:
     return PendingMessage(
         user_id=user_id,
+        message_id=message_id,
         user_info={"first_name": first_name, "last_active": "now"},
         media_type=media_type,
         text=text,
@@ -65,11 +66,18 @@ async def test_text_batch_sends_response():
     assert len(sender.calls) == 1
     assert sender.calls[0][0] == 1
     assert 'On 2026-03-09 21:36:51+00:00 Luke sent text message: "Hello"' in sender.calls[0][1]
+    assert sender.calls[0][2] is None
     conversation = memory_provider.get_conversation(chat_id=1)
     assert conversation is not None
     messages = conversation.to_llm_messages()
     assert messages[-2]["role"] == "system"
     assert messages[-1]["role"] == "assistant"
+    user_line = next(
+        m for m in conversation.messages
+        if m.role == "system" and "sent text message" in m.text
+    )
+    assert user_line.message_id == 1
+    assert user_line.user_id == 1
 
 
 @pytest.mark.asyncio
@@ -228,6 +236,8 @@ async def test_timestamps_stored_on_messages():
     conversation = memory_provider.get_conversation(chat_id=1)
     incoming_msg = next(m for m in conversation.messages if "Hi" in m.text)
     assert incoming_msg.timestamp == "2026-03-09 21:36:51+00:00"
+    assert incoming_msg.message_id == 1
+    assert incoming_msg.user_id == 1
     assistant_msg = next(
         m for m in conversation.messages if m.role == "assistant")
     assert assistant_msg.timestamp != ""

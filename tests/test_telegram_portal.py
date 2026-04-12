@@ -32,12 +32,20 @@ class FakeTelegramApi:
     async def send_typing_action(self, bot, chat_id: int):
         return None
 
-    async def send_message(self, bot, chat_id: int, message: str):
+    async def send_message(
+        self, bot, chat_id: int, message: str, reply_to_message_id: int | None = None,
+    ):
         return None
 
 
-def build_update(text: str = "hello", caption: str = "", media_group_id: str | None = None,
-                 user_id: int = 42, chat_id: int = 100):
+def build_update(
+    text: str = "hello",
+    caption: str = "",
+    media_group_id: str | None = None,
+    user_id: int = 42,
+    chat_id: int = 100,
+    message_id: int = 7001,
+):
     from_user = SimpleNamespace(
         id=user_id,
         username="obiwan",
@@ -48,6 +56,7 @@ def build_update(text: str = "hello", caption: str = "", media_group_id: str | N
     message = SimpleNamespace(
         from_user=from_user,
         chat=chat,
+        message_id=message_id,
         text=text,
         caption=caption,
         media_group_id=media_group_id,
@@ -100,6 +109,7 @@ async def test_text_handler_adds_to_pending_batch():
     assert len(batch) == 1
     assert batch[0].media_type == "text"
     assert batch[0].text == "Hi"
+    assert batch[0].message_id == 7001
     assert batch[0].timestamp != ""
     assert len(scheduled) == 1
 
@@ -137,13 +147,18 @@ async def test_grouped_photos_merge_into_single_pending_message():
     context, scheduled, removed = build_context()
 
     await bot.handle_photo_message(
-        build_update(caption="look at these", media_group_id="g1"), context=context)
+        build_update(
+            caption="look at these", media_group_id="g1", message_id=501,
+        ),
+        context=context,
+    )
     await bot.handle_photo_message(
-        build_update(media_group_id="g1"), context=context)
+        build_update(media_group_id="g1", message_id=502), context=context)
 
     batch = bot._pending_batches[100]
     assert len(batch) == 1
     assert len(batch[0].photo_file_paths) == 2
+    assert batch[0].message_id == 501
     assert batch[0].caption == "look at these"
     assert len(removed) == 1
 
@@ -172,8 +187,13 @@ async def test_flush_batch_sends_to_mind():
 
     chat_id = 100
     bot._pending_batches[chat_id] = [
-        PendingMessage(user_id=42, user_info={
-                       "last_active": "now"}, media_type="text", text="Hi"),
+        PendingMessage(
+            user_id=42,
+            message_id=99,
+            user_info={"last_active": "now"},
+            media_type="text",
+            text="Hi",
+        ),
     ]
 
     flush_context = SimpleNamespace(job=SimpleNamespace(data=chat_id))

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 @dataclass
 class PendingMessage:
     user_id: int
+    message_id: int
     user_info: dict
     media_type: str
     text: str = ""

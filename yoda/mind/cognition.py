@@ -1,4 +1,5 @@
 import logging
+from typing import TypedDict
 
 from pydantic import BaseModel
 
@@ -19,6 +20,11 @@ class IntentClassification(BaseModel):
     intent: str
 
 
+class ReplyDeliveryPart(TypedDict):
+    text: str
+    message_id: int | None
+
+
 class CognitionCore:
     @staticmethod
     def normalize_user_text(text: str) -> str:
@@ -32,6 +38,11 @@ class CognitionCore:
     @staticmethod
     def should_reply(chat_type: str) -> bool:
         return True
+
+    @staticmethod
+    def process_reply(reply: str) -> list[ReplyDeliveryPart]:
+        """Split reply into chat sends; parse markers / reply targets (stub)."""
+        return [{"text": reply, "message_id": None}]
 
     @staticmethod
     def build_intent_messages(user_text: str) -> list[dict]:

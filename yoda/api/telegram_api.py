@@ -15,8 +15,21 @@ class TelegramApi:
     async def send_typing_action(self, bot, chat_id: int) -> None:
         await bot.send_chat_action(chat_id=chat_id, action="TYPING")
 
-    async def send_message(self, bot, chat_id: int, message: str) -> None:
-        await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+    async def send_message(
+        self,
+        bot,
+        chat_id: int,
+        message: str,
+        reply_to_message_id: int | None = None,
+    ) -> None:
+        kwargs: dict = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "Markdown",
+        }
+        if reply_to_message_id is not None:
+            kwargs["reply_to_message_id"] = reply_to_message_id
+        await bot.send_message(**kwargs)
 
     async def download_voice_to_cache(self, message, cache_dir: str = FILE_CACHE_DIR) -> str:
         voice_file = await message.voice.get_file()

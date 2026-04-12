@@ -89,6 +89,8 @@ class Mind:
                 line=entry["text"],
                 system_prompt=system_prompt,
                 timestamp=entry["timestamp"],
+                message_id=entry["message_id"],
+                user_id=entry["user_id"],
             )
         self.memory_provider.save_conversation(conversation)
 
@@ -228,14 +230,20 @@ class Mind:
     ) -> None:
         reply = await self.language_provider.reply_in_conversation(messages)
         reply_timestamp = f"{dtm.datetime.now(dtm.UTC)}"
-        conversation, _ = MemoryCore.add_conversation_line(
-            conversation=conversation,
-            chat_id=chat_id,
-            role="assistant",
-            line=reply,
-            system_prompt=system_prompt,
-            timestamp=reply_timestamp,
-        )
-        self.memory_provider.save_conversation(conversation)
-        if self._message_sender:
-            await self._message_sender(chat_id, reply)
+        parts = CognitionCore.process_reply(reply)
+        for part in parts:
+            conversation, _ = MemoryCore.add_conversation_line(
+                conversation=conversation,
+                chat_id=chat_id,
+                role="assistant",
+                line=part["text"],
+                system_prompt=system_prompt,
+                timestamp=reply_timestamp,
+            )
+            self.memory_provider.save_conversation(conversation)
+            if self._message_sender:
+                await self._message_sender(
+                    chat_id,
+                    part["text"],
+                    reply_to_message_id=part["message_id"],
+                )

@@ -31,10 +31,16 @@ class FakeMemoryProvider:
 
 class FakeSender:
     def __init__(self) -> None:
-        self.calls: list[tuple[int, str]] = []
+        self.calls: list[tuple[int, str, int | None]] = []
 
-    async def __call__(self, chat_id: int, message: str) -> None:
-        self.calls.append((chat_id, message))
+    async def __call__(
+        self,
+        chat_id: int,
+        message: str,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> None:
+        self.calls.append((chat_id, message, reply_to_message_id))
 
 
 class FakeLanguageProvider:

@@ -25,6 +25,8 @@ class MemoryCore:
         line: str,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         timestamp: str = "",
+        message_id: int | None = None,
+        user_id: int | None = None,
     ) -> tuple[Conversation, list[dict]]:
         if not conversation:
             key = MemoryCore.conversation_key(chat_id)
@@ -32,7 +34,13 @@ class MemoryCore:
             conversation = Conversation(chat_id=chat_id)
 
         conversation.ensure_system_prompt(system_prompt)
-        conversation.add_message(role=role, text=line, timestamp=timestamp)
+        conversation.add_message(
+            role=role,
+            text=line,
+            timestamp=timestamp,
+            message_id=message_id,
+            user_id=user_id,
+        )
         return conversation, conversation.to_llm_messages()
 
 

@@ -18,16 +18,12 @@
 - Add rate limits for APIs
 
 ## Implement
-- Skill: list_skills (/help), 
-- Skill: manage_user_data: - private
-  - Tool: forget_user (/reset)
-  - Tool: show_user_data
 - Skill: schedule_task
 - Skill: draw_picture
+- In group chats rather use reply than send_message
 - Tool: web_scrape_tool with Crawl4AI (https://medium.com/@speaktoharisudhan/crawling-with-crawl4ai-the-open-source-scraping-beast-9d32e6946ad4)
 - Make periodic_job_cleanup sub-routine of general maintenance routine. Add sub-routine for updating chat and user profiles. Randomize sub-routines start time to distribute load (for instance, make it running every hour, but update only profiles that belong to entities that were inactive since last run (that is having: utc_now-2 < update_time < utc_now-1). Questions:
    - Which module should own those sub-routines? Could it be Memory?
-   - 
 - Load chat profile when building system prompt
 - Add user profile to system prompt when user sends first message
 - Add create_picture skill. Options:
@@ -40,13 +36,14 @@
   - AI Horde (community API)
     - https://stablehorde.net/guis#section-guis-image
   - Pixazo Free API Hub
-    - https://www.pixazo.ai/api/pricing-plan
+    - https://www.pixazo.ai/models/flux
+    - https://www.pixazo.ai/models/stable-diffusion
+    - https://www.pixazo.ai/models/sdxl
 
 ## Refactor
 - _classify_intent returns "chat" but it's never handled. It should be handled explicitly, and last elif in Mind.process_message_batch should log WARNING or something
 
 ## Consider
-- Public and private skills (update entities)
 - Skill flavours/hierarchy: search web could have a number of options (sub-specs with specific workflow/sources/hints), depending on the topic. Should this be stored in catalog, or in user preferences?
 - Trafilatura as another extraction option
 - Add fact-checking for Yoda replies

@@ -70,6 +70,7 @@ class TelegramBot:
 
         pending = PendingMessage(
             user_id=user_id,
+            message_id=update.message.message_id,
             user_info=user_info,
             media_type="text",
             text=update.message.text,
@@ -85,6 +86,7 @@ class TelegramBot:
         audio_file_path = await self.telegram_api.download_voice_to_cache(update.message)
         pending = PendingMessage(
             user_id=user_id,
+            message_id=update.message.message_id,
             user_info=user_info,
             media_type="voice",
             audio_file_path=audio_file_path,
@@ -112,6 +114,7 @@ class TelegramBot:
 
         pending = PendingMessage(
             user_id=user_id,
+            message_id=update.message.message_id,
             user_info=user_info,
             media_type="photo",
             photo_file_paths=[photo_file_path],
@@ -131,31 +134,30 @@ class TelegramBot:
         }
         return message.from_user.id, message.chat.id, user_info, timestamp
 
-    async def send_message(self, chat_id: int, message: str) -> None:
+    async def send_message(
+        self,
+        chat_id: int,
+        message: str,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> None:
         for _ in range(3):
             await asyncio.sleep(1)
             await self.telegram_api.send_typing_action(self.bot, chat_id=chat_id)
-        await self.telegram_api.send_message(self.bot, chat_id=chat_id, message=message)
-
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.message.reply_text("Start!")
-
-    async def reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.message.reply_text("Reset!")
-
-    async def settings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.message.reply_text("Settings!")
-
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.message.reply_text("Help!")
+        await self.telegram_api.send_message(
+            self.bot,
+            chat_id=chat_id,
+            message=message,
+            reply_to_message_id=reply_to_message_id,
+        )
 
     def register_handlers(self):
         self.telegram_api.register_handlers(
             application=self.application,
-            start_handler=self.start_command,
-            reset_handler=self.reset_command,
-            settings_handler=self.settings_command,
-            help_handler=self.help_command,
+            start_handler=self.handle_text_message,
+            reset_handler=self.handle_text_message,
+            settings_handler=self.handle_text_message,
+            help_handler=self.handle_text_message,
             text_handler=self.handle_text_message,
             voice_handler=self.handle_voice_message,
             photo_handler=self.handle_photo_message,

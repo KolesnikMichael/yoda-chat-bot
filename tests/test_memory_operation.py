@@ -151,6 +151,11 @@ def test_determine_chat_type():
         user_id=1, chat_id=2) == "group"
 
 
+def test_process_reply_stub_single_part():
+    parts = CognitionCore.process_reply("One reply")
+    assert parts == [{"text": "One reply", "message_id": None}]
+
+
 def test_build_system_prompt_private_chat():
     prompt = AffectCore.build_system_prompt(chat_type="private")
 
