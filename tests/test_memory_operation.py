@@ -81,10 +81,10 @@ async def test_update_chat_info_creates_chat():
 
     saved_chat = json.loads(storage.data["chats"]["1"])
     assert saved_chat["chat_type"] == "private"
-    assert saved_chat["schema_version"] == 3
+    assert saved_chat["schema_version"] == 4
     assert saved_chat["updated_on"] != ""
     assert "conversation" not in saved_chat
-    assert "users" in saved_chat
+    assert "users" not in saved_chat
 
 
 @pytest.mark.asyncio
@@ -99,9 +99,9 @@ async def test_update_chat_info_migrates_v1_chat():
         chat_id=1, chat_type="private", last_active="2026-02-20T00:00:00")
 
     saved_chat = json.loads(storage.data["chats"]["1"])
-    assert saved_chat["schema_version"] == 3
+    assert saved_chat["schema_version"] == 4
     assert "conversation" not in saved_chat
-    assert "users" in saved_chat
+    assert "users" not in saved_chat
 
 
 @pytest.mark.asyncio
@@ -217,19 +217,19 @@ def test_migrate_user_profiles_v1_to_v2():
     assert "miscellaneous" not in result
 
 
-def test_migrate_chats_v1_to_v3():
+def test_migrate_chats_v1_to_v4():
     data = {"schema_version": 1}
 
     result = migrate("chats", data)
 
-    assert result["schema_version"] == 3
+    assert result["schema_version"] == 4
     assert "conversation" not in result
-    assert "users" in result
+    assert "users" not in result
     assert "history" in result
     assert "updated_on" in result
 
 
-def test_migrate_chats_v2_to_v3():
+def test_migrate_chats_v2_to_v4():
     data = {
         "chat_type": "private",
         "history": [],
@@ -239,10 +239,27 @@ def test_migrate_chats_v2_to_v3():
 
     result = migrate("chats", data)
 
-    assert result["schema_version"] == 3
-    assert result["users"] == [42, 7]
+    assert result["schema_version"] == 4
+    assert "users" not in result
     assert "conversation" not in result
     assert result["updated_on"] == ""
+
+
+def test_migrate_chats_v3_to_v4_strips_users():
+    data = {
+        "chat_type": "group",
+        "users": [1, 2, 3],
+        "history": [],
+        "updated_on": "2026-01-01T00:00:00",
+        "schema_version": 3,
+    }
+
+    result = migrate("chats", data)
+
+    assert result["schema_version"] == 4
+    assert "users" not in result
+    assert result["chat_type"] == "group"
+    assert result["updated_on"] == "2026-01-01T00:00:00"
 
 
 def test_migrate_noop_for_current_version():

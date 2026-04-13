@@ -36,12 +36,19 @@ def _chats_v2_to_v3(data: dict) -> dict:
     return data
 
 
+def _chats_v3_to_v4(data: dict) -> dict:
+    data.pop("users", None)
+    data["schema_version"] = 4
+    return data
+
+
 MIGRATIONS: dict[str, dict[int, MigrationStep]] = {
     "users": {1: _users_v1_to_v2},
     "user_profiles": {1: _user_profiles_v1_to_v2},
     "chats": {
         1: _chats_v1_to_v2,
         2: _chats_v2_to_v3,
+        3: _chats_v3_to_v4,
     },
 }
 
