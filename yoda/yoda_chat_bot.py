@@ -3,6 +3,7 @@ import argparse
 import json
 import logging
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -35,10 +36,13 @@ from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.speech_api import SpeechApi
 from yoda.api.llm_api import LLMApi
 from yoda.api.tavily_api import TavilyApi
+from yoda.api.pixazo_api import PixazoApi
 from yoda.mind.agent.tools.get_user_data_tool import GetUserDataTool
 from yoda.mind.agent.tools.delete_user_data_tool import DeleteUserDataTool
 from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
 from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+from yoda.mind.agent.tools.text_to_image_tool import TextToImageTool
+from yoda.mind.agent.tools.send_picture_tool import SendPictureTool
 from yoda.mind.agent.skills.catalog import SkillCatalog
 
 
@@ -140,6 +144,22 @@ def main() -> None:
 
     tavily_api = TavilyApi(api_key=tavily_api_key)
 
+    try:
+        text_to_image_settings = settings_json["agent"]["tools"]["text_to_image"]
+        pixazo_api_key = text_to_image_settings["pixazo_api_key"]
+        gateway_url = text_to_image_settings["gateway_url"]
+    except KeyError as e:
+        raise ValueError(
+            f"Settings missing text_to_image key: {e.args[0]}") from e
+
+    body = TelegramBot(telegram_settings, args.test)
+
+    async def send_picture_to_chat(chat_id: int, file_path: str) -> None:
+        await body.telegram_api.send_photo(
+            body.bot, chat_id, photo_path=file_path)
+
+    pixazo_api = PixazoApi(gateway_url=gateway_url, api_key=pixazo_api_key)
+
     tools = [
         AskUserTool(),
         SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api),
@@ -154,6 +174,8 @@ def main() -> None:
             scheduler_api=scheduler_api,
             memory_provider=memory_provider,
         ),
+        TextToImageTool(pixazo_api=pixazo_api),
+        SendPictureTool(send_photo=send_picture_to_chat),
     ]
     skills_dir = Path(__file__).parent / "mind" / "agent" / "skills"
     session_provider = AgentSessionProvider(storage_api=storage_api)
@@ -200,13 +222,40 @@ def main() -> None:
             except Exception:
                 logger.warning("Periodic job cleanup failed", exc_info=True)
 
-    async def on_app_start(_application):
+    shutdown_state = {"scheduled": False}
+    shutdown_lock = asyncio.Lock()
+
+    async def on_app_start(application):
+        await memory_provider.restore_conversation_stash()
+
+        async def graceful_shutdown() -> None:
+            async with shutdown_lock:
+                if shutdown_state["scheduled"]:
+                    return
+                shutdown_state["scheduled"] = True
+            try:
+                await memory_provider.save_conversation_stash()
+            except Exception:
+                logger.exception("Failed to save conversation stash on shutdown")
+            try:
+                await application.stop()
+            except Exception:
+                logger.exception("Failed to stop Telegram application")
+
+        def schedule_shutdown() -> None:
+            asyncio.create_task(graceful_shutdown())
+
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, schedule_shutdown)
+            except (NotImplementedError, RuntimeError, ValueError) as e:
+                logger.debug(f"Signal handler not registered for {sig}: {e}")
+
         scheduler_api.start()
-        await asyncio.sleep(2) # let APScheduler process misfired jobs
+        await asyncio.sleep(2)  # let APScheduler process misfired jobs
         await reconcile_active_jobs(storage_api, scheduler_api)
         asyncio.create_task(periodic_job_cleanup())
-
-    body = TelegramBot(telegram_settings, args.test)
 
     body.wake_up(mind, on_start=on_app_start)
 

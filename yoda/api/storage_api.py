@@ -25,3 +25,12 @@ class StorageApi:
 
     async def hgetall(self, key: str) -> dict[str, str]:
         return await asyncio.to_thread(self._client.hgetall, key)
+
+    async def get(self, key: str) -> str | None:
+        return await asyncio.to_thread(self._client.get, key)
+
+    async def set(self, key: str, value: str) -> bool | None:
+        return await asyncio.to_thread(self._client.set, key, value)
+
+    async def delete(self, key: str) -> int:
+        return await asyncio.to_thread(self._client.delete, key)

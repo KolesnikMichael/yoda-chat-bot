@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -924,6 +925,113 @@ async def test_delete_user_data_missing_user_id():
 
     assert result.success is False
     assert "user_id" in result.output
+
+
+@pytest.mark.asyncio
+async def test_text_to_image_success_writes_file(tmp_path, monkeypatch):
+    from yoda.mind.agent.tools.text_to_image_tool import TextToImageTool
+    import yoda.mind.agent.tools.text_to_image_tool as tti_mod
+
+    monkeypatch.setattr(tti_mod, "FILE_CACHE_DIR", str(tmp_path))
+
+    class FakePixazo:
+        async def generate_image_bytes(self, prompt: str, **kwargs):
+            assert "cat" in prompt.lower()
+            return b"\x89PNG\r\n\x1a\nfake"
+
+    tool = TextToImageTool(
+        pixazo_api=FakePixazo(),  # type: ignore[arg-type]
+    )
+    call = ToolCall(
+        tool_name="text_to_image",
+        arguments={"english_prompt": "A small cat on a mat"},
+    )
+    result = await tool.execute(call)
+
+    assert result.success is True
+    p = Path(result.output)
+    assert p.is_file()
+    assert p.suffix == ".png"
+    assert p.read_bytes().startswith(b"\x89PNG")
+
+
+@pytest.mark.asyncio
+async def test_text_to_image_invalid_params():
+    from yoda.api.pixazo_api import PixazoApi
+    from yoda.mind.agent.tools.text_to_image_tool import TextToImageTool
+
+    tool = TextToImageTool(pixazo_api=PixazoApi("http://example.com", "k"))
+    call = ToolCall(tool_name="text_to_image", arguments={})
+    result = await tool.execute(call)
+    assert result.success is False
+    assert "Invalid parameters" in result.output
+
+
+@pytest.mark.asyncio
+async def test_send_picture_success_deletes_file(tmp_path):
+    from yoda.mind.agent.tools.send_picture_tool import SendPictureTool
+
+    img = tmp_path / "x.png"
+    img.write_bytes(b"x")
+
+    sent: list[tuple[int, str]] = []
+
+    async def send_photo(chat_id: int, file_path: str) -> None:
+        sent.append((chat_id, file_path))
+
+    tool = SendPictureTool(send_photo=send_photo)
+    call = ToolCall(
+        tool_name="send_picture",
+        arguments={
+            "file_path": str(img),
+            "summary_for_chat": "A red balloon",
+        },
+        metadata={"chat_id": 99},
+    )
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert sent[0][0] == 99
+    assert "red balloon" in result.output.lower()
+    assert not img.exists()
+
+
+@pytest.mark.asyncio
+async def test_send_picture_missing_file(tmp_path):
+    from yoda.mind.agent.tools.send_picture_tool import SendPictureTool
+
+    async def send_photo(chat_id: int, file_path: str) -> None:
+        raise AssertionError("should not run")
+
+    tool = SendPictureTool(send_photo=send_photo)
+    call = ToolCall(
+        tool_name="send_picture",
+        arguments={
+            "file_path": str(tmp_path / "nope.png"),
+            "summary_for_chat": "x",
+        },
+        metadata={"chat_id": 1},
+    )
+    result = await tool.execute(call)
+    assert result.success is False
+    assert "not found" in result.output.lower()
+
+
+@pytest.mark.asyncio
+async def test_send_picture_missing_chat_id():
+    from yoda.mind.agent.tools.send_picture_tool import SendPictureTool
+
+    async def _noop(_chat_id: int, _path: str) -> None:
+        pass
+
+    tool = SendPictureTool(send_photo=_noop)
+    call = ToolCall(
+        tool_name="send_picture",
+        arguments={"file_path": "/tmp/x", "summary_for_chat": "y"},
+    )
+    result = await tool.execute(call)
+    assert result.success is False
+    assert "chat_id" in result.output
 
 
 @pytest.mark.asyncio

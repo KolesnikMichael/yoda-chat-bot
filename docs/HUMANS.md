@@ -18,6 +18,12 @@
 - Add rate limits for APIs
 
 ## Implement
+- Compress chat:
+  - Triggers:
+    - Size over 300 messages
+    - Scheduled run
+  - Entries to compress: 1/2 of oldest, greater than 30
+  - Non-linear compression: exponential or outlook-style
 - Skill: schedule_task
 - Skill: draw_picture
 - In group chats rather use reply than send_message

@@ -31,6 +31,24 @@ class TelegramApi:
             kwargs["reply_to_message_id"] = reply_to_message_id
         await bot.send_message(**kwargs)
 
+    async def send_photo(
+        self,
+        bot,
+        chat_id: int,
+        *,
+        photo_path: str,
+        reply_to_message_id: int | None = None,
+    ) -> None:
+        # Pass path str to bot.send_photo — PTB opens the file via parse_file_input.
+        # Do NOT wrap in InputFile(str): InputFile treats str as raw text bytes, not a path.
+        kwargs: dict = {
+            "chat_id": chat_id,
+            "photo": photo_path,
+        }
+        if reply_to_message_id is not None:
+            kwargs["reply_to_message_id"] = reply_to_message_id
+        await bot.send_photo(**kwargs)
+
     async def download_voice_to_cache(self, message, cache_dir: str = FILE_CACHE_DIR) -> str:
         voice_file = await message.voice.get_file()
         return await voice_file.download_to_drive(custom_path=f"{cache_dir}/voice_{time.time()}.ogg")

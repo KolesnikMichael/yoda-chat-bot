@@ -5,13 +5,21 @@ import pytest
 from yoda.mind.affect import AffectCore
 from yoda.mind.cognition import CognitionCore
 from yoda.mind.memory.data.system_prompt import DEFAULT_SYSTEM_PROMPT
-from yoda.mind.memory.memory import MemoryCore, MemoryProvider
+from yoda.mind.memory.data.conversation import Conversation
+from yoda.mind.memory.data.message import Message
+from yoda.mind.memory.memory import (
+    CONVERSATION_STASH_REDIS_KEY,
+    CONVERSATION_STASH_SCHEMA_VERSION,
+    MemoryCore,
+    MemoryProvider,
+)
 from yoda.mind.memory.migration import migrate
 
 
 class FakeStorageApi:
     def __init__(self):
         self.data = {}
+        self.strings: dict[str, str] = {}
 
     async def hget(self, key: str, field: str):
         return self.data.get(key, {}).get(field)
@@ -20,6 +28,16 @@ class FakeStorageApi:
         bucket = self.data.setdefault(key, {})
         bucket[field] = value
         return 1
+
+    async def get(self, key: str):
+        return self.strings.get(key)
+
+    async def set(self, key: str, value: str):
+        self.strings[key] = value
+        return True
+
+    async def delete(self, key: str):
+        return 1 if self.strings.pop(key, None) is not None else 0
 
 
 @pytest.mark.asyncio
@@ -268,3 +286,89 @@ def test_migrate_noop_for_current_version():
     result = migrate("users", data)
 
     assert result == data
+
+
+def test_conversations_to_stash_dict_roundtrip_core():
+    conv = Conversation(
+        chat_id=42,
+        messages=[
+            Message(role="system", text="sys"),
+            Message(
+                role="user",
+                text="hi",
+                message_id=100,
+                user_id=7,
+            ),
+        ],
+    )
+    convs = {MemoryCore.conversation_key(42): conv}
+    wire = MemoryCore.conversations_to_stash_dict(convs)
+    assert wire["schema_version"] == CONVERSATION_STASH_SCHEMA_VERSION
+    restored = MemoryCore.stash_dict_to_conversations(wire)
+    assert len(restored) == 1
+    r = restored["42"]
+    assert r.chat_id == 42
+    assert len(r.messages) == 2
+    assert r.messages[1].text == "hi"
+    assert r.messages[1].message_id == 100
+    assert r.messages[1].user_id == 7
+
+
+@pytest.mark.asyncio
+async def test_conversation_stash_save_restore_deletes_redis_key():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    conv = Conversation(
+        chat_id=1,
+        messages=[Message(role="user", text="yo", message_id=1, user_id=1)],
+    )
+    memory.save_conversation(conv)
+
+    await memory.save_conversation_stash()
+    assert CONVERSATION_STASH_REDIS_KEY in storage.strings
+
+    memory2 = MemoryProvider(storage_api=storage)
+    await memory2.restore_conversation_stash()
+    assert CONVERSATION_STASH_REDIS_KEY not in storage.strings
+    got = memory2.get_conversation(1)
+    assert got is not None
+    assert got.messages[0].text == "yo"
+
+
+@pytest.mark.asyncio
+async def test_conversation_stash_restore_missing_key_noop():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    await memory.restore_conversation_stash()
+    assert storage.strings == {}
+
+
+@pytest.mark.asyncio
+async def test_conversation_stash_save_empty_deletes_key():
+    storage = FakeStorageApi()
+    storage.strings[CONVERSATION_STASH_REDIS_KEY] = '{"stale": true}'
+    memory = MemoryProvider(storage_api=storage)
+    await memory.save_conversation_stash()
+    assert CONVERSATION_STASH_REDIS_KEY not in storage.strings
+
+
+@pytest.mark.asyncio
+async def test_conversation_stash_migrates_v1_content_field():
+    storage = FakeStorageApi()
+    storage.strings[CONVERSATION_STASH_REDIS_KEY] = json.dumps({
+        "schema_version": 1,
+        "conversations": {
+            "9": {
+                "chat_id": 9,
+                "messages": [
+                    {"role": "user", "content": "legacy"},
+                ],
+            },
+        },
+    })
+    memory = MemoryProvider(storage_api=storage)
+    await memory.restore_conversation_stash()
+    assert CONVERSATION_STASH_REDIS_KEY not in storage.strings
+    conv = memory.get_conversation(9)
+    assert conv is not None
+    assert conv.messages[0].text == "legacy"

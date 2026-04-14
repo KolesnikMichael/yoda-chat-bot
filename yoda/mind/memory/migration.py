@@ -42,6 +42,25 @@ def _chats_v3_to_v4(data: dict) -> dict:
     return data
 
 
+def _conversation_stash_v1_to_v2(data: dict) -> dict:
+    """Normalize legacy message dicts (e.g. content instead of text)."""
+    conversations = data.get("conversations", {})
+    for _cid, payload in conversations.items():
+        if not isinstance(payload, dict):
+            continue
+        for msg in payload.get("messages", []):
+            if not isinstance(msg, dict):
+                continue
+            if "text" not in msg and "content" in msg:
+                msg["text"] = msg.pop("content")
+            msg.setdefault("media_type", "text")
+            msg.setdefault("timestamp", "")
+            msg.setdefault("message_id", None)
+            msg.setdefault("user_id", None)
+    data["schema_version"] = 2
+    return data
+
+
 MIGRATIONS: dict[str, dict[int, MigrationStep]] = {
     "users": {1: _users_v1_to_v2},
     "user_profiles": {1: _user_profiles_v1_to_v2},
@@ -49,6 +68,9 @@ MIGRATIONS: dict[str, dict[int, MigrationStep]] = {
         1: _chats_v1_to_v2,
         2: _chats_v2_to_v3,
         3: _chats_v3_to_v4,
+    },
+    "conversation_stash": {
+        1: _conversation_stash_v1_to_v2,
     },
 }
 

@@ -1,15 +1,21 @@
 import datetime as dtm
 import json
 import logging
+from dataclasses import MISSING, asdict, fields
 
 from .data.chat import Chat
 from .data.conversation import Conversation
+from .data.message import Message
 from .data.system_prompt import DEFAULT_SYSTEM_PROMPT
 from .data.user import User
 from .data.user_profile import UserProfile
 from .migration import migrate
 
 logger = logging.getLogger(__name__)
+
+# Ephemeral Redis STRING: written on graceful shutdown, consumed and deleted on next startup.
+CONVERSATION_STASH_REDIS_KEY = "conversation_stash"
+CONVERSATION_STASH_SCHEMA_VERSION = 2
 
 
 class MemoryCore:
@@ -43,6 +49,55 @@ class MemoryCore:
         )
         return conversation, conversation.to_llm_messages()
 
+    @staticmethod
+    def conversations_to_stash_dict(conversations: dict[str, Conversation]) -> dict:
+        wire_conversations: dict[str, dict] = {}
+        for key, conv in conversations.items():
+            wire_conversations[key] = {
+                "chat_id": conv.chat_id,
+                "messages": [asdict(m) for m in conv.messages],
+            }
+        return {
+            "schema_version": CONVERSATION_STASH_SCHEMA_VERSION,
+            "conversations": wire_conversations,
+        }
+
+    @staticmethod
+    def _message_from_stash_dict(msg: dict) -> Message:
+        kwargs: dict = {}
+        for field in fields(Message):
+            if field.name in msg:
+                kwargs[field.name] = msg[field.name]
+            elif field.default_factory is not MISSING:
+                kwargs[field.name] = field.default_factory()
+            elif field.default is not MISSING:
+                kwargs[field.name] = field.default
+            else:
+                raise ValueError(
+                    f"Conversation stash: missing required message field {field.name!r}"
+                )
+        return Message(**kwargs)
+
+    @staticmethod
+    def stash_dict_to_conversations(data: dict) -> dict[str, Conversation]:
+        raw = data.get("conversations", {})
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[str, Conversation] = {}
+        for _key, payload in raw.items():
+            if not isinstance(payload, dict):
+                continue
+            chat_id = int(payload["chat_id"])
+            messages: list[Message] = []
+            for msg in payload.get("messages", []):
+                if not isinstance(msg, dict):
+                    continue
+                messages.append(MemoryCore._message_from_stash_dict(msg))
+            out[MemoryCore.conversation_key(chat_id)] = Conversation(
+                chat_id=chat_id, messages=messages
+            )
+        return out
+
 
 class MemoryProvider:
     def __init__(self, storage_api):
@@ -60,6 +115,40 @@ class MemoryProvider:
     def forget_conversation(self, chat_id: int) -> None:
         key = MemoryCore.conversation_key(chat_id)
         self._conversations.pop(key, None)
+
+    async def save_conversation_stash(self) -> None:
+        if not self._conversations:
+            await self._storage_api.delete(CONVERSATION_STASH_REDIS_KEY)
+            logger.info("Conversation stash: no conversations to save, key removed")
+            return
+        payload = MemoryCore.conversations_to_stash_dict(self._conversations)
+        raw = json.dumps(payload)
+        await self._storage_api.set(CONVERSATION_STASH_REDIS_KEY, raw)
+        logger.info(f"Conversation stash: saved {len(self._conversations)} chat(s) to Redis")
+
+    async def restore_conversation_stash(self) -> None:
+        raw = await self._storage_api.get(CONVERSATION_STASH_REDIS_KEY)
+        if not raw:
+            return
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.exception("Conversation stash: invalid JSON, key left in place")
+            return
+        if not isinstance(data, dict):
+            logger.error("Conversation stash: root must be an object, key left in place")
+            return
+        try:
+            data = migrate("conversation_stash", data)
+            restored = MemoryCore.stash_dict_to_conversations(data)
+        except Exception:
+            logger.exception(
+                "Conversation stash: restore failed, key left in place for inspection"
+            )
+            return
+        self._conversations = restored
+        await self._storage_api.delete(CONVERSATION_STASH_REDIS_KEY)
+        logger.info(f"Conversation stash: restored {len(restored)} chat(s), key removed")
 
     async def update_sender_info(self, user_id: int, user_info: dict) -> None:
         raw = await self._storage_api.hget("users", str(user_id))
