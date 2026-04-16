@@ -14,7 +14,7 @@ class FakeTelegramApi:
         self.registered = False
         self.ran = False
 
-    def build_application(self, token: str):
+    def build_application(self, token: str, post_stop=None):
         return self.application
 
     def register_handlers(self, **kwargs):
@@ -204,6 +204,40 @@ async def test_flush_batch_sends_to_mind():
     assert kwargs["chat_id"] == 100
     assert len(kwargs["batch"]) == 1
     assert chat_id not in bot._pending_batches
+
+
+@pytest.mark.asyncio
+async def test_flush_pending_batches_calls_mind_per_chat():
+    bot = build_bot()
+    mind = SimpleNamespace(process_message_batch=AsyncMock())
+    bot.mind = mind
+
+    bot._pending_batches[100] = [
+        PendingMessage(
+            user_id=42,
+            message_id=1,
+            user_info={"last_active": "now"},
+            media_type="text",
+            text="a",
+        ),
+    ]
+    bot._pending_batches[200] = [
+        PendingMessage(
+            user_id=43,
+            message_id=2,
+            user_info={"last_active": "now"},
+            media_type="text",
+            text="b",
+        ),
+    ]
+
+    await bot.flush_pending_batches()
+
+    assert mind.process_message_batch.await_count == 2
+    assert 100 not in bot._pending_batches
+    assert 200 not in bot._pending_batches
+    chats = {c.kwargs["chat_id"] for c in mind.process_message_batch.await_args_list}
+    assert chats == {100, 200}
 
 
 @pytest.mark.asyncio

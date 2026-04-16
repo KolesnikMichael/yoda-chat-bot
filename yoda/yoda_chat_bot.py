@@ -3,7 +3,6 @@ import argparse
 import json
 import logging
 import os
-import signal
 import sys
 from pathlib import Path
 
@@ -152,7 +151,48 @@ def main() -> None:
         raise ValueError(
             f"Settings missing text_to_image key: {e.args[0]}") from e
 
-    body = TelegramBot(telegram_settings, args.test)
+    async def periodic_job_cleanup() -> None:
+        while True:
+            await asyncio.sleep(24 * 60 * 60)
+            try:
+                await reconcile_active_jobs(storage_api, scheduler_api)
+            except Exception:
+                logger.warning("Periodic job cleanup failed", exc_info=True)
+
+    periodic_cleanup_holder: dict[str, asyncio.Task | None] = {"task": None}
+
+    async def on_post_stop(_application) -> None:
+        logger.info("post_stop: started")
+        t = periodic_cleanup_holder.get("task")
+        if t is not None and not t.done():
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+            logger.info("post_stop: periodic job cleanup task cancelled")
+        elif t is not None:
+            logger.info("post_stop: periodic job cleanup task already finished")
+
+        try:
+            await body.flush_pending_batches()
+            logger.info("post_stop: pending batches flushed")
+        except Exception:
+            logger.exception("post_stop: failed to flush pending batches")
+
+        try:
+            scheduler_api.shutdown()
+            logger.info("post_stop: scheduler shut down")
+        except Exception:
+            logger.exception("post_stop: failed to shut down scheduler")
+
+        try:
+            await memory_provider.save_conversation_stash()
+            logger.info("post_stop: conversation stash save finished")
+        except Exception:
+            logger.exception("post_stop: failed to save conversation stash")
+
+    body = TelegramBot(telegram_settings, args.test, post_stop=on_post_stop)
 
     async def send_picture_to_chat(chat_id: int, file_path: str) -> None:
         await body.telegram_api.send_photo(
@@ -214,50 +254,15 @@ def main() -> None:
 
     scheduler_api.set_cleanup_callback(cleanup_job_metadata)
 
-    async def periodic_job_cleanup() -> None:
-        while True:
-            await asyncio.sleep(24 * 60 * 60)
-            try:
-                await reconcile_active_jobs(storage_api, scheduler_api)
-            except Exception:
-                logger.warning("Periodic job cleanup failed", exc_info=True)
-
-    shutdown_state = {"scheduled": False}
-    shutdown_lock = asyncio.Lock()
-
     async def on_app_start(application):
         await memory_provider.restore_conversation_stash()
-
-        async def graceful_shutdown() -> None:
-            async with shutdown_lock:
-                if shutdown_state["scheduled"]:
-                    return
-                shutdown_state["scheduled"] = True
-            try:
-                await memory_provider.save_conversation_stash()
-            except Exception:
-                logger.exception("Failed to save conversation stash on shutdown")
-            try:
-                await application.stop()
-            except Exception:
-                logger.exception("Failed to stop Telegram application")
-
-        def schedule_shutdown() -> None:
-            asyncio.create_task(graceful_shutdown())
-
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.add_signal_handler(sig, schedule_shutdown)
-            except (NotImplementedError, RuntimeError, ValueError) as e:
-                logger.debug(f"Signal handler not registered for {sig}: {e}")
-
         scheduler_api.start()
         await asyncio.sleep(2)  # let APScheduler process misfired jobs
         await reconcile_active_jobs(storage_api, scheduler_api)
-        asyncio.create_task(periodic_job_cleanup())
+        periodic_cleanup_holder["task"] = asyncio.create_task(periodic_job_cleanup())
 
     body.wake_up(mind, on_start=on_app_start)
+    logger.info("main(): returned after run_polling (process should exit)")
 
 
 if __name__ == "__main__":

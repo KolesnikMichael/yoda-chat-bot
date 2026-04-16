@@ -40,11 +40,11 @@ class SchedulerApi:
 
     def start(self) -> None:
         self._scheduler.start()
-        logger.info("Scheduler started")
+        logger.debug("Scheduler started")
 
     def shutdown(self) -> None:
         self._scheduler.shutdown(wait=False)
-        logger.info("Scheduler shut down")
+        logger.debug("Scheduler shut down")
 
     def schedule_once(
         self,

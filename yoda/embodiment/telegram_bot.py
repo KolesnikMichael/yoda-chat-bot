@@ -1,7 +1,9 @@
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import Application, ContextTypes
 
 from yoda.api.telegram_api import TelegramApi
 from yoda.mind.memory.data.pending_message import PendingMessage
@@ -10,7 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
-    def __init__(self, settings, test_mode: bool = False, telegram_api: TelegramApi | None = None):
+    def __init__(
+        self,
+        settings,
+        test_mode: bool = False,
+        telegram_api: TelegramApi | None = None,
+        post_stop: Callable[[Application], Awaitable[None]] | None = None,
+    ):
         self.settings = settings
         self.telegram_api = telegram_api or TelegramApi()
         self._pending_batches: dict[int, list[PendingMessage]] = {}
@@ -23,7 +31,8 @@ class TelegramBot:
             raise ValueError(
                 f"Telegram settings missing required '{token_key}'") from e
 
-        self.application = self.telegram_api.build_application(bot_token)
+        self.application = self.telegram_api.build_application(
+            bot_token, post_stop=post_stop)
         self.bot = self.application.bot
 
         self.register_handlers()
@@ -49,12 +58,23 @@ class TelegramBot:
             data=chat_id, name=job_name,
         )
 
-    async def _flush_batch(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        chat_id = context.job.data
+    async def _flush_pending_batch_for_chat(self, chat_id: int) -> None:
         batch = self._pending_batches.pop(chat_id, None)
         if not batch:
             return
+        logger.info(
+            f"Flushing pending batch for chat {chat_id} ({len(batch)} message(s))"
+        )
         await self.mind.process_message_batch(chat_id=chat_id, batch=batch)
+
+    async def _flush_batch(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._flush_pending_batch_for_chat(context.job.data)
+
+    async def flush_pending_batches(self) -> None:
+        if not self._pending_batches:
+            return
+        for chat_id in list(self._pending_batches.keys()):
+            await self._flush_pending_batch_for_chat(chat_id)
 
     def wake_up(self, mind, on_start=None):
         self.mind = mind
@@ -62,6 +82,7 @@ class TelegramBot:
         if on_start:
             self.application.post_init = on_start
         self.telegram_api.run_polling(self.application)
+        logger.info("TelegramBot: run_polling returned")
 
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id, chat_id, user_info, timestamp = self.get_message_info(

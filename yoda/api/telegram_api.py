@@ -1,13 +1,22 @@
 import time
+from collections.abc import Awaitable, Callable
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 FILE_CACHE_DIR = "./.file_cache"
 
+
 class TelegramApi:
-    def build_application(self, token: str) -> Application:
-        return Application.builder().token(token).build()
+    def build_application(
+        self,
+        token: str,
+        post_stop: Callable[[Application], Awaitable[None]] | None = None,
+    ) -> Application:
+        builder = Application.builder().token(token)
+        if post_stop is not None:
+            builder = builder.post_stop(post_stop)
+        return builder.build()
 
     def run_polling(self, application: Application) -> None:
         application.run_polling(allowed_updates=Update.ALL_TYPES)

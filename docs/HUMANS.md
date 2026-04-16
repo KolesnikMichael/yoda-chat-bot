@@ -4,8 +4,10 @@
 
 ## Fix
 - ReAct loop doesn't survive tool crashes like exception when using ask_user
+- System exit is missing from graceful shutdown
 
 ## Improve
+- Use lighter model (mistral-medium-2508) for Agent (and maybe classificator)
 - Stop calculating chat_type each time - it doesn't change
 - Scheduling jobs: Daylight saving is unlikely taken into account (and there are countries that do not use it)
 - Calculating timezone can be done when user provides his current time - add this hint to skill
@@ -18,33 +20,26 @@
 - Add rate limits for APIs
 
 ## Implement
-- Compress chat:
+- [internall skill] Conversation compression:
   - Triggers:
     - Size over 300 messages
     - Scheduled run
-  - Entries to compress: 1/2 of oldest, greater than 30
+  - Entries to compress: 1/2 of oldest but no less than 30
   - Non-linear compression: exponential or outlook-style
+  - Alternatively, use diary-style compression with skill-like catalog of records with frontmatters with date/topic.
+    - Research persistence techniques: Redis, MDs, vector db
+  - Rebuild system prompt after compression is done
+  - Re-insert users metadata if removed during compression
+- Internal skill: [local_buddy_]small_talk
+  - Gather in advance or lazily-collect facts on potential topics of interest and propose those for discussion with user
 - Skill: schedule_task
-- Skill: draw_picture
 - In group chats rather use reply than send_message
 - Tool: web_scrape_tool with Crawl4AI (https://medium.com/@speaktoharisudhan/crawling-with-crawl4ai-the-open-source-scraping-beast-9d32e6946ad4)
 - Make periodic_job_cleanup sub-routine of general maintenance routine. Add sub-routine for updating chat and user profiles. Randomize sub-routines start time to distribute load (for instance, make it running every hour, but update only profiles that belong to entities that were inactive since last run (that is having: utc_now-2 < update_time < utc_now-1). Questions:
    - Which module should own those sub-routines? Could it be Memory?
-- Load chat profile when building system prompt
-- Add user profile to system prompt when user sends first message
-- Add create_picture skill. Options:
-  - Cloudflare Workers AI
-    - https://developers.cloudflare.com/workers-ai/models/stable-diffusion-xl-lightning/
-    - https://developers.cloudflare.com/workers-ai/models/stable-diffusion-xl-base-1.0/
-    - https://developers.cloudflare.com/workers-ai/models/stable-diffusion-v1-5-img2img/
-    - https://developers.cloudflare.com/workers-ai/models/stable-diffusion-v1-5-inpainting/
-    - https://developers.cloudflare.com/workers-ai/models/dreamshaper-8-lcm/
-  - AI Horde (community API)
-    - https://stablehorde.net/guis#section-guis-image
-  - Pixazo Free API Hub
-    - https://www.pixazo.ai/models/flux
-    - https://www.pixazo.ai/models/stable-diffusion
-    - https://www.pixazo.ai/models/sdxl
+- Add more context to the Conversation (critical after compression is in place):
+  - Load Chats metadata (history) when building system prompt
+  - Add user profile to system prompt or insert it with the system message when user sends first message
 
 ## Refactor
 - _classify_intent returns "chat" but it's never handled. It should be handled explicitly, and last elif in Mind.process_message_batch should log WARNING or something
