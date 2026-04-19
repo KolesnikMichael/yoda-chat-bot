@@ -1,6 +1,7 @@
 """Shared test doubles for Mind pipeline tests."""
 
 from yoda.mind.memory.data.conversation import Conversation
+from yoda.mind.memory.data.routing_context import RoutingContext
 from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.memory.memory import MemoryCore
 
@@ -66,5 +67,5 @@ class FakeCognitionProvider:
     def __init__(self, intent: str = "chat") -> None:
         self._intent = intent
 
-    async def classify_intent(self, user_text: str) -> str:
+    async def classify_intent(self, routing: RoutingContext) -> str:
         return self._intent

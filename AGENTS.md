@@ -38,8 +38,9 @@ yoda/
     agent/            # Agentic capabilities → see agent/AGENTS.md
 ```
 
-## Coding style
+## Coding guidelines
 
+- General guidelines: `coding_behavior.md`
 - `@staticmethod` on methods that don't need instance state
 - Private names: `_name` (PEP 8)
 - Explicit type hints on all functions and methods

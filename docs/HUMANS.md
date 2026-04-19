@@ -3,11 +3,21 @@
 - No connection pooling for Redis - what's that?
 
 ## Fix
+- Problems with Skill create_picture: 
+  1. Yoda is hallucinating about the picture created by agent because he has no description of it.
+  2. When tool is failig Yoda suggests extended user's description as a substitude.
+  3. The quality of created picture is often suboptimal.
+- How to address:
+  1. Extend the skill with the image-to-text step (new tool using the same API as VisionProvider is needed)
+  2. If the discription differs significantly from that of the user, return to skill's step 2 and  slightly adjust generation prompt. Make no more than three generation attempts, then choose the best matching picture and send it to chat.
+  - Add the description of the sent picture in the system prompt
 - ReAct loop doesn't survive tool crashes like exception when using ask_user
 - System exit is missing from graceful shutdown
 
 ## Improve
-- Use lighter model (mistral-medium-2508) for Agent (and maybe classificator)
+- search_web: user's time and location are important for some queries, ask about those if needed, and then use update_profile tool
+- ReAct: keeping user messages in AgentContext.messages after skill is selected might be confusing for Agent (perceived as futher instructions). Try to transform those into the task's details on Phase 1, and use ask_user if something is not clear.
+- Use mistral-medium-2508 for Agent, use mistral-large-latest for Yoda, decide about classify_intent call.
 - Stop calculating chat_type each time - it doesn't change
 - Scheduling jobs: Daylight saving is unlikely taken into account (and there are countries that do not use it)
 - Calculating timezone can be done when user provides his current time - add this hint to skill

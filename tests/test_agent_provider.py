@@ -11,6 +11,7 @@ from yoda.mind.agent.data.agent_data import (
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.tools.ask_user_tool import AskUserTool
 from yoda.mind.agent.tools.tool_port import Tool
+from yoda.mind.memory.data.routing_context import RoutingContext
 from yoda.mind.memory.data.user_profile import UserProfile
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "skills"
@@ -89,7 +90,10 @@ def _build_provider(
 @pytest.mark.asyncio
 async def test_full_flow_select_skill_and_use_tool():
     decisions = [
-        Decision(selected_skill="test_skill"),
+        Decision(
+            selected_skill="test_skill",
+            distilled_task="Search the web for something relevant.",
+        ),
         Decision(tool_calls=[
             ToolCallRequest(tool_name="web_search", arguments={"query": "test"}),
         ]),
@@ -112,7 +116,10 @@ async def test_full_flow_select_skill_and_use_tool():
 async def test_llm_context_static_system_and_tools_in_activation():
     """Phase 1: system prompt has no tool catalog; Phase 2: tools in activation user message."""
     decisions = [
-        Decision(selected_skill="test_skill"),
+        Decision(
+            selected_skill="test_skill",
+            distilled_task="Do the distilled task.",
+        ),
         Decision(tool_calls=[
             ToolCallRequest(tool_name="web_search", arguments={"query": "q"}),
         ]),
@@ -129,10 +136,42 @@ async def test_llm_context_static_system_and_tools_in_activation():
     assert "Current UTC time:" in phase1[-1]["content"]
 
     phase2 = llm.messages_log[1]
+    joined = "\n".join(
+        m.get("content", "") for m in phase2 if isinstance(m.get("content"), str))
+    assert "Recent conversation (newest last):" not in joined
+    assert "Select the best skill" not in joined
+    task_user = phase2[1]
+    assert task_user["role"] == "user"
+    assert "Task:" in task_user["content"]
+    assert "Do the distilled task." in task_user["content"]
     activation = next(
         m for m in phase2 if m["role"] == "user" and "activated" in m["content"])
     assert "Available tools:" in activation["content"]
     assert "web_search" in activation["content"]
+
+
+@pytest.mark.asyncio
+async def test_selection_includes_recent_when_routing_provided():
+    decisions = [
+        Decision(final_answer="cannot"),
+    ]
+    provider, llm = _build_provider(decisions)
+    routing = RoutingContext(
+        current_user_text="make it 6pm",
+        recent_messages=[{"role": "user", "content": "remind at 5"}],
+    )
+    await provider.run(
+        task="make it 6pm",
+        profile=UserProfile(),
+        chat_id=99,
+        routing=routing,
+    )
+    phase1 = llm.messages_log[0]
+    selection = phase1[1]
+    assert selection["role"] == "user"
+    assert "Recent conversation (newest last):" in selection["content"]
+    assert "remind at 5" in selection["content"]
+    assert "Task: make it 6pm" in selection["content"]
 
 
 @pytest.mark.asyncio
@@ -154,7 +193,10 @@ async def test_no_matching_skill_returns_final_answer():
 @pytest.mark.asyncio
 async def test_suspend_on_ask_user():
     decisions = [
-        Decision(selected_skill="test_skill"),
+        Decision(
+            selected_skill="test_skill",
+            distilled_task="Set a reminder; timezone unknown.",
+        ),
         Decision(tool_calls=[
             ToolCallRequest(tool_name="ask_user", arguments={"question": "What timezone?"}),
         ]),
@@ -175,7 +217,10 @@ async def test_suspend_on_ask_user():
 @pytest.mark.asyncio
 async def test_resume_after_suspend():
     decisions = [
-        Decision(selected_skill="test_skill"),
+        Decision(
+            selected_skill="test_skill",
+            distilled_task="Set a reminder.",
+        ),
         Decision(tool_calls=[
             ToolCallRequest(tool_name="ask_user", arguments={"question": "What timezone?"}),
         ]),
@@ -203,3 +248,37 @@ async def test_resume_without_session():
     result = await provider.resume(999, "some answer")
 
     assert result.answer == "No pending session found."
+
+
+@pytest.mark.asyncio
+async def test_phase1_ask_user_then_skill_then_execute():
+    decisions = [
+        Decision(tool_calls=[
+            ToolCallRequest(
+                tool_name="ask_user",
+                arguments={"question": "Which city?"},
+            ),
+        ]),
+        Decision(
+            selected_skill="test_skill",
+            distilled_task="Search for weather in the agreed city.",
+        ),
+        Decision(tool_calls=[
+            ToolCallRequest(tool_name="web_search", arguments={"query": "weather"}),
+        ]),
+        Decision(final_answer="Sunny."),
+    ]
+    provider, llm = _build_provider(decisions)
+    r1 = await provider.run(task="weather", profile=UserProfile(), chat_id=301)
+    assert r1.clarification == "Which city?"
+    assert await provider.has_pending_session(301) is True
+
+    r2 = await provider.resume(301, "Paris")
+    assert r2.answer == "Sunny."
+    assert await provider.has_pending_session(301) is False
+
+    assert len(llm.messages_log) == 4
+    phase2_first = "\n".join(
+        str(m.get("content", "")) for m in llm.messages_log[2])
+    assert "Recent conversation" not in phase2_first
+    assert "Select the best skill" not in phase2_first

@@ -125,6 +125,21 @@ def test_build_selection_message_empty_catalog():
 
 # --- build_activation_message ---
 
+def test_build_compact_execution_messages_order_and_content():
+    profile = UserProfile(timezone="Europe/Moscow")
+    activation = ReactLoop.build_activation_message(SKILL_SPEC, TOOL_SCHEMAS)
+    msgs = ReactLoop.build_compact_execution_messages(
+        profile, "Distilled brief.", SKILL_SPEC, activation)
+
+    assert len(msgs) == 4
+    assert msgs[0]["role"] == "system"
+    assert msgs[1]["role"] == "user"
+    assert msgs[1]["content"] == "Task:\nDistilled brief."
+    assert msgs[2]["role"] == "assistant"
+    assert "schedule_message" in msgs[2]["content"]
+    assert msgs[3] == activation
+
+
 def test_build_activation_message_contains_skill_spec_and_tools():
     msg = ReactLoop.build_activation_message(SKILL_SPEC, TOOL_SCHEMAS)
 
@@ -220,7 +235,7 @@ def test_append_tool_results_failed_tool():
 # --- validate_decision ---
 
 def test_validate_decision_rejects_unknown_skill():
-    ctx = _make_context()
+    ctx = _make_context(active_skill=None)
     decision = Decision(selected_skill="nonexistent_skill")
 
     validated = ReactLoop.validate_decision(
@@ -230,8 +245,45 @@ def test_validate_decision_rejects_unknown_skill():
     assert "Unknown skill" in validated.final_answer
 
 
+def test_validate_decision_phase1_rejects_skill_and_final_together():
+    ctx = _make_context(active_skill=None)
+    decision = Decision(selected_skill="schedule_message", final_answer="no")
+
+    validated = ReactLoop.validate_decision(
+        decision, ctx, {"schedule_message", "ask_user"})
+
+    assert validated.final_answer is not None
+    assert "exactly one" in validated.final_answer
+
+
+def test_validate_decision_phase1_rejects_non_infra_tool():
+    ctx = _make_context(active_skill=None)
+    decision = Decision(tool_calls=[
+        ToolCallRequest(tool_name="web_search", arguments={"query": "q"}),
+    ])
+
+    validated = ReactLoop.validate_decision(
+        decision, ctx, {"ask_user", "web_search"})
+
+    assert validated.final_answer is not None
+    assert "Phase 1 only allows" in validated.final_answer
+
+
+def test_validate_decision_phase1_allows_ask_user_only():
+    ctx = _make_context(active_skill=None)
+    decision = Decision(tool_calls=[
+        ToolCallRequest(tool_name="ask_user", arguments={"question": "?"}),
+    ])
+
+    validated = ReactLoop.validate_decision(
+        decision, ctx, {"ask_user", "web_search"})
+
+    assert validated.tool_calls
+    assert validated.final_answer is None
+
+
 def test_validate_decision_passes_valid_skill():
-    ctx = _make_context()
+    ctx = _make_context(active_skill=None)
     decision = Decision(selected_skill="schedule_message")
 
     validated = ReactLoop.validate_decision(
@@ -239,6 +291,27 @@ def test_validate_decision_passes_valid_skill():
 
     assert validated.selected_skill == "schedule_message"
     assert validated.final_answer is None
+
+
+def test_validate_decision_execution_strips_stray_phase1_fields():
+    ctx = _make_context(active_skill=SKILL_SPEC)
+    decision = Decision(
+        distilled_task="should be stripped",
+        selected_skill="schedule_message",
+        tool_calls=[
+            ToolCallRequest(
+                tool_name="schedule_message",
+                arguments={"reminder_text": "x"},
+            ),
+        ],
+    )
+
+    validated = ReactLoop.validate_decision(
+        decision, ctx, {"schedule_message", "ask_user"})
+
+    assert validated.distilled_task is None
+    assert validated.selected_skill is None
+    assert validated.tool_calls
 
 
 def test_validate_decision_rejects_unknown_tool():

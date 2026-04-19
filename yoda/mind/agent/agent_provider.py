@@ -14,10 +14,13 @@ from yoda.mind.agent.data.agent_data import (
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.skills.catalog import SkillCatalog
 from yoda.mind.agent.tools.tool_port import Tool
+from yoda.mind.memory.data.routing_context import RoutingContext
 from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.perception.language import LanguageProvider
 
 logger = logging.getLogger(__name__)
+
+_MAX_PHASE1_ROUNDS = 5
 
 
 class AgentProvider:
@@ -52,9 +55,13 @@ class AgentProvider:
         profile: UserProfile,
         chat_id: int,
         user_id: int = 0,
+        routing: RoutingContext | None = None,
     ) -> AgentResult:
+        effective_task = routing.current_user_text if routing else task
+        recent = routing.recent_messages if routing else []
+
         context = AgentContext(
-            task=task,
+            task=effective_task,
             profile=profile,
             chat_id=chat_id,
             user_id=user_id,
@@ -63,30 +70,19 @@ class AgentProvider:
 
         system_msg = ReactLoop.build_system_message(profile)
         selection_msg = ReactLoop.build_selection_message(
-            task, self._catalog_summaries)
+            effective_task,
+            self._catalog_summaries,
+            recent_messages=recent,
+        )
         context = context.with_messages([system_msg, selection_msg])
 
-        decision = await self._llm_decide(context)
-        logger.info(
-            f"Phase 1 decision: skill={decision.selected_skill}, "
-            f"final={decision.final_answer}, reasoning={decision.reasoning}")
-        decision = ReactLoop.validate_decision(
-            decision, context, self._available_tools_for_validation(context))
-        context = ReactLoop.append_assistant(context, decision)
-
-        if decision.final_answer:
-            return AgentResult(answer=decision.final_answer)
-
-        if decision.selected_skill:
-            skill = SkillCatalog.load_skill(
-                self._skills_dir, decision.selected_skill)
-            context = context.with_active_skill(skill)
-            filtered_schemas = ReactLoop.filter_tool_schemas(
-                self._tool_schemas, skill)
-            activation_msg = ReactLoop.build_activation_message(
-                skill, filtered_schemas)
-            context = context.with_messages(context.messages + [activation_msg])
-
+        context, decision, early = await self._run_until_skill_or_answer(context)
+        if early is not None:
+            if early.answer is not None:
+                await self._sessions.delete(context.chat_id)
+            return early
+        assert decision is not None
+        context = self._activate_skill_context(context, decision)
         return await self._execute_loop(context)
 
     async def resume(self, chat_id: int, user_answer: str) -> AgentResult:
@@ -96,6 +92,16 @@ class AgentProvider:
 
         answer_msg = {"role": "user", "content": f"User answered: {user_answer}"}
         context = context.with_messages(context.messages + [answer_msg])
+
+        if context.active_skill is None:
+            context, decision, early = await self._run_until_skill_or_answer(context)
+            if early is not None:
+                if early.answer is not None:
+                    await self._sessions.delete(context.chat_id)
+                return early
+            assert decision is not None
+            context = self._activate_skill_context(context, decision)
+
         return await self._execute_loop(context)
 
     async def _execute_loop(self, context: AgentContext) -> AgentResult:
@@ -196,3 +202,93 @@ class AgentProvider:
         utc_now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
         messages = ReactLoop.build_context(context, utc_now)
         return await self._llm.parse_structured(messages, Decision)
+
+    async def _run_until_skill_or_answer(
+        self,
+        context: AgentContext,
+    ) -> tuple[AgentContext, Decision | None, AgentResult | None]:
+        """Phase 1 loop: skill selection, decline, or infra tool calls (e.g. ask_user)."""
+        available = self._available_tools_for_validation(context)
+        for _ in range(_MAX_PHASE1_ROUNDS):
+            decision = await self._llm_decide(context)
+            logger.info(
+                "Phase 1 decision: skill=%s, final=%s, reasoning=%s",
+                decision.selected_skill,
+                decision.final_answer,
+                decision.reasoning,
+            )
+            decision = ReactLoop.validate_decision(
+                decision, context, available)
+            context = ReactLoop.append_assistant(context, decision)
+
+            if decision.final_answer:
+                return context, None, AgentResult(answer=decision.final_answer)
+
+            if decision.selected_skill:
+                return context, decision, None
+
+            if decision.effective_tool_calls:
+                tool_calls = [
+                    ToolCall(
+                        tool_name=tc.tool_name,
+                        arguments=tc.arguments,
+                        metadata={
+                            "chat_id": context.chat_id,
+                            "user_id": context.user_id,
+                            "profile_timezone": context.profile.timezone,
+                        },
+                    )
+                    for tc in decision.effective_tool_calls
+                ]
+                results = await asyncio.gather(*[
+                    self._tools[tc.tool_name].execute(tc)
+                    for tc in tool_calls
+                ])
+                suspended = next((r for r in results if r.suspend), None)
+                if suspended:
+                    context = ReactLoop.append_tool_results(
+                        context, list(results))
+                    await self._sessions.save(context)
+                    return context, None, AgentResult(
+                        clarification=suspended.output)
+
+                context = ReactLoop.append_tool_results(
+                    context, list(results))
+                continue
+
+            return context, None, AgentResult(
+                answer="Invalid Phase 1: expected tool_calls.")
+
+        return context, None, AgentResult(
+            answer="Selection phase exceeded iteration limit.")
+
+    def _activate_skill_context(
+        self,
+        context: AgentContext,
+        decision: Decision,
+    ) -> AgentContext:
+        assert decision.selected_skill
+        skill = SkillCatalog.load_skill(
+            self._skills_dir, decision.selected_skill)
+        raw_distill = (decision.distilled_task or "").strip()
+        distilled = raw_distill or context.task
+        if not raw_distill:
+            logger.warning(
+                "Phase 1 returned empty distilled_task; using prior task text")
+        filtered_schemas = ReactLoop.filter_tool_schemas(
+            self._tool_schemas, skill)
+        activation_msg = ReactLoop.build_activation_message(
+            skill, filtered_schemas)
+        messages = ReactLoop.build_compact_execution_messages(
+            context.profile, distilled, skill, activation_msg)
+        return AgentContext(
+            task=distilled,
+            profile=context.profile,
+            chat_id=context.chat_id,
+            user_id=context.user_id,
+            catalog_summaries=context.catalog_summaries,
+            active_skill=skill,
+            messages=messages,
+            iteration=0,
+            tools_used=[],
+        )

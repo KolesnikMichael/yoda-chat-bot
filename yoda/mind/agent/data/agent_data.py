@@ -52,6 +52,7 @@ class ToolCallRequest(BaseModel):
 
 class Decision(BaseModel):
     selected_skill: str | None = None
+    distilled_task: str | None = None
     tool_calls: list[ToolCallRequest] | None = Field(default=None)
     final_answer: str | None = None
     reasoning: str = ""

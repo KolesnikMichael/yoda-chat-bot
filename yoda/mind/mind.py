@@ -6,7 +6,9 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.memory.data.pending_message import PendingMessage
+from yoda.mind.memory.data.routing_context import RoutingContext
 
 from .affect import AffectCore, AffectProvider
 from .cognition import CognitionCore, CognitionProvider
@@ -94,18 +96,17 @@ class Mind:
             )
         self.memory_provider.save_conversation(conversation)
 
-        intent = await self._classify_intent(chat_id, perceived)
+        routing = CognitionCore.build_routing_context(perceived, conversation)
+        intent = await self._classify_intent(chat_id, routing)
 
         if intent == "agent_resume" and self.agent_provider:
-            user_text = CognitionCore.extract_user_text(perceived)
             await self._handle_agent_resume(
-                chat_id, user_text, system_prompt, conversation)
+                chat_id, routing.current_user_text, system_prompt, conversation)
 
         elif intent == "agent_task" and self.agent_provider:
             user_id = batch[0].user_id
-            user_text = CognitionCore.extract_user_text(perceived)
             await self._handle_agent_task(
-                chat_id, user_id, user_text, system_prompt, conversation)
+                chat_id, user_id, routing, system_prompt, conversation)
 
         elif intent == "chat" and CognitionCore.should_reply(chat_type) and messages:
             await self._reply_and_send(
@@ -149,22 +150,25 @@ class Mind:
                     if os.path.exists(path):
                         os.remove(path)
                         
-    async def _classify_intent(self, chat_id: int, perceived: list[dict]) -> str:
+    async def _classify_intent(
+        self,
+        chat_id: int,
+        routing: RoutingContext,
+    ) -> str:
         if self.agent_provider and await self.agent_provider.has_pending_session(chat_id):
             return "agent_resume"
 
         if not self.agent_provider:
             return "chat"
 
-        user_text = CognitionCore.extract_user_text(perceived)
-        if not user_text:
+        if not routing.current_user_text:
             return "chat"
 
         if self.cognition_provider is None:
             return "chat"
 
         try:
-            return await self.cognition_provider.classify_intent(user_text)
+            return await self.cognition_provider.classify_intent(routing)
         except Exception:
             logger.warning(
                 "Intent classification failed, defaulting to chat", exc_info=True)
@@ -174,13 +178,18 @@ class Mind:
         self,
         chat_id: int,
         user_id: int,
-        user_text: str,
+        routing: RoutingContext,
         system_prompt: str,
         conversation,
     ) -> None:
         profile = await self.memory_provider.get_user_profile(user_id, chat_id)
         result = await self.agent_provider.run(
-            task=user_text, profile=profile, chat_id=chat_id, user_id=user_id)
+            task=routing.current_user_text,
+            profile=profile,
+            chat_id=chat_id,
+            user_id=user_id,
+            routing=routing,
+        )
         await self._handle_agent_result(
             chat_id, result, system_prompt, conversation)
 

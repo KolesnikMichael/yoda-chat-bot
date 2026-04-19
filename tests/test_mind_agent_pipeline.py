@@ -26,8 +26,8 @@ class FakeAgentProvider:
     async def has_pending_session(self, chat_id):
         return self._has_session
 
-    async def run(self, task, profile, chat_id, user_id=0):
-        self.run_calls.append((task, profile, chat_id, user_id))
+    async def run(self, task, profile, chat_id, user_id=0, routing=None):
+        self.run_calls.append((task, profile, chat_id, user_id, routing))
         return self._result
 
     async def resume(self, chat_id, user_answer):
@@ -96,6 +96,8 @@ async def test_agent_task_delegates_to_agent():
 
     assert len(agent.run_calls) == 1
     assert agent.run_calls[0][0] == "remind me in 30 minutes"
+    assert agent.run_calls[0][4] is not None
+    assert agent.run_calls[0][4].current_user_text == "remind me in 30 minutes"
     assert len(sender.calls) == 1
     assert "Reminder set for 15:30" in sender.calls[0][1]
 

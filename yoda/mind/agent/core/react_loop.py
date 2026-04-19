@@ -5,6 +5,7 @@ from yoda.mind.agent.data.agent_data import (
     SkillSummary,
     ToolResult,
 )
+from yoda.mind.memory.data.routing_context import format_recent_messages_block
 from yoda.mind.memory.data.user_profile import UserProfile
 
 EXECUTOR_SYSTEM_PROMPT = (
@@ -13,17 +14,27 @@ EXECUTOR_SYSTEM_PROMPT = (
     "You MUST respond with a JSON object matching this schema:\n"
     '{{\n'
     '  "selected_skill": "skill_name or null",\n'
+    '  "distilled_task": "self-contained execution brief or null",\n'
     '  "tool_calls": [{{"tool_name": "name", "arguments": {{...}}}}],\n'
     '  "final_answer": "answer text or null",\n'
     '  "reasoning": "brief explanation of your decision"\n'
     '}}\n'
-    "Rules: set exactly ONE of: selected_skill (phase 1), tool_calls (phase 2), or final_answer (done)."
+    "Phase 1 (no skill active yet): set exactly ONE of:\n"
+    "  - selected_skill: when you pick a skill you MUST set distilled_task to a neutral, "
+    "self-contained description of what to accomplish (constraints, times, entities). "
+    "No chat meta, no \"the user said\". Use null for distilled_task only when not selecting a skill.\n"
+    "  - tool_calls: ONLY ask_user or update_profile to clarify before choosing a skill.\n"
+    "  - final_answer: decline or answer without tools.\n"
+    "Phase 2 (skill already active): set tool_calls or final_answer only; "
+    "selected_skill and distilled_task must be null."
 )
 
 SELECTION_INSTRUCTION = (
-    "Select the best skill for this task. Set selected_skill to the skill name. "
+    "Select the best skill for this task. Set selected_skill to the skill name and "
+    "distilled_task to a clear execution brief (as required by the system rules). "
+    "If something critical is missing to choose or specify the task, call ask_user. "
     "If no skill fits, set final_answer with a brief explanation. "
-    "Do NOT set tool_calls in this phase."
+    "Do not call skill-specific tools (only ask_user or update_profile here)."
 )
 
 EXECUTION_INSTRUCTION = (
@@ -32,6 +43,8 @@ EXECUTION_INSTRUCTION = (
 )
 
 INFRA_TOOLS = frozenset({"ask_user", "update_profile"})
+
+PHASE1_TOOL_CALL_WHITELIST = INFRA_TOOLS
 
 
 class ReactLoop:
@@ -55,8 +68,14 @@ class ReactLoop:
     def build_selection_message(
         task: str,
         catalog_summaries: list[SkillSummary],
+        recent_messages: list[dict] | None = None,
     ) -> dict:
-        parts = [f"Task: {task}"]
+        parts: list[str] = []
+        if recent_messages:
+            block = format_recent_messages_block(recent_messages)
+            if block:
+                parts.append(block)
+        parts.append(f"Task: {task}")
         if catalog_summaries:
             lines = ["Available skills:"]
             for s in catalog_summaries:
@@ -77,6 +96,22 @@ class ReactLoop:
     @staticmethod
     def allowed_tool_names_for_skill(skill: SkillSpec) -> set[str]:
         return set(skill.tools) | set(INFRA_TOOLS)
+
+    @staticmethod
+    def build_compact_execution_messages(
+        profile: UserProfile,
+        task: str,
+        skill: SkillSpec,
+        activation_msg: dict,
+    ) -> list[dict]:
+        """Fresh message list for Phase 2: no selection noise or raw Phase-1 JSON."""
+        system = ReactLoop.build_system_message(profile)
+        task_msg = {"role": "user", "content": f"Task:\n{task}"}
+        ack = {
+            "role": "assistant",
+            "content": f"Skill '{skill.name}' selected. Executing the workflow.",
+        }
+        return [system, task_msg, ack, activation_msg]
 
     @staticmethod
     def build_activation_message(
@@ -147,7 +182,13 @@ class ReactLoop:
                     final_answer=f"Unknown skill: {decision.selected_skill}",
                     reasoning="Validation: skill not in catalog",
                 )
-            return decision
+            return ReactLoop._validate_phase1_modes(
+                decision, available_tools)
+
+        if decision.selected_skill is not None or decision.distilled_task is not None:
+            decision = decision.model_copy(
+                update={"selected_skill": None, "distilled_task": None},
+            )
 
         for tc in decision.effective_tool_calls:
             if tc.tool_name not in available_tools:
@@ -156,6 +197,44 @@ class ReactLoop:
                     reasoning="Validation: tool not available",
                 )
 
+        return decision
+
+    @staticmethod
+    def _validate_phase1_modes(
+        decision: Decision,
+        available_tools: set[str],
+    ) -> Decision:
+        has_fa = decision.final_answer is not None and str(decision.final_answer).strip() != ""
+        has_skill = (
+            decision.selected_skill is not None
+            and str(decision.selected_skill).strip() != ""
+        )
+        has_tools = len(decision.effective_tool_calls) > 0
+        modes = int(has_fa) + int(has_skill) + int(has_tools)
+        if modes > 1:
+            return Decision(
+                final_answer=(
+                    "Invalid Phase 1: use exactly one of final_answer, "
+                    "selected_skill, or tool_calls."
+                ),
+                reasoning="Validation: mutually exclusive fields",
+            )
+        if modes == 0:
+            return Decision(
+                final_answer="Invalid Phase 1: empty response.",
+                reasoning="Validation: no actionable fields",
+            )
+        if has_tools:
+            allowed = PHASE1_TOOL_CALL_WHITELIST & available_tools
+            for tc in decision.effective_tool_calls:
+                if tc.tool_name not in allowed:
+                    return Decision(
+                        final_answer=(
+                            f"Phase 1 only allows {sorted(allowed)}; "
+                            f"got {tc.tool_name!r}."
+                        ),
+                        reasoning="Validation: tool not allowed in phase 1",
+                    )
         return decision
 
     @staticmethod
