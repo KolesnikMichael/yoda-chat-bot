@@ -956,6 +956,61 @@ async def test_text_to_image_success_writes_file(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_image_to_text_success(tmp_path):
+    from yoda.mind.agent.tools.image_to_text_tool import ImageToTextTool
+
+    img = tmp_path / "shot.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\nx")
+
+    class FakeVision:
+        async def image_to_description(self, path: str) -> str:
+            assert Path(path).resolve() == img.resolve()
+            return "  A red door  "
+
+    tool = ImageToTextTool(vision_provider=FakeVision())  # type: ignore[arg-type]
+    call = ToolCall(
+        tool_name="image_to_text",
+        arguments={"file_path": str(img)},
+    )
+    result = await tool.execute(call)
+    assert result.success is True
+    assert result.output == "A red door"
+
+
+@pytest.mark.asyncio
+async def test_image_to_text_missing_file(tmp_path):
+    from yoda.mind.agent.tools.image_to_text_tool import ImageToTextTool
+
+    class FakeVision:
+        async def image_to_description(self, path: str) -> str:
+            raise AssertionError("should not run")
+
+    tool = ImageToTextTool(vision_provider=FakeVision())  # type: ignore[arg-type]
+    call = ToolCall(
+        tool_name="image_to_text",
+        arguments={"file_path": str(tmp_path / "missing.png")},
+    )
+    result = await tool.execute(call)
+    assert result.success is False
+    assert "not found" in result.output.lower()
+
+
+@pytest.mark.asyncio
+async def test_image_to_text_invalid_params():
+    from yoda.mind.agent.tools.image_to_text_tool import ImageToTextTool
+
+    class FakeVision:
+        async def image_to_description(self, path: str) -> str:
+            raise AssertionError("should not run")
+
+    tool = ImageToTextTool(vision_provider=FakeVision())  # type: ignore[arg-type]
+    call = ToolCall(tool_name="image_to_text", arguments={})
+    result = await tool.execute(call)
+    assert result.success is False
+    assert "Invalid parameters" in result.output
+
+
+@pytest.mark.asyncio
 async def test_text_to_image_invalid_params():
     from yoda.api.pixazo_api import PixazoApi
     from yoda.mind.agent.tools.text_to_image_tool import TextToImageTool
@@ -993,6 +1048,7 @@ async def test_send_picture_success_deletes_file(tmp_path):
     assert result.success is True
     assert sent[0][0] == 99
     assert "red balloon" in result.output.lower()
+    assert "description:" in result.output.lower()
     assert not img.exists()
 
 

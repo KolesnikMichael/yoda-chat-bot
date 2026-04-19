@@ -12,7 +12,6 @@
   2. If the discription differs significantly from that of the user, return to skill's step 2 and  slightly adjust generation prompt. Make no more than three generation attempts, then choose the best matching picture and send it to chat.
   - Add the description of the sent picture in the system prompt
 - ReAct loop doesn't survive tool crashes like exception when using ask_user
-- System exit is missing from graceful shutdown
 
 ## Improve
 - Stop calculating chat_type each time - it doesn't change

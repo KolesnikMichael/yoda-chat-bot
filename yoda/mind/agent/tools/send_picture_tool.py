@@ -15,7 +15,11 @@ class SendPictureParams(BaseModel):
     summary_for_chat: str = Field(
         ...,
         min_length=1,
-        description="Short summary for the main chat model (not sent to Telegram): what was drawn, in the task language",
+        description=(
+            "Detailed description of what is actually in the sent image, in the same language "
+            "as the user's task — for the main chat model's context only (not sent to Telegram "
+            "as a caption)."
+        ),
     )
 
 
@@ -74,6 +78,8 @@ class SendPictureTool(Tool):
         summary = params.summary_for_chat.strip()
         out = (
             "A photo was sent to the chat (no caption on the image). "
-            f"Topic: {summary}"
+            f"Description: {summary}\n"
+            "Keep this description in mind if the user discusses the image; do not read it "
+            "verbatim to the user or paste the full text into chat."
         )
         return ToolResult(tool_name=self.name, output=out, success=True)

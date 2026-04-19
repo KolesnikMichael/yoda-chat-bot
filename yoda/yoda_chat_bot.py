@@ -40,6 +40,7 @@ from yoda.mind.agent.tools.get_user_data_tool import GetUserDataTool
 from yoda.mind.agent.tools.delete_user_data_tool import DeleteUserDataTool
 from yoda.mind.agent.tools.web_extract_tool import WebExtractTool
 from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+from yoda.mind.agent.tools.image_to_text_tool import ImageToTextTool
 from yoda.mind.agent.tools.text_to_image_tool import TextToImageTool
 from yoda.mind.agent.tools.send_picture_tool import SendPictureTool
 from yoda.mind.agent.skills.catalog import SkillCatalog
@@ -224,6 +225,7 @@ def main() -> None:
             memory_provider=memory_provider,
         ),
         TextToImageTool(pixazo_api=pixazo_api),
+        ImageToTextTool(vision_provider=vision_provider),
         SendPictureTool(send_photo=send_picture_to_chat),
     ]
     skills_dir = Path(__file__).parent / "mind" / "agent" / "skills"

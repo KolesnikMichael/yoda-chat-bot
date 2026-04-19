@@ -52,6 +52,11 @@ class Mind:
         lines.extend(f"- {d}" for d in descriptions)
         lines.append(
             "If the user asks what you can do, describe these naturally in your voice.")
+        lines.append(
+            "When a delegated skill cannot complete the task, do not invent details, "
+            "or offer improvised substitutes (e.g. text-only stand-ins for images). "
+            "State briefly that it did not work this time; it may work another time."
+        )
         return "\n".join(lines)
 
     def bind_message_sender(self, message_sender) -> None:

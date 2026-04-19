@@ -52,4 +52,4 @@ yoda/
 ## Workflow
 
 - TDD where applicable and reasonable
-- Run tests before proposing changes: `python -m pytest` from project root (venv: `.venv/bin/python`)
+- Run tests before proposing changes for review: `python -m pytest` from project root (venv: `.venv/bin/python`)
