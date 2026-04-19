@@ -114,15 +114,24 @@ def main() -> None:
             f"Settings missing required key: {missing_key}") from e
 
     try:
+        agent_settings = settings_json["agent"]
+        agent_model_name = agent_settings["model_name"]
         tavily_api_key = (
-            settings_json["agent"]["tools"]["web_search"]["tavily_api_key"]
+            agent_settings["tools"]["web_search"]["tavily_api_key"]
         )
     except KeyError as e:
         raise ValueError(
-            f"Settings missing Tavily key: {e.args[0]}") from e
+            f"Settings missing agent key: {e.args[0]}") from e
 
+    llm_api = LLMApi(api_key=language_api_key)
     language_provider = LanguageProvider(
-        settings=language_settings, llm_api=LLMApi(api_key=language_api_key))
+        settings=language_settings, llm_api=llm_api)
+    agent_language_settings = {
+        **language_settings,
+        "model_name": agent_model_name,
+    }
+    agent_language_provider = LanguageProvider(
+        settings=agent_language_settings, llm_api=llm_api)
     vision_provider = VisionProvider(
         settings=vision_settings, llm_api=LLMApi(api_key=vision_api_key))
     audio_provider = AudioProvider(
@@ -144,7 +153,7 @@ def main() -> None:
     tavily_api = TavilyApi(api_key=tavily_api_key)
 
     try:
-        text_to_image_settings = settings_json["agent"]["tools"]["text_to_image"]
+        text_to_image_settings = agent_settings["tools"]["text_to_image"]
         pixazo_api_key = text_to_image_settings["pixazo_api_key"]
         gateway_url = text_to_image_settings["gateway_url"]
     except KeyError as e:
@@ -225,7 +234,7 @@ def main() -> None:
     ]
 
     agent_provider = AgentProvider(
-        language_provider=language_provider,
+        language_provider=agent_language_provider,
         tools=tools,
         skills_dir=skills_dir,
         session_provider=session_provider,

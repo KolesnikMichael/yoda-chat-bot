@@ -15,9 +15,6 @@
 - System exit is missing from graceful shutdown
 
 ## Improve
-- search_web: user's time and location are important for some queries, ask about those if needed, and then use update_profile tool
-- ReAct: keeping user messages in AgentContext.messages after skill is selected might be confusing for Agent (perceived as futher instructions). Try to transform those into the task's details on Phase 1, and use ask_user if something is not clear.
-- Use mistral-medium-2508 for Agent, use mistral-large-latest for Yoda, decide about classify_intent call.
 - Stop calculating chat_type each time - it doesn't change
 - Scheduling jobs: Daylight saving is unlikely taken into account (and there are countries that do not use it)
 - Calculating timezone can be done when user provides his current time - add this hint to skill
