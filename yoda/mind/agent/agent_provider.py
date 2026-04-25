@@ -14,7 +14,6 @@ from yoda.mind.agent.data.agent_data import (
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.skills.catalog import SkillCatalog
 from yoda.mind.agent.tools.tool_port import Tool
-from yoda.mind.memory.data.routing_context import RoutingContext
 from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.perception.language import LanguageProvider
 
@@ -55,13 +54,10 @@ class AgentProvider:
         profile: UserProfile,
         chat_id: int,
         user_id: int = 0,
-        routing: RoutingContext | None = None,
+        recent_messages: list[dict] | None = None,
     ) -> AgentResult:
-        effective_task = routing.current_user_text if routing else task
-        recent = routing.recent_messages if routing else []
-
         context = AgentContext(
-            task=effective_task,
+            task=task,
             profile=profile,
             chat_id=chat_id,
             user_id=user_id,
@@ -70,9 +66,9 @@ class AgentProvider:
 
         system_msg = ReactLoop.build_system_message(profile)
         selection_msg = ReactLoop.build_selection_message(
-            effective_task,
+            task,
             self._catalog_summaries,
-            recent_messages=recent,
+            recent_messages=recent_messages,
         )
         context = context.with_messages([system_msg, selection_msg])
 
@@ -139,23 +135,8 @@ class AgentProvider:
                 logger.warning("LLM still returned no tool_calls after nudge, stopping loop")
                 break
 
-            tool_calls = [
-                ToolCall(
-                    tool_name=tc.tool_name,
-                    arguments=tc.arguments,
-                    metadata={
-                        "chat_id": context.chat_id,
-                        "user_id": context.user_id,
-                        "profile_timezone": context.profile.timezone,
-                    },
-                )
-                for tc in decision.effective_tool_calls
-            ]
-
-            results = await asyncio.gather(*[
-                self._tools[tc.tool_name].execute(tc)
-                for tc in tool_calls
-            ])
+            tool_calls = self._build_tool_calls(context, decision)
+            results = await self._execute_tool_calls(tool_calls)
 
             suspended = next((r for r in results if r.suspend), None)
             if suspended:
@@ -198,6 +179,51 @@ class AgentProvider:
             & set(self._tools.keys())
         )
 
+    @staticmethod
+    def _build_tool_calls(context: AgentContext, decision: Decision) -> list[ToolCall]:
+        return [
+            ToolCall(
+                tool_name=tc.tool_name,
+                arguments=tc.arguments,
+                metadata={
+                    "chat_id": context.chat_id,
+                    "user_id": context.user_id,
+                    "profile_timezone": context.profile.timezone,
+                },
+            )
+            for tc in decision.effective_tool_calls
+        ]
+
+    async def _execute_tool_calls(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
+        return await asyncio.gather(*[
+            self._execute_single_tool(tc) for tc in tool_calls
+        ])
+
+    async def _execute_single_tool(self, tool_call: ToolCall) -> ToolResult:
+        tool = self._tools.get(tool_call.tool_name)
+        if tool is None:
+            logger.warning(
+                "Tool '%s' became unavailable at execution time",
+                tool_call.tool_name,
+            )
+            return ToolResult(
+                tool_name=tool_call.tool_name,
+                output="Tool is unavailable.",
+                success=False,
+            )
+        try:
+            return await tool.execute(tool_call)
+        except Exception as exc:
+            logger.exception(
+                "Tool '%s' crashed during execution",
+                tool_call.tool_name,
+            )
+            return ToolResult(
+                tool_name=tool_call.tool_name,
+                output=f"Tool crashed with exception: {exc}",
+                success=False,
+            )
+
     async def _llm_decide(self, context: AgentContext) -> Decision:
         utc_now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
         messages = ReactLoop.build_context(context, utc_now)
@@ -228,22 +254,8 @@ class AgentProvider:
                 return context, decision, None
 
             if decision.effective_tool_calls:
-                tool_calls = [
-                    ToolCall(
-                        tool_name=tc.tool_name,
-                        arguments=tc.arguments,
-                        metadata={
-                            "chat_id": context.chat_id,
-                            "user_id": context.user_id,
-                            "profile_timezone": context.profile.timezone,
-                        },
-                    )
-                    for tc in decision.effective_tool_calls
-                ]
-                results = await asyncio.gather(*[
-                    self._tools[tc.tool_name].execute(tc)
-                    for tc in tool_calls
-                ])
+                tool_calls = self._build_tool_calls(context, decision)
+                results = await self._execute_tool_calls(tool_calls)
                 suspended = next((r for r in results if r.suspend), None)
                 if suspended:
                     context = ReactLoop.append_tool_results(

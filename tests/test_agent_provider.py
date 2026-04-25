@@ -11,7 +11,6 @@ from yoda.mind.agent.data.agent_data import (
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.tools.ask_user_tool import AskUserTool
 from yoda.mind.agent.tools.tool_port import Tool
-from yoda.mind.memory.data.routing_context import RoutingContext
 from yoda.mind.memory.data.user_profile import UserProfile
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "skills"
@@ -53,6 +52,39 @@ class FakeTool(Tool):
     async def execute(self, call):
         self.calls.append(call)
         return ToolResult(tool_name=self.name, output="search result", success=True)
+
+
+class FailingWebSearchTool(Tool):
+    name = "web_search"
+
+    class Params:
+        @classmethod
+        def model_json_schema(cls):
+            return {"properties": {"query": {"type": "string"}}, "required": ["query"]}
+
+    parameters_schema = Params
+
+    async def execute(self, call):
+        raise RuntimeError("search backend is unavailable")
+
+
+class FailingUpdateProfileTool(Tool):
+    name = "update_profile"
+
+    class Params:
+        @classmethod
+        def model_json_schema(cls):
+            return {
+                "properties": {
+                    "fields": {"type": "object"},
+                },
+                "required": ["fields"],
+            }
+
+    parameters_schema = Params
+
+    async def execute(self, call):
+        raise RuntimeError("profile store is unavailable")
 
 
 class FakeLanguageProvider:
@@ -151,20 +183,16 @@ async def test_llm_context_static_system_and_tools_in_activation():
 
 
 @pytest.mark.asyncio
-async def test_selection_includes_recent_when_routing_provided():
+async def test_selection_includes_recent_messages():
     decisions = [
         Decision(final_answer="cannot"),
     ]
     provider, llm = _build_provider(decisions)
-    routing = RoutingContext(
-        current_user_text="make it 6pm",
-        recent_messages=[{"role": "user", "content": "remind at 5"}],
-    )
     await provider.run(
         task="make it 6pm",
         profile=UserProfile(),
         chat_id=99,
-        routing=routing,
+        recent_messages=[{"role": "user", "content": "remind at 5"}],
     )
     phase1 = llm.messages_log[0]
     selection = phase1[1]
@@ -282,3 +310,53 @@ async def test_phase1_ask_user_then_skill_then_execute():
         str(m.get("content", "")) for m in llm.messages_log[2])
     assert "Recent conversation" not in phase2_first
     assert "Select the best skill" not in phase2_first
+
+
+@pytest.mark.asyncio
+async def test_phase1_tool_exception_does_not_crash_loop():
+    decisions = [
+        Decision(tool_calls=[
+            ToolCallRequest(
+                tool_name="update_profile",
+                arguments={"fields": {"timezone": "UTC"}},
+            ),
+        ]),
+        Decision(final_answer="Need clarification first."),
+    ]
+    tools = [AskUserTool(), FailingUpdateProfileTool()]
+    provider, llm = _build_provider(decisions, tools=tools)
+
+    result = await provider.run(task="set timezone", profile=UserProfile(), chat_id=777)
+
+    assert result.answer == "Need clarification first."
+    second_llm_call_messages = "\n".join(
+        str(m.get("content", "")) for m in llm.messages_log[1]
+    )
+    assert "[update_profile] (FAILED)" in second_llm_call_messages
+    assert "Tool crashed with exception" in second_llm_call_messages
+
+
+@pytest.mark.asyncio
+async def test_phase2_tool_exception_does_not_crash_loop():
+    decisions = [
+        Decision(
+            selected_skill="test_skill",
+            distilled_task="Search for facts",
+        ),
+        Decision(tool_calls=[
+            ToolCallRequest(tool_name="web_search", arguments={"query": "facts"}),
+        ]),
+        Decision(final_answer="Recovered after tool failure."),
+    ]
+    tools = [AskUserTool(), FailingWebSearchTool()]
+    provider, llm = _build_provider(decisions, tools=tools)
+
+    result = await provider.run(task="search facts", profile=UserProfile(), chat_id=778)
+
+    assert result.answer == "Recovered after tool failure."
+    assert "web_search" in result.tools_used
+    third_llm_call_messages = "\n".join(
+        str(m.get("content", "")) for m in llm.messages_log[2]
+    )
+    assert "[web_search] (FAILED)" in third_llm_call_messages
+    assert "Tool crashed with exception" in third_llm_call_messages

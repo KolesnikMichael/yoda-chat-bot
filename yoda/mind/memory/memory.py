@@ -1,7 +1,7 @@
 import datetime as dtm
 import json
 import logging
-from dataclasses import MISSING, asdict, fields
+from dataclasses import asdict
 
 from .data.chat import Chat
 from .data.conversation import Conversation
@@ -63,36 +63,21 @@ class MemoryCore:
         }
 
     @staticmethod
-    def _message_from_stash_dict(msg: dict) -> Message:
-        kwargs: dict = {}
-        for field in fields(Message):
-            if field.name in msg:
-                kwargs[field.name] = msg[field.name]
-            elif field.default_factory is not MISSING:
-                kwargs[field.name] = field.default_factory()
-            elif field.default is not MISSING:
-                kwargs[field.name] = field.default
-            else:
-                raise ValueError(
-                    f"Conversation stash: missing required message field {field.name!r}"
-                )
-        return Message(**kwargs)
-
-    @staticmethod
     def stash_dict_to_conversations(data: dict) -> dict[str, Conversation]:
         raw = data.get("conversations", {})
         if not isinstance(raw, dict):
             return {}
         out: dict[str, Conversation] = {}
-        for _key, payload in raw.items():
+        for payload in raw.values():
             if not isinstance(payload, dict):
                 continue
             chat_id = int(payload["chat_id"])
-            messages: list[Message] = []
-            for msg in payload.get("messages", []):
-                if not isinstance(msg, dict):
-                    continue
-                messages.append(MemoryCore._message_from_stash_dict(msg))
+            messages = [
+                Message(**{k: v for k, v in msg.items()
+                           if k in Message.__dataclass_fields__})
+                for msg in payload.get("messages", [])
+                if isinstance(msg, dict)
+            ]
             out[MemoryCore.conversation_key(chat_id)] = Conversation(
                 chat_id=chat_id, messages=messages
             )

@@ -76,19 +76,6 @@ class AgentContext:
     iteration: int = 0
     tools_used: list[str] = field(default_factory=list)
 
-    def with_active_skill(self, skill: SkillSpec) -> AgentContext:
-        return AgentContext(
-            task=self.task,
-            profile=self.profile,
-            chat_id=self.chat_id,
-            user_id=self.user_id,
-            catalog_summaries=self.catalog_summaries,
-            active_skill=skill,
-            messages=list(self.messages),
-            iteration=self.iteration,
-            tools_used=list(self.tools_used),
-        )
-
     def with_messages(self, messages: list[dict]) -> AgentContext:
         return AgentContext(
             task=self.task,

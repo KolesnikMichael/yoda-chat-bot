@@ -1,7 +1,6 @@
 from yoda.mind.cognition import CognitionCore
 from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.memory.data.message import Message
-from yoda.mind.memory.data.routing_context import RoutingContext
 
 
 def test_build_intent_messages_structure():
@@ -94,17 +93,6 @@ def test_build_intent_context_messages_exclude_trailing():
         conv, exclude_trailing=1) == [{"role": "user", "content": "old"}]
     assert CognitionCore.build_intent_context_messages(
         conv, exclude_trailing=2) == []
-
-
-def test_build_intent_messages_from_routing():
-    routing = RoutingContext(
-        current_user_text="do it",
-        recent_messages=[{"role": "assistant", "content": "ok"}],
-    )
-    messages = CognitionCore.build_intent_messages_from_routing(routing)
-    assert len(messages) == 3
-    assert messages[-1]["content"] == "do it"
-    assert "Recent conversation" in messages[1]["content"]
 
 
 def test_build_intent_messages_with_recent_messages():

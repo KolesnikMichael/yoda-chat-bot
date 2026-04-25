@@ -4,7 +4,7 @@ from typing import TypedDict
 from pydantic import BaseModel
 
 from yoda.mind.memory.data.conversation import Conversation
-from yoda.mind.memory.data.routing_context import (
+from yoda.mind.data.routing_context import (
     RoutingContext,
     format_recent_messages_block,
 )
@@ -93,18 +93,12 @@ class CognitionCore:
             {"role": "system", "content": INTENT_CLASSIFICATION_PROMPT},
         ]
         if recent_messages:
-            block = format_recent_messages_block(recent_messages)
-            if block:
-                out.append({"role": "user", "content": block})
+            out.append({
+                "role": "user",
+                "content": format_recent_messages_block(recent_messages),
+            })
         out.append({"role": "user", "content": user_text})
         return out
-
-    @staticmethod
-    def build_intent_messages_from_routing(routing: RoutingContext) -> list[dict]:
-        return CognitionCore.build_intent_messages(
-            routing.current_user_text,
-            recent_messages=routing.recent_messages or None,
-        )
 
     @staticmethod
     def extract_user_text(perceived_entries: list[dict]) -> str:
@@ -145,7 +139,8 @@ class CognitionProvider:
         self._llm = language_provider
 
     async def classify_intent(self, routing: RoutingContext) -> str:
-        intent_messages = CognitionCore.build_intent_messages_from_routing(routing)
+        intent_messages = CognitionCore.build_intent_messages(
+            routing.current_user_text, routing.recent_messages)
         result = await self._llm.parse_structured(
             intent_messages, IntentClassification)
         logger.debug(

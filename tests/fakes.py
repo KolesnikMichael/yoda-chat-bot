@@ -1,7 +1,7 @@
 """Shared test doubles for Mind pipeline tests."""
 
 from yoda.mind.memory.data.conversation import Conversation
-from yoda.mind.memory.data.routing_context import RoutingContext
+from yoda.mind.data.routing_context import RoutingContext
 from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.memory.memory import MemoryCore
 

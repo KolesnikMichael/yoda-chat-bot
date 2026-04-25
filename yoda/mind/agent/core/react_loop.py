@@ -5,7 +5,7 @@ from yoda.mind.agent.data.agent_data import (
     SkillSummary,
     ToolResult,
 )
-from yoda.mind.memory.data.routing_context import format_recent_messages_block
+from yoda.mind.data.routing_context import format_recent_messages_block
 from yoda.mind.memory.data.user_profile import UserProfile
 
 EXECUTOR_SYSTEM_PROMPT = (

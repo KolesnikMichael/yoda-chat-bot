@@ -6,9 +6,8 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.memory.data.pending_message import PendingMessage
-from yoda.mind.memory.data.routing_context import RoutingContext
+from yoda.mind.data.routing_context import RoutingContext
 
 from .affect import AffectCore, AffectProvider
 from .cognition import CognitionCore, CognitionProvider
@@ -160,16 +159,13 @@ class Mind:
         chat_id: int,
         routing: RoutingContext,
     ) -> str:
-        if self.agent_provider and await self.agent_provider.has_pending_session(chat_id):
-            return "agent_resume"
-
         if not self.agent_provider:
             return "chat"
 
-        if not routing.current_user_text:
-            return "chat"
+        if await self.agent_provider.has_pending_session(chat_id):
+            return "agent_resume"
 
-        if self.cognition_provider is None:
+        if not routing.current_user_text or self.cognition_provider is None:
             return "chat"
 
         try:
@@ -193,7 +189,7 @@ class Mind:
             profile=profile,
             chat_id=chat_id,
             user_id=user_id,
-            routing=routing,
+            recent_messages=routing.recent_messages,
         )
         await self._handle_agent_result(
             chat_id, result, system_prompt, conversation)
