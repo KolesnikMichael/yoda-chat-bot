@@ -34,6 +34,7 @@ from yoda.api.storage_api import StorageApi
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.speech_api import SpeechApi
 from yoda.api.llm_api import LLMApi
+from yoda.api.openrouter_api import OpenRouterApi
 from yoda.api.tavily_api import TavilyApi
 from yoda.api.pixazo_api import PixazoApi
 from yoda.mind.agent.tools.get_user_data_tool import GetUserDataTool
@@ -133,8 +134,16 @@ def main() -> None:
     }
     agent_language_provider = LanguageProvider(
         settings=agent_language_settings, llm_api=llm_api)
+    vision_backend: OpenRouterApi | LLMApi
+    if vision_settings.get("provider", "mistral") == "openrouter":
+        vision_base = vision_settings.get(
+            "base_url", "https://openrouter.ai/api/v1")
+        vision_backend = OpenRouterApi(
+            api_key=vision_api_key, base_url=vision_base)
+    else:
+        vision_backend = LLMApi(api_key=vision_api_key)
     vision_provider = VisionProvider(
-        settings=vision_settings, llm_api=LLMApi(api_key=vision_api_key))
+        settings=vision_settings, chat_backend=vision_backend)
     audio_provider = AudioProvider(
         speech_api=SpeechApi(), default_language=default_language)
     storage_api = StorageApi(

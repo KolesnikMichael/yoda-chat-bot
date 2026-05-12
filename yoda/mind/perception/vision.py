@@ -1,7 +1,13 @@
 import base64
 from pathlib import Path
+from typing import Protocol
 
-from yoda.api.llm_api import LLMApi
+
+class VisionChatBackend(Protocol):
+    async def complete_chat_async(
+        self, model_name: str, messages: list[dict]
+    ) -> str:
+        ...
 
 
 def _mime_type_for_image_path(image_file_path: str) -> str:
@@ -18,18 +24,31 @@ def _mime_type_for_image_path(image_file_path: str) -> str:
 
 
 class VisionProvider:
-    def __init__(self, settings: dict, llm_api: LLMApi):
-        self._llm_api = llm_api
+    def __init__(self, settings: dict, chat_backend: VisionChatBackend) -> None:
+        self._chat_backend = chat_backend
         try:
             self._model_name = settings["model_name"]
         except KeyError as e:
             raise ValueError(
                 "Vision settings missing required 'model_name'") from e
+        self._provider = settings.get("provider", "mistral")
 
     @staticmethod
     def encode_image_to_base64(image_file_path: str) -> str:
         with open(image_file_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode("utf-8")
+
+    def _image_part(self, mime: str, image_base64: str) -> dict:
+        data_url = f"data:{mime};base64,{image_base64}"
+        if self._provider == "openrouter":
+            return {
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            }
+        return {
+            "type": "image_url",
+            "image_url": data_url,
+        }
 
     async def image_to_description(self, image_file_path: str) -> str:
         image_base64 = self.encode_image_to_base64(image_file_path)
@@ -39,14 +58,11 @@ class VisionProvider:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "Please describe the image in detail."},
-                    {
-                        "type": "image_url",
-                        "image_url": f"data:{mime};base64,{image_base64}",
-                    },
+                    self._image_part(mime, image_base64),
                 ],
             }
         ]
-        return await self._llm_api.complete_chat_via_thread(
+        return await self._chat_backend.complete_chat_async(
             model_name=self._model_name,
             messages=messages,
         )
