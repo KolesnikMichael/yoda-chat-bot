@@ -3,12 +3,16 @@
 - Stop calculating chat_type each time - it doesn't change
 
 ## ADD
-- schedule_message: add recurrency
 - Retry after 429 where needed
 - Scheduling jobs: Daylight saving is unlikely taken into account (and there are countries that do not use it)
 - Admin notifications
 - _classify_intent returns "chat" but it's never handled. It should be handled explicitly, and last elif in Mind.process_message_batch should log WARNING or something
-- Record skill usages in Chat.history
+- Record skill usages in Chat.history:
+  - create_picture: iterations
+  - manage_jobs: task
+  - manage_user_data: task
+  - schedule_message: daily/once
+  - search_web: tools
 - Error handling (logging + retry, where needed + admin notification, where needed):
   - network errors to Telegram
   - Redis failures
@@ -23,7 +27,6 @@
   - rebuild system prompt after compression is done - not really needed if it's being updated during restarts already
   - "saved=true/false" for summary entries, if close to edge - notify admin
 - Tool: web_scrape_tool with Crawl4AI (https://medium.com/@speaktoharisudhan/crawling-with-crawl4ai-the-open-source-scraping-beast-9d32e6946ad4)
-- Skill schedule_task: run skill with certain parameters periodically or just once
 - In group chats use reply rather than send_message
 - Introduce conversation modes (docs/conversation_modes.md) and apply when delivering agent results
 - Internal skill: [local_buddy_]small_talk

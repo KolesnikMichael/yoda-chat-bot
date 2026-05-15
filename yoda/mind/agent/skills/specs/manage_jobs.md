@@ -17,7 +17,7 @@ User wants to see, check, or cancel their scheduled jobs. Examples: "what remind
 ## Workflow
 1. Call `list_jobs` to retrieve the current list of active jobs for this chat.
 2. Based on the user's intent:
-   - **List/inspect**: present the jobs list in final_answer. Scheduled times from the tool are already in the user's local time — use them as-is. Do not mention or add timezone names (e.g. avoid "Europe/Moscow", "UTC", "your local time").
+   - **List/inspect**: present the jobs list in final_answer. Each job has `kind`: **message** (text reminder) or **task** (agent will run a skill later). `type` is **once** or **cron**. For once jobs, scheduled times are in the user's local time — use as-is. For cron jobs, show the recurrence from the tool output. Do not mention or add timezone names (e.g. avoid "Europe/Moscow", "UTC", "your local time").
    - **Cancel specific**: identify the target job_id from the list and call `cancel_job` with that job_id. If the user's description matches multiple jobs, call `ask_user` to clarify which one.
    - **Cancel all**: call `cancel_job` for each job_id from the list. You can issue multiple cancel_job calls in a single tool_calls array.
 3. After cancellation(s), set final_answer confirming what was cancelled.

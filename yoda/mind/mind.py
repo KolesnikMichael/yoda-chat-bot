@@ -121,6 +121,62 @@ class Mind:
 
         self._cleanup_temp_files(batch)
 
+    async def execute_scheduled_task(
+        self,
+        chat_id: int,
+        user_id: int,
+        skill_name: str,
+        distilled_task: str,
+    ) -> None:
+        if not self.agent_provider:
+            logger.error("execute_scheduled_task called without agent_provider")
+            return
+
+        profile = await self.memory_provider.get_user_profile(user_id, chat_id)
+        result = await self.agent_provider.run_with_skill(
+            skill_name=skill_name,
+            task=distilled_task,
+            profile=profile,
+            chat_id=chat_id,
+            user_id=user_id,
+        )
+
+        emotional_state = self.affect_provider.get_emotional_state()
+        chat_type = CognitionCore.determine_chat_type(user_id, chat_id)
+        system_prompt = AffectCore.build_system_prompt(
+            emotional_state, chat_type=chat_type
+        ) + self._capabilities_block
+        conversation = self.memory_provider.get_conversation(chat_id=chat_id)
+        await self._handle_agent_result(
+            chat_id, result, system_prompt, conversation)
+
+    async def notify_scheduled_failure(self, chat_id: int, brief: str) -> None:
+        emotional_state = self.affect_provider.get_emotional_state()
+        chat_type = CognitionCore.determine_chat_type(0, chat_id)
+        system_prompt = AffectCore.build_system_prompt(
+            emotional_state, chat_type=chat_type
+        )
+        conversation = self.memory_provider.get_conversation(chat_id=chat_id)
+
+        line = (
+            f"SCHEDULED TASK FAILED: {brief}. "
+            f"Tell the user briefly in your voice. "
+            f"Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        )
+        conversation, messages = MemoryCore.add_conversation_line(
+            conversation=conversation,
+            chat_id=chat_id,
+            role="system",
+            line=line,
+            system_prompt=system_prompt,
+            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+        )
+        self.memory_provider.save_conversation(conversation)
+
+        if messages:
+            await self._reply_and_send(
+                chat_id, messages, system_prompt, conversation)
+
     async def deliver_scheduled_reminder(self, chat_id: int, user_id: int, reminder_text: str) -> None:
         emotional_state = self.affect_provider.get_emotional_state()
         chat_type = CognitionCore.determine_chat_type(user_id, chat_id)

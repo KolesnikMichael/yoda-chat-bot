@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from yoda.api.storage_api import StorageApi
 from yoda.mind.agent.data.agent_data import ToolCall, ToolResult
-from yoda.mind.agent.tools.scheduler_tool import ACTIVE_JOBS_KEY_PREFIX
+from yoda.mind.agent.tools.job_keys import ACTIVE_JOBS_KEY_PREFIX
 from yoda.mind.agent.tools.tool_port import Tool
 
 logger = logging.getLogger(__name__)

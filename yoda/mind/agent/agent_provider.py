@@ -81,6 +81,30 @@ class AgentProvider:
         context = self._activate_skill_context(context, decision)
         return await self._execute_loop(context)
 
+    async def run_with_skill(
+        self,
+        *,
+        skill_name: str,
+        task: str,
+        profile: UserProfile,
+        chat_id: int,
+        user_id: int = 0,
+    ) -> AgentResult:
+        base = AgentContext(
+            task=task,
+            profile=profile,
+            chat_id=chat_id,
+            user_id=user_id,
+            catalog_summaries=self._catalog_summaries,
+        )
+        decision = Decision(
+            selected_skill=skill_name,
+            distilled_task=task,
+            reasoning="forced by scheduled trigger",
+        )
+        context = self._activate_skill_context(base, decision)
+        return await self._execute_loop(context)
+
     async def resume(self, chat_id: int, user_answer: str) -> AgentResult:
         context = await self._sessions.load(chat_id)
         if context is None:
@@ -108,9 +132,10 @@ class AgentProvider:
         while not ReactLoop.is_done(context):
             decision = await self._llm_decide(context)
             logger.info(
-                f"Loop iteration {context.iteration}: "
-                f"tools={[tc.tool_name for tc in decision.effective_tool_calls]}, "
-                f"final={decision.final_answer}, reasoning={decision.reasoning}")
+                f"Loop iteration {context.iteration}:\n"
+                f"Tools={[tc.tool_name for tc in decision.effective_tool_calls]}")
+            logger.debug(
+                f"Final={decision.final_answer}\nReasoning={decision.reasoning}")
             decision = ReactLoop.validate_decision(
                 decision, context, self._available_tools_for_validation(context))
             context = ReactLoop.append_assistant(context, decision)
@@ -238,11 +263,9 @@ class AgentProvider:
         for _ in range(_MAX_PHASE1_ROUNDS):
             decision = await self._llm_decide(context)
             logger.info(
-                "Phase 1 decision: skill=%s, final=%s, reasoning=%s",
-                decision.selected_skill,
-                decision.final_answer,
-                decision.reasoning,
-            )
+                f"Phase 1 decision:\nSkill={decision.selected_skill}")
+            logger.debug(
+                f"Final={decision.final_answer}\nReasoning={decision.reasoning}")
             decision = ReactLoop.validate_decision(
                 decision, context, available)
             context = ReactLoop.append_assistant(context, decision)

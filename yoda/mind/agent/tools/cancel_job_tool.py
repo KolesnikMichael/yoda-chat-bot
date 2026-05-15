@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.storage_api import StorageApi
 from yoda.mind.agent.data.agent_data import ToolCall, ToolResult
-from yoda.mind.agent.tools.scheduler_tool import ACTIVE_JOBS_KEY_PREFIX
+from yoda.mind.agent.tools.job_keys import active_jobs_key
 from yoda.mind.agent.tools.tool_port import Tool
 
 logger = logging.getLogger(__name__)
@@ -42,8 +42,7 @@ class CancelJobTool(Tool):
             )
 
         scheduler_removed = self._scheduler_api.cancel(params.job_id)
-        await self._storage_api.hdel(
-            f"{ACTIVE_JOBS_KEY_PREFIX}:{chat_id}", params.job_id)
+        await self._storage_api.hdel(active_jobs_key(chat_id), params.job_id)
 
         if scheduler_removed:
             return ToolResult(

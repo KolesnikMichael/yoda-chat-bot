@@ -25,7 +25,10 @@ from yoda.mind.affect import AffectProvider
 from yoda.mind.agent.agent_provider import AgentProvider
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.tools.ask_user_tool import AskUserTool
-from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+from yoda.mind.agent.tools.job_keys import active_jobs_key
+from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+from yoda.mind.agent.tools.schedule_task_tool import ScheduleTaskTool
+from yoda.mind.job_dispatcher import JobDispatcher
 from yoda.mind.agent.tools.list_jobs_tool import ListJobsTool
 from yoda.mind.agent.tools.cancel_job_tool import CancelJobTool
 from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
@@ -218,10 +221,16 @@ def main() -> None:
             body.bot, chat_id, photo_path=file_path)
 
     pixazo_api = PixazoApi(gateway_url=gateway_url, api_key=pixazo_api_key)
+    skills_dir = Path(__file__).parent / "mind" / "agent" / "skills"
 
     tools = [
         AskUserTool(),
-        SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api),
+        ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api),
+        ScheduleTaskTool(
+            scheduler_api=scheduler_api,
+            storage_api=storage_api,
+            skills_dir=skills_dir,
+        ),
         ListJobsTool(storage_api=storage_api),
         CancelJobTool(scheduler_api=scheduler_api, storage_api=storage_api),
         UpdateProfileTool(memory_provider=memory_provider),
@@ -237,7 +246,6 @@ def main() -> None:
         ImageToTextTool(vision_provider=vision_provider),
         SendPictureTool(send_photo=send_picture_to_chat),
     ]
-    skills_dir = Path(__file__).parent / "mind" / "agent" / "skills"
     session_provider = AgentSessionProvider(storage_api=storage_api)
     public_skill_descriptions = [
         s.description for s in SkillCatalog.public_summaries(
@@ -267,10 +275,15 @@ def main() -> None:
         public_skill_descriptions=public_skill_descriptions,
     )
 
-    scheduler_api.set_delivery_callback(mind.deliver_scheduled_reminder)
+    job_dispatcher = JobDispatcher(
+        storage_api=storage_api,
+        scheduler_api=scheduler_api,
+        mind=mind,
+    )
+    scheduler_api.set_fire_callback(job_dispatcher.fire)
 
     async def cleanup_job_metadata(chat_id: int, job_id: str) -> None:
-        await storage_api.hdel(f"active_jobs:{chat_id}", job_id)
+        await storage_api.hdel(active_jobs_key(chat_id), job_id)
 
     scheduler_api.set_cleanup_callback(cleanup_job_metadata)
 

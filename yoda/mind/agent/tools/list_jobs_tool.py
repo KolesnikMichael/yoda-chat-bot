@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from yoda.api.storage_api import StorageApi
 from yoda.mind.agent.data.agent_data import ToolCall, ToolResult
-from yoda.mind.agent.tools.scheduler_tool import ACTIVE_JOBS_KEY_PREFIX
+from yoda.mind.agent.tools.job_keys import active_jobs_key
 from yoda.mind.agent.tools.tool_port import Tool
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class ListJobsTool(Tool):
                 success=False,
             )
 
-        key = f"{ACTIVE_JOBS_KEY_PREFIX}:{chat_id}"
+        key = active_jobs_key(chat_id)
         entries = await self._storage_api.hgetall(key)
 
         if not entries:
@@ -47,18 +47,28 @@ class ListJobsTool(Tool):
         for job_id, raw in entries.items():
             meta = json.loads(raw)
             tz_name = meta.get("timezone", "UTC")
-            deliver_utc = meta.get("deliver_at_utc", "")
-            display_time = deliver_utc
-            try:
-                utc_dt = datetime.fromisoformat(deliver_utc)
-                local_dt = utc_dt.astimezone(ZoneInfo(tz_name))
-                display_time = local_dt.strftime("%Y-%m-%d %H:%M")
-            except (ValueError, KeyError):
-                pass
+            kind = meta.get("kind", "message")
+            schedule_type = meta.get("type", "?")
+            description = meta.get("description", "")
+
+            if schedule_type == "cron":
+                cron_expr = meta.get("cron", "")
+                timing = f"recurrence: {cron_expr}" if cron_expr else "recurrence: (cron)"
+            else:
+                deliver_utc = meta.get("deliver_at_utc", "") or ""
+                display_time = deliver_utc
+                try:
+                    if deliver_utc:
+                        utc_dt = datetime.fromisoformat(deliver_utc)
+                        local_dt = utc_dt.astimezone(ZoneInfo(tz_name))
+                        display_time = local_dt.strftime("%Y-%m-%d %H:%M")
+                except (ValueError, KeyError):
+                    pass
+                timing = f"scheduled: {display_time}"
+
             lines.append(
-                f"- job_id: {job_id}, type: {meta.get('type', '?')}, "
-                f"description: \"{meta.get('description', '')}\", "
-                f"scheduled: {display_time}"
+                f"- job_id: {job_id}, kind: {kind}, type: {schedule_type}, "
+                f"description: \"{description}\", {timing}"
             )
 
         return ToolResult(

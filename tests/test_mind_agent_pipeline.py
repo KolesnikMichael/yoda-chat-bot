@@ -21,6 +21,7 @@ class FakeAgentProvider:
         self._result = result or AgentResult(answer="Done!")
         self._has_session = has_session
         self.run_calls = []
+        self.run_with_skill_calls = []
         self.resume_calls = []
 
     async def has_pending_session(self, chat_id):
@@ -28,6 +29,13 @@ class FakeAgentProvider:
 
     async def run(self, task, profile, chat_id, user_id=0, recent_messages=None):
         self.run_calls.append((task, profile, chat_id, user_id, recent_messages))
+        return self._result
+
+    async def run_with_skill(
+        self, *, skill_name, task, profile, chat_id, user_id=0,
+    ):
+        self.run_with_skill_calls.append(
+            (skill_name, task, profile, chat_id, user_id))
         return self._result
 
     async def resume(self, chat_id, user_answer):
@@ -196,3 +204,23 @@ async def test_deliver_scheduled_reminder_group_prompt():
     conversation = memory.get_conversation(1000)
     assert conversation is not None
     assert "Telegram group chat" in conversation.messages[0].text
+
+
+@pytest.mark.asyncio
+async def test_execute_scheduled_task_delegates_to_agent():
+    agent_result = AgentResult(answer="USD/RUB is 92.5")
+    mind, lang, agent, memory, sender = _build_mind(
+        agent_result=agent_result,
+    )
+
+    await mind.execute_scheduled_task(
+        chat_id=1,
+        user_id=7,
+        skill_name="search_web",
+        distilled_task="Find today's USD/RUB rate",
+    )
+
+    assert len(agent.run_with_skill_calls) == 1
+    assert agent.run_with_skill_calls[0][0] == "search_web"
+    assert agent.run_with_skill_calls[0][1] == "Find today's USD/RUB rate"
+    assert len(sender.calls) == 1

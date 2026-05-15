@@ -33,15 +33,23 @@ async def test_ask_user_describe():
 class FakeSchedulerApi:
     def __init__(self):
         self.scheduled = []
+        self.cron_scheduled = []
         self._live_job_ids: set[str] = set()
 
-    def schedule_once(self, job_id, run_date, chat_id, user_id, text):
+    def schedule_once(self, job_id, run_date, chat_id):
         self.scheduled.append({
             "job_id": job_id,
             "run_date": run_date,
             "chat_id": chat_id,
-            "user_id": user_id,
-            "text": text,
+        })
+        self._live_job_ids.add(job_id)
+
+    def schedule_cron(self, job_id, cron_expr, timezone, chat_id):
+        self.cron_scheduled.append({
+            "job_id": job_id,
+            "cron_expr": cron_expr,
+            "timezone": timezone,
+            "chat_id": chat_id,
         })
         self._live_job_ids.add(job_id)
 
@@ -92,11 +100,11 @@ class SpyMemoryProvider:
 
 @pytest.mark.asyncio
 async def test_scheduler_tool_schedules_reminder():
-    from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
 
     scheduler_api = FakeSchedulerApi()
     storage_api = FakeStorageApi()
-    tool = SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
 
     call = ToolCall(
         tool_name="schedule_message",
@@ -119,24 +127,24 @@ async def test_scheduler_tool_schedules_reminder():
     assert len(scheduler_api.scheduled) == 1
     job = scheduler_api.scheduled[0]
     assert job["chat_id"] == 42
-    assert job["user_id"] == 0
-    assert job["text"] == "call mom"
 
     job_keys = [k for k in storage_api.data if k.startswith("active_jobs:")]
     assert len(job_keys) == 1
     stored = json.loads(list(storage_api.data[job_keys[0]].values())[0])
     assert stored["description"] == "call mom"
     assert stored["type"] == "once"
+    assert stored["kind"] == "message"
+    assert stored["message_text"] == "call mom"
     assert stored["user_id"] == 0
 
 
 @pytest.mark.asyncio
 async def test_scheduler_tool_delay_minutes():
-    from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
 
     scheduler_api = FakeSchedulerApi()
     storage_api = FakeStorageApi()
-    tool = SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
 
     call = ToolCall(
         tool_name="schedule_message",
@@ -154,7 +162,6 @@ async def test_scheduler_tool_delay_minutes():
     assert "30 minutes" in result.output
     assert len(scheduler_api.scheduled) == 1
     assert scheduler_api.scheduled[0]["chat_id"] == 42
-    assert scheduler_api.scheduled[0]["user_id"] == 777
 
     job_keys = [k for k in storage_api.data if k.startswith("active_jobs:")]
     assert len(job_keys) == 1
@@ -165,11 +172,11 @@ async def test_scheduler_tool_delay_minutes():
 
 @pytest.mark.asyncio
 async def test_scheduler_tool_delay_minutes_utc_without_profile_timezone():
-    from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
 
     scheduler_api = FakeSchedulerApi()
     storage_api = FakeStorageApi()
-    tool = SchedulerTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
 
     call = ToolCall(
         tool_name="schedule_message",
@@ -190,9 +197,9 @@ async def test_scheduler_tool_delay_minutes_utc_without_profile_timezone():
 
 @pytest.mark.asyncio
 async def test_scheduler_tool_rejects_past_time():
-    from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
 
-    tool = SchedulerTool(
+    tool = ScheduleMessageTool(
         scheduler_api=FakeSchedulerApi(),
         storage_api=FakeStorageApi(),
     )
@@ -219,9 +226,9 @@ async def test_scheduler_tool_rejects_past_time():
 
 @pytest.mark.asyncio
 async def test_scheduler_tool_rejects_invalid_timezone():
-    from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
 
-    tool = SchedulerTool(
+    tool = ScheduleMessageTool(
         scheduler_api=FakeSchedulerApi(),
         storage_api=FakeStorageApi(),
     )
@@ -248,9 +255,9 @@ async def test_scheduler_tool_rejects_invalid_timezone():
 
 @pytest.mark.asyncio
 async def test_scheduler_tool_rejects_missing_chat_id():
-    from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
 
-    tool = SchedulerTool(
+    tool = ScheduleMessageTool(
         scheduler_api=FakeSchedulerApi(),
         storage_api=FakeStorageApi(),
     )
@@ -276,9 +283,9 @@ async def test_scheduler_tool_rejects_missing_chat_id():
 
 @pytest.mark.asyncio
 async def test_scheduler_tool_rejects_invalid_date():
-    from yoda.mind.agent.tools.scheduler_tool import SchedulerTool
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
 
-    tool = SchedulerTool(
+    tool = ScheduleMessageTool(
         scheduler_api=FakeSchedulerApi(),
         storage_api=FakeStorageApi(),
     )
@@ -304,24 +311,55 @@ async def test_scheduler_tool_rejects_invalid_date():
 
 
 @pytest.mark.asyncio
-async def test_fire_job_passes_user_id_and_cleans_up_once():
-    delivered = []
+async def test_schedule_message_cron():
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+
+    call = ToolCall(
+        tool_name="schedule_message",
+        arguments={
+            "reminder_text": "weekly vitamins",
+            "cron": "0 9 * * 1",
+            "timezone": "Europe/Moscow",
+        },
+        metadata={"chat_id": 42, "user_id": 1},
+    )
+
+    result = await tool.execute(call)
+
+    assert result.success is True
+    assert len(scheduler_api.cron_scheduled) == 1
+    assert scheduler_api.cron_scheduled[0]["cron_expr"] == "0 9 * * 1"
+    stored = json.loads(
+        list(storage_api.data["active_jobs:42"].values())[0]
+    )
+    assert stored["type"] == "cron"
+    assert stored["kind"] == "message"
+    assert stored["cron"] == "0 9 * * 1"
+
+
+@pytest.mark.asyncio
+async def test_fire_job_invokes_callback_and_cleans_up_once():
+    fired = []
     cleaned = []
 
-    async def delivery(chat_id, user_id, text):
-        delivered.append((chat_id, user_id, text))
+    async def fire(chat_id, job_id):
+        fired.append((chat_id, job_id))
 
     async def cleanup(chat_id, job_id):
         cleaned.append((chat_id, job_id))
 
-    scheduler_module._delivery_callback = delivery
+    scheduler_module._fire_callback = fire
     scheduler_module._cleanup_callback = cleanup
 
-    await scheduler_module._fire_job(42, 777, "call mom", "job_1", "once")
+    await scheduler_module._fire_job(42, "job_1", "once")
 
-    assert delivered == [(42, 777, "call mom")]
+    assert fired == [(42, "job_1")]
     assert cleaned == [(42, "job_1")]
-    scheduler_module._delivery_callback = None
+    scheduler_module._fire_callback = None
     scheduler_module._cleanup_callback = None
 
 

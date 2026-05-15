@@ -1,0 +1,94 @@
+import json
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from yoda.mind.job_dispatcher import JobDispatcher
+from tests.test_agent_tools import FakeSchedulerApi, FakeStorageApi
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_routes_message_job():
+    storage = FakeStorageApi()
+    scheduler = FakeSchedulerApi()
+    mind = MagicMock()
+    mind.deliver_scheduled_reminder = AsyncMock()
+    mind.execute_scheduled_task = AsyncMock()
+
+    payload = json.dumps({
+        "kind": "message",
+        "user_id": 5,
+        "message_text": "hello",
+        "description": "hello",
+    })
+    await storage.hset("active_jobs:42", "job_1", payload)
+
+    dispatcher = JobDispatcher(storage, scheduler, mind)
+    await dispatcher.fire(42, "job_1")
+
+    mind.deliver_scheduled_reminder.assert_awaited_once_with(
+        chat_id=42, user_id=5, reminder_text="hello"
+    )
+    mind.execute_scheduled_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_routes_task_job():
+    storage = FakeStorageApi()
+    scheduler = FakeSchedulerApi()
+    mind = MagicMock()
+    mind.deliver_scheduled_reminder = AsyncMock()
+    mind.execute_scheduled_task = AsyncMock()
+
+    payload = json.dumps({
+        "kind": "task",
+        "user_id": 5,
+        "skill_name": "search_web",
+        "distilled_task": "Find news",
+    })
+    await storage.hset("active_jobs:42", "job_2", payload)
+
+    dispatcher = JobDispatcher(storage, scheduler, mind)
+    await dispatcher.fire(42, "job_2")
+
+    mind.execute_scheduled_task.assert_awaited_once_with(
+        chat_id=42,
+        user_id=5,
+        skill_name="search_web",
+        distilled_task="Find news",
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_missing_payload_cancels_job():
+    storage = FakeStorageApi()
+    scheduler = FakeSchedulerApi()
+    scheduler._live_job_ids.add("orphan")
+    mind = MagicMock()
+
+    dispatcher = JobDispatcher(storage, scheduler, mind)
+    await dispatcher.fire(42, "orphan")
+
+    assert "orphan" not in scheduler._live_job_ids
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_task_failure_notifies():
+    storage = FakeStorageApi()
+    scheduler = FakeSchedulerApi()
+    mind = MagicMock()
+    mind.execute_scheduled_task = AsyncMock(side_effect=RuntimeError("boom"))
+    mind.notify_scheduled_failure = AsyncMock()
+
+    payload = json.dumps({
+        "kind": "task",
+        "user_id": 1,
+        "skill_name": "search_web",
+        "distilled_task": "x",
+    })
+    await storage.hset("active_jobs:1", "job_t", payload)
+
+    dispatcher = JobDispatcher(storage, scheduler, mind)
+    await dispatcher.fire(1, "job_t")
+
+    mind.notify_scheduled_failure.assert_awaited_once()
