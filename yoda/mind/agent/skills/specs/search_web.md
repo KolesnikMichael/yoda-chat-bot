@@ -1,8 +1,12 @@
 ---
 name: search_web
-description: Search the web for information, verify facts, or research a topic using web search and content extraction.
+description: Search the web for current information to deliver results immediately, or schedule web searches for ongoing monitoring.
 required_inputs:
-  topic: "What the user wants to find out or verify"
+  topic: "What the user wants to find out, verify, or monitor"
+optional_inputs:
+  schedule: "When the search should run (specific time, delay) and how often to repeat it (e.g. daily, weekly, every 6 hours)"
+  notify_condition: "What qualifies as a meaningful update worth notifying about"
+  sources: "Preferred websites or source types"
 tools:
   - web_search
   - web_extract
@@ -14,9 +18,11 @@ max_iterations: 8
 # Search Web
 
 ## When to use
-- User asks for current/factual information about a topic
+- User asks for current or factual information
 - User asks to verify or check a fact
-- You need to back up your next statement with up-to-date facts
+- You need up-to-date information before responding
+- User wants deferred or periodic searches
+- User asks to track news, weather, prices, etc. over time
 
 ## Workflow
 1. If the user wants **deferred or recurring** execution (e.g. "every morning", "at 6 PM", "watch the dollar rate daily") — clarify topic, schedule, and timezone (`ask_user` / `update_profile` if needed). Then call `schedule_task` with `skill_name=search_web`, a **self-contained** `distilled_task` (what to find, in which language), and a short `description` for the jobs list. Use `cron`, `delay_minutes`, or absolute date/time fields. **Do not** run `web_search` in the same run — `schedule_task` is terminal.

@@ -1,6 +1,16 @@
 # Human Actions to Take
 ## DROP
 - Stop calculating chat_type each time - it doesn't change
+- Add modify_job tool for manage_jobs skill, otherwise job just gets cancelled
+- Request like "wake me up with a weather forecast" triggers schedule_message skill instead of recurrent search_web - probably because search_web frontmatter doesn't tell anything about scheduling
+- Job's description repeats message_text, but at least skill name should be present in description, so that list_jobs is aware of task nature. Ideally it should contain distilled_task
+- Double check: distilled_task is missing on Phase 2
+- Choose skill prompt looks suboptimal:
+  - Not to say terribly structured, excessive, confusing and misleading, 
+  - Missing ask_user format and example
+  - Skills are ordered in a strange way
+  - Skill descriptions are incoherent
+- Search_web preference not taken into account, should be put into description (probably because of wrong skill applied - verify)
 
 ## ADD
 - Retry after 429 where needed

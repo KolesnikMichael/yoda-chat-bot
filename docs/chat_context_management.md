@@ -201,6 +201,132 @@ After this one-time migration on the first restart following the
 upgrade, the fields stay consistent through normal operation; no
 recurring full-message recomputation is needed.
 
+### `Chat.history` schema
+
+`Chat.history` is the chat-level **audit log**: a list of structured
+records describing notable events that happen to the conversation
+over its lifetime. It is **not** a copy of the discussion flow — that
+is what `Conversation.messages` (plus, eventually, the externalised
+summary store) is for. `Chat.history` is for events about events.
+
+All entries share one envelope:
+
+```json
+{
+  "ts":    "<iso8601 UTC>",
+  "event": "<event_name>",
+  ... event-specific fields ...
+}
+```
+
+Compression entries (the only event type defined by this design)
+look like this:
+
+```json
+{
+  "ts":    "<snapshot_ts of the run>",
+  "event": "compression",
+  "added": {
+    "summary_id":    "<sha256 — same id as the Chroma record and the outbox entry>",
+    "visible_count": 42,
+    "from_ts":       "<iso8601 of the first visible message in the chunk>",
+    "to_ts":         "<iso8601 of the last visible message in the chunk>"
+  },
+  "evicted": [
+    {"summary_id": "<sha256>", "added_at": "<iso8601 — when this summary was originally added inline>"}
+  ]
+}
+```
+
+Notes:
+
+- `summary_id` is the deterministic identifier described in
+  [Persistence flow / Deterministic record id](#deterministic-record-id).
+  Sharing it across `Chat.history`, `pending_vectorization`, and the
+  Chroma record gives an end-to-end trace of one summary block by a
+  single id.
+- `evicted` is always present, possibly empty (`[]`) when the
+  `MAX_SUMMARY_COUNT` cap was not reached on this run — an absent
+  field would force readers to distinguish "no eviction happened"
+  from "field missing because of an old writer".
+- Typically `evicted` has length 1 (FIFO one-in-one-out), but the
+  list shape handles multi-eviction without schema change.
+
+The same envelope will host **other event types** as the project
+grows. The next likely addition is `skill_invocation`, for agent
+tasks; its concrete fields are out of scope of this design but will
+follow the same `{ts, event, ...}` shape so consumers do not need a
+per-event parser dispatch.
+
+The compression audit entry is written by [Compression apply step
+10](#transformation-on-the-copy) and persisted atomically with the
+rest of the apply.
+
+---
+
+## Prerequisites
+
+Two codebase changes have to land **before** the compression
+implementation can use the data shapes assumed by this design. They
+are small, self-contained, and independent of compression itself —
+they only widen the existing schemas.
+
+### Prerequisite: skill name in `task_result` content
+
+The summarizer and the mechanical `skills` extractor both expect the
+skill (tool) name to be present in the **content** of every
+`task_result` message stored in `Conversation.messages`. Today it is
+not: `Mind._handle_agent_result` writes a line of the form
+
+```
+Agent completed a task. Result: {result.answer}. Communicate this to
+the user naturally
+```
+
+`result.tools_used: list[str]` is already available on
+`AgentResult`; it just needs to flow into the chat line, for example:
+
+```python
+tools = ", ".join(result.tools_used) if result.tools_used else "none"
+line = (
+    f"Agent completed a task. Tools used: {tools}. "
+    f"Result: {result.answer}. ..."
+)
+```
+
+The exact wording is flexible. The contract for downstream code is:
+the substring `Tools used: <name>[, <name>]*` (or any equivalent
+machine-parseable form) appears in every `task_result` content
+produced by `_handle_agent_result`. Reminder-style `task_result`
+records that did not go through the agent (e.g. plain scheduled
+reminders) keep their current content; the mechanical extractor
+treats their `skills` set as empty.
+
+### Prerequisite: `UserProfile.skill_preferences`
+
+`UserProfile` gains a new field:
+
+```python
+skill_preferences: dict[str, list[str]] = field(default_factory=dict)
+```
+
+Storage layer changes:
+
+- `MemoryProvider` migration: existing stashed profiles get
+  `skill_preferences = {}` on first read (default value handles this
+  for free if the dataclass field has `default_factory=dict`).
+- `MemoryProvider.update_user_profile` is extended per
+  [Profile extraction details](#profile-extraction-details).
+- The agent-side `update_profile` tool's `ALLOWED_FIELDS` set gains
+  `"skill_preferences"` so the agent can write the field through the
+  replace path when it has a strong reason to (e.g. user explicitly
+  asks to forget a stored preference). Compression always uses
+  `skill_preferences_to_add`.
+
+The field is then included in the `UserProfile` snapshot that
+`user_introduction` carries, so Yoda sees skill-specific preferences
+in the live tail without any extra retrieval round-trip.
+
 ---
 
 ## Compression triggers
@@ -220,7 +346,8 @@ gist, not detail. Yoda can do the same and stop paying tokens for
 fine-grained history that will not be referenced.
 
 **Firing condition:** `conversation.visible_messages >
-SIZE_TRIGGER_THRESHOLD` (default `300`, exact value TBD). Visible-only
+SIZE_TRIGGER_THRESHOLD` (default `300`, configured at
+`mind.memory.chat_compression.size_trigger_threshold`). Visible-only
 counting matches the timeout-trigger and ignores `prompt`,
 accumulated `summary` blocks, and `user_introduction` markers, none of which
 should drive an emergency cutoff.
@@ -260,9 +387,9 @@ hour, visits conversations for which **both** of the following hold:
   conversation that has been quiet *and* unchanged since the previous
   run.
 
-N is a setting with **two separate values** — one for private chats, one
-for group chats. Both default to `8`. The settings section name in
-`settings.json` is TBD.
+N is a setting with **two separate values** — one for private chats,
+one for group chats, both default to `8`, configured at
+`mind.memory.chat_compression.quiet_runs_before_compression.{private,group}`.
 
 The two-knob split exists because in groups with users across time zones a
 shared "night" may not exist, so groups may need a different (typically
@@ -330,29 +457,40 @@ strip them, since they carry content rather than projected metadata. In
 particular, `task_result` messages routinely carry information that
 narrative-style compression loses first — URLs, IDs, exact tool
 configurations, parameter values, error contexts. The summariser prompt
-will therefore explicitly instruct the model to preserve such values
-**verbatim** in the summary, separately from the narrative compression of
-the surrounding dialogue. Detailed prompt design is deferred.
+([`docs/prompts/summarizer.md`](prompts/summarizer.md)) explicitly
+instructs the model to preserve such values **verbatim** in the summary,
+separately from the narrative compression of the surrounding dialogue.
 
 #### Constants and entry threshold
 
-- **`MIN_CHUNK_LENGTH = 30`** — the same constant serves two roles by
+All of the empirical knobs below live in
+`settings.json → mind.memory.chat_compression`; the
+defaults listed are the values shipped with the repo and the values
+referenced throughout this document. Names in code (loaded into a
+`ChatCompressionSettings` dataclass at startup) match the JSON keys
+1:1. The same dataclass also exposes the size-trigger threshold and
+the per-chat-type silence knobs documented earlier in
+[Size-trigger](#size-trigger--emergency-cutoff) and
+[Timeout-trigger](#timeout-trigger--clean-chunk-compression).
+
+- **`min_chunk_length = 30`** — the same value serves two roles by
   design: minimum visible length of the live tail (so Yoda always
   retains roughly the screen of recent messages a returning user
   sees), and minimum visible length of a compressed chunk (so we never
   spend an LLM call on a chunk smaller than what humans themselves
   would still recall in detail).
-- **`GAP_TO_TRIGGER_RATIO = 0.5`** — single tunable that ties gap
+- **`gap_to_trigger_ratio = 0.5`** — single tunable that ties gap
   detection to the silence threshold. `GAP_THRESHOLD` is derived
-  per-chat-type as `N(chat_type) * GAP_TO_TRIGGER_RATIO`, i.e. 4h for
-  the default `N = 8`. Tying the two together guarantees by
-  construction that an internal gap can never be longer than the
+  per-chat-type as
+  `quiet_runs_before_compression[chat_type] * gap_to_trigger_ratio`,
+  i.e. 4h for the default `N = 8`. Tying the two together guarantees
+  by construction that an internal gap can never be longer than the
   silence required to fire the trigger, and that groups with larger
   `N` (time-zone-spread) automatically get proportionally larger gap
   thresholds, matching their slower natural rhythm. The ratio is a
-  named constant rather than two independent settings to keep the
+  single setting rather than two independent thresholds to keep the
   invariant `GAP_THRESHOLD < N` non-optional.
-- **`MAX_SUMMARY_COUNT = 30`** — hard cap on the number of `summary`
+- **`max_summary_count = 30`** — hard cap on the number of `summary`
   blocks coexisting inline in a single `Conversation`. When a
   compression run would push the count above the cap, the same atomic
   apply that inserts the new summary also evicts as many oldest
@@ -362,8 +500,43 @@ the surrounding dialogue. Detailed prompt design is deferred.
   cap, variant C would let the prompt grow unboundedly on long-lived
   chats; with it, the inline conversation lives in a known envelope.
   Evicted summary blocks remain available through the externalised
-  summary store (see open question on summary retrieval) — eviction
-  here is purely about inline footprint, not data loss.
+  summary store — eviction here is purely about inline footprint, not
+  data loss.
+
+The full block, with the size-trigger and timeout-trigger settings
+gathered alongside, looks like this in `settings.json`:
+
+```json
+"mind": {
+  "memory": {
+    "chat_compression": {
+      "size_trigger_threshold":        300,
+      "min_chunk_length":              30,
+      "max_summary_count":             30,
+      "gap_to_trigger_ratio":          0.5,
+      "quiet_runs_before_compression": {
+        "private": 8,
+        "group":   8
+      },
+      "outbox_health_threshold":       10
+    }
+  }
+}
+```
+
+`outbox_health_threshold` controls operator warnings from
+`flush_summary_outbox`; see
+[Outbox health threshold](#outbox-health-threshold).
+
+The Maintenance loop tick itself is unrelated to compression in
+isolation — it also drives `flush_summary_outbox` and
+`reconcile_active_jobs` — and lives at `mind.maintenance.tick_minutes`
+(default `60`).
+
+Throughout the rest of the document, the names `MIN_CHUNK_LENGTH`,
+`GAP_THRESHOLD`, `MAX_SUMMARY_COUNT`, `SIZE_TRIGGER_THRESHOLD` and
+the per-chat-type `N` refer to the values resolved from these
+settings at startup.
 
 The deliberate side effect of choosing `0.5` is that several short
 sub-bursts separated by 1–3 hour pauses will be slept through and
@@ -446,45 +619,38 @@ The next refresh of `user_introduction` happens at the next compression.
 
 ### Refresh during compression
 
-The pipeline runs strictly in this order, atomically with summary
-application:
+The compression pipeline interacts with `user_introduction` markers
+at two points; the full step-by-step pipeline lives in
+[Compression apply / Transformation on the copy](#transformation-on-the-copy)
+and is the single source of truth. This subsection only states the
+`user_introduction`-specific contract:
 
-1. Identify the chunk via [window selection](#window-selection-algorithm).
-2. Strip every `user_introduction` message from the chunk; remember the set
-   `removed_users` of user_ids whose marker was stripped. The
-   `user_introduction` markers do **not** participate in summarisation: they
-   are projected metadata, not content, and the source of truth is
-   `UserProfile` itself.
-3. Run summarisation on the stripped chunk.
-4. Run profile extraction on the chunk and update `UserProfile` for
-   each author of compressed `user`-kind messages.
+- **Strip before summarisation** (transformation step 2).
+  Every `user_introduction` message in the selected chunk is removed
+  before the LLM call; the set of removed `user_id`s is held as
+  `removed_users` for use in step 8. The markers do **not**
+  participate in summarisation — they are projected metadata, not
+  content, and the source of truth is `UserProfile` itself.
 
-   *Invariant:* the set of compressed `user`-kind authors equals
-   `removed_users` exactly, by construction of insertion (every
-   `user_introduction` is inserted directly before that user's first reply,
-   so it shares chunk membership with that reply). The implementation
-   should assert this invariant.
+- **Refresh after summarisation** (transformation step 8).
+  For each `user_id ∈ removed_users`, the tail of `copy.messages`
+  after the just-inserted summary is scanned for that user's first
+  `user`-kind message: if found, a fresh `user_introduction` is
+  built from the just-updated `UserProfile` and inserted before it;
+  if not found, the user is dropped from `copy.introduced_users` and
+  will be re-introduced lazily on their next message via
+  [Insertion on message ingest](#insertion-on-message-ingest).
 
-5. For each `user_id ∈ removed_users`, scan the tail (the portion of
-   the copy's `messages` after the just-inserted summary) for that
-   user's first `user`-kind message:
-   - **Found** → build a fresh `user_introduction` from the just-updated
-     `UserProfile` and insert it immediately before that message;
-     keep `user_id` in the copy's `introduced_users`.
-   - **Not found** → drop `user_id` from the copy's
-     `introduced_users`. The user will be re-introduced lazily on
-     their next message via the ingest rule above.
+  *Invariant:* `removed_users` equals the set of `user`-kind authors
+  whose messages got compressed, by construction of insertion (every
+  `user_introduction` is inserted directly before that user's first
+  reply, so it shares chunk membership with that reply). The
+  implementation should assert this invariant.
 
-   This scan only sees the snapshot tail. Messages that arrived on
-   the live conversation during the LLM call are reconciled
-   separately at apply time — see
-   [Compression apply](#compression-apply).
-6. The user_introduction work above is one phase of the larger compression
-   run. Replacing the chunk with the new summary, FIFO eviction
-   under `MAX_SUMMARY_COUNT`, decrement of `visible_messages`,
-   update of `last_compressed_at`, the audit line on `Chat.history`,
-   and the commit back to the live conversation are all described in
-   [Compression apply](#compression-apply).
+  This scan only sees the snapshot tail. Messages that arrived on
+  the live conversation during the LLM call are reconciled
+  separately at apply time — see
+  [Apply: graft + merge](#apply-graft--merge).
 
 ### Private vs. group chats
 
@@ -540,37 +706,77 @@ transformation runs in this order:
 
 1. [Window selection](#window-selection-algorithm) on `copy.messages`
    produces the chunk.
-2. Strip `user_introduction` markers from the chunk into `removed_users`
-   ([`user_introduction` lifecycle](#refresh-during-compression) step 2).
-3. Summarise the stripped chunk (lifecycle step 3).
-4. Profile extraction on the chunk; `UserProfile` updates are
-   persisted to the user-profile store directly — they do not live
-   on `copy` (lifecycle step 4).
-5. Replace the chunk in `copy.messages` with the new `summary`
+2. Strip `user_introduction` markers from the chunk into
+   `removed_users`. See
+   [`user_introduction` lifecycle / Refresh during compression](#refresh-during-compression)
+   for the contract.
+3. Run a single LLM call on the stripped chunk per
+   [Summarizer envelope](#summarizer-envelope), producing
+   `summary`, `topics`, and `profile_updates` in one JSON object.
+   The summarizer prompt is in
+   [`docs/prompts/summarizer.md`](prompts/summarizer.md).
+4. Compute the mechanical record fields from the chunk:
+   `participants = sorted({m.user_id for m in chunk if m.kind == "user"})`,
+   `skills` = the set of skill names parsed out of `task_result`
+   contents (relies on [Prerequisite: skill name in `task_result`
+   content](#prerequisite-skill-name-in-task_result-content)). These
+   plus the LLM output form the complete summary record for the
+   [Record schema](#record-schema).
+5. Apply each per-user delta in `profile_updates` to `UserProfile`
+   via `MemoryProvider.update_user_profile`. Updates are persisted
+   to the user-profile store directly — they do not live on `copy` —
+   and must commit **before** step 8 so the `user_introduction`
+   refresh sees fresh profiles. Delta semantics in
+   [Profile extraction details](#profile-extraction-details).
+6. Replace the chunk in `copy.messages` with the new `summary`
    block.
-6. If the resulting `summary`-block count exceeds
+7. If the resulting `summary`-block count exceeds
    `MAX_SUMMARY_COUNT`, FIFO-evict the oldest summary block(s) from
    the head of `copy.messages` — same number as added in this run,
    typically one — and append each evicted block to
    `copy.pending_vectorization` so that the externalised summary
    store eventually picks it up via [Persistence
    flow](#persistence-flow).
-7. `user_introduction` refresh on `copy`'s tail (lifecycle step 5). The
-   scan sees only the snapshot tail; new arrivals are handled in the
-   merge phase below.
-8. Update derived fields on `copy`:
+8. `user_introduction` refresh on `copy`'s tail. For each
+   `user_id ∈ removed_users`, scan the portion of `copy.messages`
+   after the just-inserted summary for that user's first
+   `user`-kind message:
+   - **Found** → build a fresh `user_introduction` from the
+     just-updated `UserProfile` and insert it immediately before
+     that message; keep `user_id` in `copy.introduced_users`.
+   - **Not found** → drop `user_id` from `copy.introduced_users`.
+     The user will be re-introduced lazily on their next message
+     via the ingest rule
+     ([Insertion on message ingest](#insertion-on-message-ingest)).
+
+   The scan only sees the snapshot tail; messages that arrived on
+   the live conversation during the LLM call are reconciled
+   separately at apply time — see [Apply: graft + merge](#apply-graft--merge).
+
+   *Invariant:* the set of compressed `user`-kind authors equals
+   `removed_users` exactly, by construction of insertion (every
+   `user_introduction` is inserted directly before that user's first
+   reply, so it shares chunk membership with that reply). The
+   implementation should assert this.
+9. Update derived fields on `copy`:
    - `copy.visible_messages -= chunk_visible_count`;
    - `copy.last_compressed_at = snapshot_ts`;
-   - `copy.introduced_users` was already mutated by step 7.
-9. Append the audit line to `copy.chat.history`:
-   `"Compressed <n_visible> messages into 1 summary on <iso8601>"`,
-   with `<n_visible> = chunk_visible_count` and
-   `<iso8601> = snapshot_ts`. The same form is used by the
-   size-trigger so future audits do not need a parser.
+   - `copy.introduced_users` was already mutated by step 8.
+10. Append a structured `compression` audit entry to
+    `copy.chat.history` per
+    [`Chat.history` schema](#chathistory-schema). Fields:
+    `ts = snapshot_ts`,
+    `added.summary_id` = the deterministic id of the just-inserted
+    summary, `added.visible_count = chunk_visible_count`,
+    `added.from_ts` / `added.to_ts` from the first/last visible
+    messages in the chunk, and `evicted` from the blocks moved into
+    `copy.pending_vectorization` in step 7 (each carrying its own
+    `summary_id` and original `added_at`). The same shape is written
+    by the size-trigger.
 
-After step 9, `copy` is a valid `Conversation` representing the state
-the live conversation **would** have ended up in had no concurrent
-ingest happened.
+After step 10, `copy` is a valid `Conversation` representing the
+state the live conversation **would** have ended up in had no
+concurrent ingest happened.
 
 ### Apply: graft + merge
 
@@ -597,9 +803,10 @@ live.introduced_users   = copy.introduced_users
 ```
 
 Then reconcile `user_introduction` correctness on `new_arrivals` —
-essentially `user_introduction` lifecycle step 5 applied to the
-post-snapshot range. For each distinct `user_id` whose `user`-kind
-message appears in `new_arrivals`:
+the same refresh contract from
+[Refresh during compression](#refresh-during-compression) applied to
+the post-snapshot range. For each distinct `user_id` whose
+`user`-kind message appears in `new_arrivals`:
 
 - **`user_id ∈ live.introduced_users` already, with a `user_introduction`
   for them in `new_arrivals` before that message** — no-op
@@ -615,17 +822,17 @@ message appears in `new_arrivals`:
 - **`user_id ∉ live.introduced_users`, no `user_introduction` in
   `new_arrivals`** — *the edge case.* This is a user who was in
   `removed_users` (so dropped from `copy.introduced_users` by
-  transformation step 5) but whose new message arrived during
+  transformation step 8) but whose new message arrived during
   compression while ingest still saw them as introduced (because
   `live.introduced_users` had not yet been overwritten and so ingest
-  correctly skipped insertion). Build a fresh `user_introduction` from the
-  just-updated `UserProfile`, insert it in `new_arrivals` immediately
-  before this user's first `user`-kind message there, and add
-  `user_id` to `live.introduced_users`.
+  correctly skipped insertion). Build a fresh `user_introduction`
+  from the just-updated `UserProfile`, insert it in `new_arrivals`
+  immediately before this user's first `user`-kind message there,
+  and add `user_id` to `live.introduced_users`.
 
-The same code that implements lifecycle step 5 should be reused for
-this scan; the only difference is the range it operates on
-(`new_arrivals` here, copy's tail there).
+The same code that implements the refresh in transformation step 8
+should be reused for this scan; the only difference is the range it
+operates on (`new_arrivals` here, copy's tail there).
 
 ### Post-apply invariant
 
@@ -640,6 +847,132 @@ block):
 This is the acceptance criterion for the apply step. Any
 implementation that satisfies it is correct, regardless of how the
 work is divided between transformation-on-copy and merge-on-arrivals.
+
+### Profile extraction details
+
+Profile extraction is the part of the compression run that updates
+`UserProfile` from what was said in the chunk. It is folded into the
+same LLM call as summarisation (transformation step 3), and the
+resulting deltas are applied in step 5.
+
+#### Delta shape
+
+The summariser's JSON envelope carries a `profile_updates` object
+keyed by `user_id`:
+
+```json
+{
+  "summary": "...",
+  "topics": ["погода"],
+  "profile_updates": {
+    "<user_id_a>": {
+      "preferred_name":           "...",                  // scalar, overwrite
+      "location":                 "...",                  // scalar, overwrite
+      "interests_to_add":         ["...", "..."],         // list, append
+      "facts_to_add":             ["..."],                // list, append
+      "skill_preferences_to_add": {                       // dict-of-list, append per skill
+        "<skill_name>": ["...", "..."]
+      }
+    },
+    "<user_id_b>": { ... }
+  }
+}
+```
+
+An empty `profile_updates: {}` is the expected output when the chunk
+contained no clear profile-relevant signal. The summariser prompt
+instructs the model to emit a field **only** when the chunk
+contains explicit evidence — no inference, no guessing.
+
+#### Scalar vs list vs dict-of-list semantics
+
+`UserProfile` has three classes of field, each with its own update
+rule:
+
+- **Scalar fields** (`preferred_name`, `gender`, `location`,
+  `timezone`, `occupation`) — overwrite. The LLM emits a scalar
+  **only** when the chunk provides explicit, durable evidence of a
+  new value; in that case the new value replaces the old. If the
+  chunk indicates that the old value is no longer true ("I quit
+  Yandex") without naming a replacement, the field is skipped
+  entirely. Empty strings and `null` are forbidden as scalar
+  values — erasure is never a compressor operation, only the
+  explicit `update_profile` agent tool can clear a field.
+- **List fields** (`interests`, `facts`) — **append only**. At
+  compression time the LLM sees a single chunk and has no knowledge
+  of what was previously known about the user, so a full
+  replacement would silently wipe everything accumulated from past
+  compressions. The delta uses distinct keys `interests_to_add` and
+  `facts_to_add`, and `MemoryProvider` appends with case-insensitive
+  deduplication against the existing list.
+- **Dict-of-list field** (`skill_preferences`) — **append per
+  skill**. Shape:
+
+  ```python
+  skill_preferences: dict[str, list[str]] = {}
+  # e.g. {"web_search":   ["weather forecast: accuweather.com",
+  #                        "currency rates: ligovka.ru"],
+  #       "text_to_image": ["prefers anime style"]}
+  ```
+
+  The delta key is `skill_preferences_to_add` and has the same
+  shape. For every `(skill_name, items)` entry, `MemoryProvider`
+  appends `items` to `current.skill_preferences[skill_name]` with
+  case-insensitive deduplication. Skill names are matched as-is
+  against the open vocabulary used by `task_result` content; an
+  unknown name simply creates a new bucket. Skill names are never
+  removed.
+
+The distinct key names (`interests_to_add` vs `interests`, etc.)
+make the three semantics statically disjoint: no compression-time
+delta can accidentally trigger a replace on a list/dict field.
+
+#### `MemoryProvider.update_user_profile` extension
+
+The current `MemoryProvider.update_user_profile(user_id, chat_id,
+fields)` does `setattr` for any field present in `fields`. This is
+correct for the existing `update_profile` agent tool, which acts
+with full conversational context. It needs to be extended to also
+recognise these compression-time keys:
+
+- `interests_to_add: list[str]` → append-with-dedup to
+  `current.interests`.
+- `facts_to_add: list[str]` → append-with-dedup to `current.facts`.
+- `skill_preferences_to_add: dict[str, list[str]]` → for each
+  `(skill, items)`: append-with-dedup to
+  `current.skill_preferences.setdefault(skill, [])`.
+
+The replace-style keys (`interests`, `facts`, `skill_preferences`)
+stay available for the agent tool, so the extension is purely
+additive — no existing call site breaks.
+
+#### Ordering
+
+Profile updates commit during transformation step 5, before the
+`user_introduction` refresh in transformation step 8. The refreshed
+`user_introduction` is therefore built from the just-updated
+`UserProfile` and carries the new values (including
+`skill_preferences`) immediately into the live tail. Any reordering
+of these steps breaks the design.
+
+#### Redaction
+
+The redaction list from
+[`docs/prompts/summarizer.md`](prompts/summarizer.md) (e-mails,
+phone numbers, street-level postal addresses, IBAN / card / account
+numbers, passwords, API tokens, secret keys) applies to every field
+of `profile_updates`.
+
+Crucially, redaction in `profile_updates` means **dropping the item
+entirely**, never storing the literal token `[REDACTED]`. The
+contrast with summary text is intentional: in prose, `[REDACTED]`
+keeps the narrative intact ("she sent me her [REDACTED]
+yesterday") — in a structured profile field, the same token is
+useless noise, so the only acceptable behaviour is to skip the
+item. This rule covers `facts_to_add` items, `skill_preferences_to_add`
+items, and any scalar whose content would consist of redactable PII.
+City and country are not redacted — they are profile-relevant and
+expected in `location`.
 
 ### Lock model
 
@@ -744,25 +1077,42 @@ does not natively support arrays; filtering uses substring/`$contains`
 predicates. This is a documented Chroma limitation, not a workaround
 for buggy code.
 
-### Tag extraction
+### Summarizer envelope
 
-`participants`, `skills`, and `topics` are produced **by the same LLM
-call** that writes the summary itself. The summarizer prompt asks for a
-JSON envelope:
+One LLM call per compression run produces the summary text, topic
+tags, and per-user profile-update deltas as a single JSON envelope.
+`participants` and `skills` are **not** emitted by the LLM — the
+compressor fills them in mechanically from the chunk after the call
+returns. This both lightens the cognitive load on the summarizer and
+removes a class of drift / out-of-sync failures (a closed skill
+vocabulary in the prompt would inevitably diverge from the real tool
+registry).
+
+LLM-emitted envelope:
 
 ```json
 {
-  "summary": "...",
-  "participants": [user_id, ...],
-  "skills": ["weather", "calendar"],
-  "topics": ["погода", "выезд за город"]
+  "summary":         "...",
+  "topics":          ["погода", "выезд за город"],
+  "profile_updates": { "<user_id>": { ... } }
 }
 ```
 
-`participants` is also computable mechanically from the chunk; the
-LLM-reported value is cross-checked against the mechanical one and any
-mismatch is logged (the LLM side is the suspect side). `skills` and
-`topics` are LLM-only.
+Mechanically computed by the compressor after the call:
+
+- `participants`: `sorted({m.user_id for m in chunk if m.kind == "user"})`.
+- `skills`: the set of skill names parsed out of `task_result`
+  records' `content` (see
+  [Prerequisite: skill name in `task_result` content](#prerequisite-skill-name-in-task_result-content)).
+  The vocabulary is open and always in sync with the live tool
+  registry.
+
+The merged record (LLM output + mechanical fields) is what the
+[Record schema](#record-schema) consumes for the Chroma write.
+
+The full prompt text — input format description, output rules,
+redaction list, profile-update semantics, and a worked example —
+lives in [`docs/prompts/summarizer.md`](prompts/summarizer.md).
 
 Topic-tag extraction is part of the MVP, not deferred. Cost is one
 extra JSON field in the summarizer's output — practically free — and
@@ -792,7 +1142,7 @@ never has to be rolled back due to vector-store availability.
 When [Compression apply](#compression-apply) evicts the oldest
 `summary` block(s) from the inline tail under `MAX_SUMMARY_COUNT`
 pressure, those blocks are appended to
-`copy.pending_vectorization` (transformation step 6). The graft +
+`copy.pending_vectorization` (transformation step 7). The graft +
 merge that commits the apply also persists
 `pending_vectorization` via the post-apply stash — see [Lock
 model](#lock-model). The compression run then returns success,
@@ -801,7 +1151,8 @@ regardless of whether the vector store is reachable.
 #### Outbox flush
 
 `Maintenance.flush_summary_outbox` runs once per Maintenance tick
-(1 hour, the same base period as compression — see [Single ticking
+(default 1 hour, configured at `mind.maintenance.tick_minutes`, the
+same base period as compression — see [Single ticking
 loop](#single-ticking-loop)). On each tick, it scans Conversations
 with non-empty `pending_vectorization` and for each one, in FIFO
 order:
@@ -835,12 +1186,14 @@ embedding call on retry (not free, but cheap and bounded).
 
 #### Outbox health threshold
 
-When any single Conversation accumulates **more than 10 entries** in
-`pending_vectorization`, `flush_summary_outbox` logs a warning per
-tick. This signals a sustained embedding-API outage or a Chroma
-misconfiguration that needs operator attention. There is no
-automatic drop policy — the entries are recoverable and can be
-flushed once the underlying problem is fixed.
+When any single Conversation accumulates more entries in
+`pending_vectorization` than
+`mind.memory.chat_compression.outbox_health_threshold` (default
+`10`), `flush_summary_outbox` logs a warning per tick. This signals
+a sustained embedding-API outage or a Chroma misconfiguration that
+needs operator attention. There is no automatic drop policy — the
+entries are recoverable and can be flushed once the underlying
+problem is fixed.
 
 #### Recall during the flush window
 
@@ -882,11 +1235,21 @@ mechanism:
 Yoda herself does not invoke recall on every turn; her chat replies
 are formed from the inline tail and inline summaries only. Recall
 fires only when the agent receives a task that explicitly needs older
-context, e.g. "помнишь, мы обсуждали…". Whether retrieved summaries
-should also be promoted back into the inline tail as a hit-cache (so
-that immediately following turns see them without another retrieval)
-is an open optimisation — see [Open
-questions](#open-questions).
+context, e.g. "помнишь, мы обсуждали…".
+
+Retrieved summaries are **not** promoted back into the inline summary
+list. By the time the agent finishes the recall task, the retrieved
+text already lives in the conversation as the `task_result` content
+of the `recall_conversation` invocation, so Yoda sees it for the
+current turn and the next several turns until that chunk is
+compressed — no extra mechanism needed for the common case. Explicit
+promotion into the inline summary list would break the load-bearing
+chronological-order invariant of inline summaries (which FIFO
+eviction, system-prompt rebuild and future readers all depend on)
+for negligible token savings on what is in practice a cold path. If
+telemetry later shows recurring follow-up recall patterns within
+short windows, the right fix is an out-of-band in-process LRU keyed
+by `summary_id`, not promotion into `Conversation.messages`.
 
 ### Security baseline
 
@@ -896,8 +1259,10 @@ questions](#open-questions).
 - **No raw user text in summaries** — already a property of
   summarisation by construction, but reinforced in the summarizer
   prompt with explicit redaction rules: e-mails, phone numbers,
-  IBAN/card numbers, postal addresses and similar PII are replaced
-  with placeholders (`<redacted_email>`, `<redacted_phone>`, ...).
+  IBAN / card numbers, street-level postal addresses and similar PII
+  are replaced with the literal token `[REDACTED]` in summary prose
+  and **dropped entirely** from structured `profile_updates` fields
+  (see [Profile extraction details / Redaction](#redaction)).
   User-typed URLs are kept verbatim because [agent-result
   fidelity](#single-summary-per-run-default) needs them; the operator
   accepts this trade-off.
@@ -964,8 +1329,9 @@ wiring file** — it is a one-line infrastructure callback, not a routine.
 
 `Maintenance` runs **a single periodic loop**, not one task per
 sub-routine. The loop ticks at a base period equal to the smallest
-period needed by any sub-routine — currently 1 hour (compression). On
-each tick the loop decides which sub-routines are due:
+period needed by any sub-routine — currently 1 hour (compression),
+configured at `mind.maintenance.tick_minutes`. On each tick the loop
+decides which sub-routines are due:
 
 - `compress_conversations` — every tick;
 - `flush_summary_outbox` — every tick (independent of compression in
@@ -1032,24 +1398,5 @@ taking on a heavy framework dependency.
 
 ## Open questions
 
-To be resolved in subsequent iterations:
-
-- **Recall hit-cache promotion.** When the agent's
-  `recall_conversation` skill returns a summary that was previously
-  evicted from the inline tail, should that summary be temporarily
-  re-inserted into the live tail (until it falls out again under
-  ordinary `MAX_SUMMARY_COUNT` pressure) so that immediately following
-  turns can use it without another retrieval round-trip? Cheap to
-  implement, but interacts with the FIFO eviction order. Deferred
-  until usage data shows whether it's worth it.
-- **Summarizer prompt and redaction details.** Concrete prompt
-  templates for the summarisation/tag-extraction LLM call, including
-  the verbatim-preserve list (URLs, IDs, parameters from
-  `task_result`), the redaction list (e-mails, phones, etc.), and
-  how `participants/skills/topics` are formatted. Mem0 / MemGPT prompt
-  patterns are the starting reference per [Prior art](#prior-art).
-- **Profile / Chat metadata extraction during compression.** What is
-  extracted, by which Operation, and how the system prompt is rebuilt
-  afterwards. The `user_introduction` refresh path (lifecycle step 4)
-  consumes whatever this extraction produces.
-- **Settings section name** for the two `N` knobs in `settings.json`.
+None outstanding at design level. Future questions will accumulate
+here as implementation surfaces them.
