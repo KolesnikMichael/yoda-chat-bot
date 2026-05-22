@@ -14,9 +14,19 @@ Why is this task needed, which problem does it solve, and under what conditions.
 
 ## Functional requirements
 
-### FR-1: Requirement's name
+### FR-1: Requirement name
 
 Description: what the applicaton should do.
+
+**Acceptance criteria:**
+- [ ] Criteria 1
+- [ ] Criteria 2
+
+## Non-functional requirements
+
+### NFR-1: Requirement name
+
+Description: what non-functional criteria the applicaton should comply to.
 
 **Acceptance criteria:**
 - [ ] Criteria 1

@@ -15,6 +15,7 @@
 
 ## Add
 
+- Design invariants to the root (?) AGENTS.md: chat isolation, chats nonpersistence, low hardware requirements, low budget, logging, exception handling, etc.
 - Retry after 429 where needed
 - Scheduling jobs: Daylight saving is unlikely taken into account (and there are countries that do not use it)
 - Admin notifications
