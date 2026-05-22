@@ -119,8 +119,7 @@ Rules:
   clear a field** — erasure is not a compressor operation. If the
   chunk only indicates that the old value is no longer true ("I quit
   Yandex") without naming a replacement, skip the field entirely.
-- `interests_to_add` and `facts_to_add` are append-only — the storage
-  layer dedupes against the existing list, but you should still avoid
+- `interests_to_add` and `facts_to_add` are append-only — you should avoid
   emitting items literally present in the snapshot you received.
 - `facts_to_add` items must be short, third-person, self-contained
   statements:
@@ -135,7 +134,7 @@ Rules:
   free-form phrase such as
     "web_search": ["weather forecast: accuweather.com",
                    "currency rates: ligovka.ru"],
-    "text_to_image": ["prefers anime style"].
+    "create_picture": ["prefers anime style"].
   The storage layer dedupes per-skill against the existing list.
   Capture a preference only when the user expressed it as a stable
   preference, not as a one-off request.

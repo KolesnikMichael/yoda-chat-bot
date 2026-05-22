@@ -457,7 +457,7 @@ strip them, since they carry content rather than projected metadata. In
 particular, `task_result` messages routinely carry information that
 narrative-style compression loses first — URLs, IDs, exact tool
 configurations, parameter values, error contexts. The summariser prompt
-([`docs/prompts/summarizer.md`](prompts/summarizer.md)) explicitly
+([`docs/design/prompts/summarizer.md`](design/prompts/summarizer.md)) explicitly
 instructs the model to preserve such values **verbatim** in the summary,
 separately from the narrative compression of the surrounding dialogue.
 

@@ -1,5 +1,6 @@
-# Human Actions to Take
-## DROP
+# Notes
+## Fix
+
 - Stop calculating chat_type each time - it doesn't change
 - Add modify_job tool for manage_jobs skill, otherwise job just gets cancelled
 - Request like "wake me up with a weather forecast" triggers schedule_message skill instead of recurrent search_web - probably because search_web frontmatter doesn't tell anything about scheduling
@@ -12,7 +13,8 @@
   - Skill descriptions are incoherent
 - Search_web preference not taken into account, should be put into description (probably because of wrong skill applied - verify)
 
-## ADD
+## Add
+
 - Retry after 429 where needed
 - Scheduling jobs: Daylight saving is unlikely taken into account (and there are countries that do not use it)
 - Admin notifications
@@ -42,14 +44,15 @@
 - Internal skill: [local_buddy_]small_talk
   - Gather in advance or lazily-collect facts on potential topics of interest and propose those for discussion with user
 
-## TRY
+## Try
+
 - Skill flavours/hierarchy: search web could have a number of options (sub-specs with specific workflow/sources/hints), depending on the topic. - Actuall, should this be stored in catalog, or in user preferences - like agent updating user_profile with object skill_preferences > web_search > weather > accuweather.com?
 - Trafilatura as another extraction option
 - _classify_intent could return 'pass' to replace CognitionCore.should_reply. And _classify_intent could have a better name, e.g. "decide_next_action"
 - Regulate Еmotional state with system messages, instead of the system prompt (should those be acually saved?). 
 - AffectProvider: should return current emotional state as a string, and MemoryCore should pass it to MemoryProvider and it should append it to the conversation as a system message
 
-## DISCOVER
+## See
 - No connection pooling for Redis - what's that?
 - The winner's approach:
   https://github.com/idzivinskyi/bitgn-trustworthy-agent/tree/main
@@ -58,3 +61,87 @@
   - `pending_message.py` — perception/embodiment concept
   - `system_prompt.py` — mind-level
   - `emotional_state.py` — affect concept
+
+# Backlog
+
+```dataviewjs
+const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+const priorityLabel = {
+  critical: "🔴 critical",
+  high:     "🟠 high",
+  medium:   "🟡 medium",
+  low:      "🟢 low"
+};
+const statusLabel = {
+  "in-progress": "🔵 in-progress",
+  "in-review":   "🟣 in-review",
+  "blocked":     "🔴 blocked",
+  "todo":        "⬜ todo",
+  "done":        "✅ done"
+};
+
+const all = dv.pages('"backlog"')
+  .where(p => p.id && p.file.name === "task");
+
+const active = all
+  .where(p => p.status !== "done")
+  .sort(p => priorityOrder[p.priority] ?? 99);
+
+const done = all
+  .where(p => p.status === "done")
+  .sort(p => p.updated, "desc");
+
+// ── Сводка ───────────────────────────────────────────────────────────────────
+const inProgress = active.where(p => p.status === "in-progress").length;
+const blocked    = active.where(p => p.status === "blocked").length;
+const todo       = active.where(p => p.status === "todo").length;
+
+dv.paragraph(
+  "**Total:** " + all.length + " · " +
+  "**in-progress:** " + inProgress + " · " +
+  "**todo:** " + todo + " · " +
+  "**blocked:** " + blocked + " · " +
+  "**done:** " + done.length
+);
+
+// ── Active tasks ───────────────────────────────────────────────────────────
+dv.header(2, "Active tasks (" + active.length + ")");
+
+if (active.length === 0) {
+  dv.paragraph("_No tasks._");
+} else {
+  dv.table(
+    ["ID", "Title", "Tags", "Link", "Status", "Priority", "Size", "Created"],
+    active.map(p => [
+      p.id,
+      p.title,
+      p.tags,
+      p.file.link,
+      statusLabel[p.status]   ?? p.status,
+      priorityLabel[p.priority] ?? p.priority,
+      p.size,
+      p.created
+    ])
+  );
+}
+
+// ── Complete tasks ────────────────────────────────────────────────────────
+dv.header(2, "Done (" + done.length + ")");
+
+if (done.length === 0) {
+  dv.paragraph("_No tasks._");
+} else {
+  dv.table(
+    ["ID", "Title", "Tags", "Link", "Status", "Size", "Created"],
+    done.map(p => [
+      p.id,
+      p.title,
+      p.tags,
+      p.file.link,
+      statusLabel[p.status]   ?? p.status,
+      p.size,
+      p.created
+    ])
+  );
+}
+```
