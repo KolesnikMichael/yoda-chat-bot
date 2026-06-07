@@ -457,7 +457,7 @@ strip them, since they carry content rather than projected metadata. In
 particular, `task_result` messages routinely carry information that
 narrative-style compression loses first — URLs, IDs, exact tool
 configurations, parameter values, error contexts. The summariser prompt
-([`docs/design/prompts/summarizer.md`](design/prompts/summarizer.md)) explicitly
+([`doc/design/prompts/summarizer.md`](design/prompts/summarizer.md)) explicitly
 instructs the model to preserve such values **verbatim** in the summary,
 separately from the narrative compression of the surrounding dialogue.
 
@@ -714,7 +714,7 @@ transformation runs in this order:
    [Summarizer envelope](#summarizer-envelope), producing
    `summary`, `topics`, and `profile_updates` in one JSON object.
    The summarizer prompt is in
-   [`docs/prompts/summarizer.md`](prompts/summarizer.md).
+   [`doc/design/prompts/summarizer.md`](design/prompts/summarizer.md).
 4. Compute the mechanical record fields from the chunk:
    `participants = sorted({m.user_id for m in chunk if m.kind == "user"})`,
    `skills` = the set of skill names parsed out of `task_result`
@@ -958,7 +958,7 @@ of these steps breaks the design.
 #### Redaction
 
 The redaction list from
-[`docs/prompts/summarizer.md`](prompts/summarizer.md) (e-mails,
+[`doc/design/prompts/summarizer.md`](design/prompts/summarizer.md) (e-mails,
 phone numbers, street-level postal addresses, IBAN / card / account
 numbers, passwords, API tokens, secret keys) applies to every field
 of `profile_updates`.
@@ -1112,7 +1112,7 @@ The merged record (LLM output + mechanical fields) is what the
 
 The full prompt text — input format description, output rules,
 redaction list, profile-update semantics, and a worked example —
-lives in [`docs/prompts/summarizer.md`](prompts/summarizer.md).
+lives in [`doc/design/prompts/summarizer.md`](design/prompts/summarizer.md).
 
 Topic-tag extraction is part of the MVP, not deferred. Cost is one
 extra JSON field in the summarizer's output — practically free — and

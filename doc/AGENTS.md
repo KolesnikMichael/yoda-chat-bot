@@ -10,14 +10,17 @@ doc/                      ← vault root, read from here
 ├── AGENTS.md             ← this file, read first
 ├── backlog/              ← project tasks
 │  ├── main.md            ← operational notes and project backlog
-│  └── TASK-NN-name/      ← single task folder
+│  └── TASK-NNN-name/     ← single task folder
 │     ├── task.md         ← task definition, status, context, and relationships
 │     ├── requirements.md ← what needs to be done and acceptance criteria
 │     ├── design.md       ← how it works, solutions, diagrams
 │     └── plan.md         ← step-by-step implementation plan
 ├── design/               ← project-level architectural documents
-├── misc/                 ← other documents (ignore as content)
-└── templates/            ← templates (ignore as content)
+│  └── decisions/         ← architecture decision records
+├── runbooks/             ← operational procedures
+├── templates/            ← Templater templates (ignore as content)
+├── .obsidian/            ← vault files (ignore as content)
+└── misc/                 ← other documents (ignore as content)
 ```
 
 ## How to read a task
@@ -29,13 +32,15 @@ Then read only what you need:
 | ---------------------------------------- | ----------------- |
 | What needs to be done?                   | `requirements.md` |
 | How does it work?                        | `design.md`       |
-| What exaclty is to be done?              | `plan.md`         |
+| What exactly is to be done?              | `plan.md`         |
 | How is the system structured as a whole? | `design/`         |
+| How to perform the operation?            | `runbooks/`       |
+|                                          |                   |
 
 ## Task Frontmatter (task.md)
 
 ```yaml
-id: TASK-NN # unique identifier
+id: TASK-NNN # unique identifier
 title: improve skill selection # task title
 status: todo # todo | in-progress | in-review | blocked | done
 priority: medium # low | medium | high | critical
@@ -55,7 +60,7 @@ grep -rl "status: in-progress" doc/backlog/*/task.md
 grep -rl "priority: high" doc/backlog/*/task.md
 
 # Task by ID
-grep -rl "id: TASK-42" doc/backlog/*/taks.md
+grep -rl "id: TASK-042" doc/backlog/*/task.md
 ```
 
 ## Agreements

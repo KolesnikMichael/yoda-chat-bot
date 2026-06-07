@@ -5,7 +5,7 @@
 .vscode
 *.exe
 __pycache__
-docs
+doc
 tests
 AGENTS.md
 deploy-exclude

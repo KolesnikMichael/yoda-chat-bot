@@ -3,3 +3,4 @@
 .file_cache/
 __pycache__/
 settings.json
+.obsidian/

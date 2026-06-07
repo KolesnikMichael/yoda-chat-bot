@@ -41,7 +41,7 @@
   - "saved=true/false" for summary entries, if close to edge - notify admin
 - Tool: web_scrape_tool with Crawl4AI (https://medium.com/@speaktoharisudhan/crawling-with-crawl4ai-the-open-source-scraping-beast-9d32e6946ad4)
 - In group chats use reply rather than send_message
-- Introduce conversation modes (docs/conversation_modes.md) and apply when delivering agent results
+- Introduce conversation modes (doc/design/conversation_modes.md) and apply when delivering agent results
 - Internal skill: [local_buddy_]small_talk
   - Gather in advance or lazily-collect facts on potential topics of interest and propose those for discussion with user
 
