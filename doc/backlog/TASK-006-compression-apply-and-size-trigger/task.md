@@ -1,0 +1,72 @@
+---
+id: TASK-006
+title: "compression apply and size trigger"
+status: todo
+priority: high
+size: L
+created: 2026-06-09
+updated: 2026-06-09
+tags:
+  - chat-context
+---
+
+# TASK-006: compression apply and size trigger
+
+## Description
+
+Implement the full compression apply pipeline: a per-conversation `asyncio.Lock`; snapshot → transformation on the copy (steps 1–10) → graft+merge with `new_arrivals` reconciliation; inline `summary` blocks with `MAX_SUMMARY_COUNT` FIFO eviction into `pending_vectorization`; the `Chat.history` audit entry; and the `user_introduction` strip (step 2) + refresh (step 8) + merge reconciliation reusing the Core helper from TASK-002. The summarisation/profile call is delegated to the `SummarizerProvider` from TASK-005 (invoked between snapshot and apply, with profile updates committed before the `user_introduction` refresh). Wire **only the size-trigger** into `compress_conversations`. This is the program's main integration milestone — after it, long chats compress inline without Chroma.
+
+## Master design
+
+- [[chat_context_management#Compression apply]]
+- [[chat_context_management#Lock model]]
+- [[chat_context_management#Refresh during compression]]
+- [[chat_context_management#Profile extraction details]] (step-5 ordering)
+- [[chat_context_management#Summarizer envelope]] (`SummarizerProvider` contract)
+- [[chat_context_management#Size-trigger — emergency cutoff]]
+- [[chat_context_management#Chathistory schema]]
+
+## Program
+
+Part of the Chat Context Management chain — see the program map in [[main#Chat Context Management]].
+
+## Scope boundary
+
+**In scope:**
+- Snapshot / transformation on the copy / apply graft+merge (including concurrent ingest during the LLM call)
+- `user_introduction` strip (step 2) + refresh (step 8) + merge reconciliation — **reusing the TASK-002 Core helper**, not a new implementation
+- Invoking `SummarizerProvider` (TASK-005) for the summary/profile call; enforcing the ordering invariant: profile updates commit (step 5) **before** the `user_introduction` refresh (step 8)
+- Inline `summary` blocks; FIFO eviction → `pending_vectorization` (the outbox accumulates; flush is still a no-op here)
+- `Chat.history` compression audit entry
+- Size-trigger wiring in `Maintenance.compress_conversations` (using the `CompressionCore` size-window + firing predicate)
+- Post-apply invariant tests, incl. a deterministic "messages arrived during the LLM call" test (inject via the fake LLM/ingest)
+
+**Out of scope:**
+- timeout-trigger wiring (TASK-007)
+- the summariser/profile internals themselves (TASK-005)
+- Chroma / `flush_summary_outbox` implementation (TASK-008)
+- `recall_conversation` skill (TASK-009)
+
+## Related documents
+
+- [[requirements]] — requirements and acceptance criteria
+- [[design]] — architectural solution
+- [[plan]] — implementation plan
+- [[chat_context_management]] — master design
+- [[main#Chat Context Management]] — program map and position in the chain
+
+## Dependencies
+
+- Depends on:
+  - [[TASK-001-message-kinds-and-conversation-state-v3/task|TASK-001]]
+  - [[TASK-002-user-introduction-on-ingest/task|TASK-002]]
+  - [[TASK-003-compression-window-algorithms-core/task|TASK-003]]
+  - [[TASK-004-maintenance-integration-shell/task|TASK-004]]
+  - [[TASK-005-summarizer-provider-and-profile-extraction/task|TASK-005]]
+- Blocks:
+  - [[TASK-007-timeout-trigger-wiring/task|TASK-007]]
+  - [[TASK-008-summary-store-and-outbox-flush/task|TASK-008]]
+
+## Notes
+
+The largest stage (L), even after extracting the summariser into TASK-005. Program milestone: user value without vector recall. Do not split the apply itself — the snapshot/transform/graft invariants give no valid intermediate state.

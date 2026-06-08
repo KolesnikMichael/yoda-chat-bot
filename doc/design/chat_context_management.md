@@ -34,7 +34,7 @@ Kind = Literal[
 | `prompt` | system prompt at the start of a conversation | `Conversation.ensure_system_prompt` |
 | `user` | a user-originated message (perception output) | `Perception.perceive_message` |
 | `assistant` | Yoda's reply | `Mind._reply_and_send` |
-| `task_result` | non-visible system message carrying the outcome of either a delegated agent task or a fired scheduled reminder. Both are bot-initiated payloads with the same downstream treatment by triggers and summarisation; merging them keeps the enum minimal. | `Mind._handle_agent_result`, `Mind.deliver_scheduled_reminder` |
+| `task_result` | non-visible system message carrying the outcome of a delegated agent task, a fired scheduled reminder, or a scheduled-task failure notice. All are bot-initiated payloads with the same downstream treatment by triggers and summarisation; merging them keeps the enum minimal. | `Mind._handle_agent_result`, `Mind.deliver_scheduled_reminder`, `Mind.notify_scheduled_failure` |
 | `user_introduction` | non-visible system message carrying a snapshot of a participant's `UserProfile`, lazily inserted before that user's first appearance in the live tail and refreshed at compression. Does not exist in the codebase yet — see [`user_introduction` lifecycle](#user_introduction-lifecycle). | `MemoryProvider` ingest hook + `user_introduction` lifecycle refresh |
 | `summary` | compression block produced by this design | `Maintenance.compress_conversations` (via `MemoryProvider.apply_compression`) |
 
@@ -167,6 +167,7 @@ conversation:
        # task delivery (agent result or scheduled reminder).
        known_prefixes = (
            "SCHEDULED REMINDER:",
+           "SCHEDULED TASK FAILED:",
            "Agent completed a task",
            "Ask the user (rephrase naturally",
        )
@@ -710,23 +711,28 @@ transformation runs in this order:
    `removed_users`. See
    [`user_introduction` lifecycle / Refresh during compression](#refresh-during-compression)
    for the contract.
-3. Run a single LLM call on the stripped chunk per
-   [Summarizer envelope](#summarizer-envelope), producing
-   `summary`, `topics`, and `profile_updates` in one JSON object.
-   The summarizer prompt is in
+3. Run `SummarizerProvider.summarise(chunk)` — a single LLM call on
+   the stripped chunk per [Summarizer envelope](#summarizer-envelope),
+   producing `summary`, `topics`, and `profile_updates` in one JSON
+   object. The summarizer prompt is in
    [`doc/design/prompts/summarizer.md`](design/prompts/summarizer.md).
-4. Compute the mechanical record fields from the chunk:
+4. The mechanical record fields are computed from the chunk **inside
+   `SummarizerProvider`**, alongside the call:
    `participants = sorted({m.user_id for m in chunk if m.kind == "user"})`,
    `skills` = the set of skill names parsed out of `task_result`
    contents (relies on [Prerequisite: skill name in `task_result`
-   content](#prerequisite-skill-name-in-task_result-content)). These
-   plus the LLM output form the complete summary record for the
-   [Record schema](#record-schema).
+   content](#prerequisite-skill-name-in-task_result-content)). The
+   provider returns these plus the LLM output as the complete summary
+   record for the [Record schema](#record-schema). Steps 3–4 are the
+   provider's whole contribution; everything after is Integration
+   orchestration on `copy`.
 5. Apply each per-user delta in `profile_updates` to `UserProfile`
-   via `MemoryProvider.update_user_profile`. Updates are persisted
-   to the user-profile store directly — they do not live on `copy` —
-   and must commit **before** step 8 so the `user_introduction`
-   refresh sees fresh profiles. Delta semantics in
+   via `MemoryProvider.update_user_profile`. This call is made by the
+   apply Integration, not by `SummarizerProvider` (a Provider never
+   calls another Provider). Updates are persisted to the user-profile
+   store directly — they do not live on `copy` — and must commit
+   **before** step 8 so the `user_introduction` refresh sees fresh
+   profiles. Delta semantics in
    [Profile extraction details](#profile-extraction-details).
 6. Replace the chunk in `copy.messages` with the new `summary`
    block.
@@ -1079,14 +1085,26 @@ for buggy code.
 
 ### Summarizer envelope
 
+This whole concern is owned by **`SummarizerProvider`** — an IODA
+Provider that depends only on the language (LLM) API. Its single
+public method `summarise(chunk)` runs the LLM call, parses and
+validates the JSON envelope, applies the redaction rules, computes
+the mechanical fields, and returns the merged summary record (plus
+the per-user `profile_updates` deltas) to the caller. Per IODA it
+**persists nothing**: applying the `profile_updates` deltas via
+`MemoryProvider.update_user_profile` and writing/evicting the inline
+`summary` block are orchestrated by [Compression apply](#compression-apply)
+(an Integration concern), so the provider stays a pure summarisation
+unit testable against a fake LLM façade.
+
 One LLM call per compression run produces the summary text, topic
 tags, and per-user profile-update deltas as a single JSON envelope.
-`participants` and `skills` are **not** emitted by the LLM — the
-compressor fills them in mechanically from the chunk after the call
-returns. This both lightens the cognitive load on the summarizer and
-removes a class of drift / out-of-sync failures (a closed skill
-vocabulary in the prompt would inevitably diverge from the real tool
-registry).
+`participants` and `skills` are **not** emitted by the LLM —
+`SummarizerProvider` fills them in mechanically from the chunk after
+the call returns. This both lightens the cognitive load on the
+summarizer and removes a class of drift / out-of-sync failures (a
+closed skill vocabulary in the prompt would inevitably diverge from
+the real tool registry).
 
 LLM-emitted envelope:
 
@@ -1098,7 +1116,7 @@ LLM-emitted envelope:
 }
 ```
 
-Mechanically computed by the compressor after the call:
+Mechanically computed inside `SummarizerProvider` after the call:
 
 - `participants`: `sorted({m.user_id for m in chunk if m.kind == "user"})`.
 - `skills`: the set of skill names parsed out of `task_result`
@@ -1306,8 +1324,10 @@ Compression and other periodic background work live in a new
 
 `Maintenance` is constructed in `yoda/yoda_chat_bot.py:main()` like any
 other Integration, with dependencies on `storage_api`, `scheduler_api`,
-`memory_provider`, `language_provider`, `embedding_provider`,
-`vector_provider`, and any other Operations its sub-routines need. It exposes three handles to the wiring file:
+`memory_provider`, `summarizer_provider`, `embedding_provider`,
+`vector_provider`, and any other Operations its sub-routines need
+(`summarizer_provider` itself is constructed from `language_api` in
+the wiring file). It exposes three handles to the wiring file:
 
 - `run_initial_pass()` — called from `on_app_start` after state
   restoration; performs one-shot work that previously lived inline in
