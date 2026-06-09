@@ -60,6 +60,7 @@ Per task folder (`doc/backlog/TASK-NNN-name/`):
 
 Broader context (read selectively):
 
+- If `task.md` has `epic: EPIC-NNN`, read `EPIC-NNN-*/epic.md` for this task's position/dependencies in the decomposition. 
 - `doc/design/` — system-level docs and ADRs (`doc/design/decisions/`)
 - `doc/runbooks/` — operational procedures relevant to deploy/maintenance steps
 - `design.md` of dependency tasks linked from `task.md` for approach consistency
@@ -176,7 +177,7 @@ branch:                 # feat/TASK-NNN-...
 ---
 ```
 
-Set `updated` to today when saving. Leave `last_step` empty. Set **`branch`** to `feat/TASK-NNN-short-name`.
+Set `updated` to today when saving. Leave `last_step` empty. **Branch:** for a standalone task set `branch` to `feat/TASK-NNN-short-name`. For a task with `epic: EPIC-NNN`, **leave `branch` empty**.
 
 Keep the Obsidian links: `← [[task|Back to task]] | [[requirements|Requirements]] | [[design|Design]]`
 

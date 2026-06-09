@@ -48,6 +48,7 @@ Per task folder (`doc/backlog/TASK-NNN-name/`):
 
 Broader context (read selectively):
 
+- **Epic membership:** if `task.md` has `epic: EPIC-NNN`, the epic's `design.md` (master design) is the **source of truth** for cross-cutting architecture. Read `EPIC-NNN-*/epic.md` + the master-design sections this task implements, then **reference** them (`[[<master-design>#Section]]`) instead of restating decisions. Put only this task's local design here; raise any cross-task decision to the master design (flag it in the report).
 - `doc/design/` — system-level design docs
 - `doc/design/decisions/ADR-*.md` — binding decisions (patterns, conventions, …)
 - `design.md` and `requirements.md` of dependency tasks linked from `task.md` for contract continuity

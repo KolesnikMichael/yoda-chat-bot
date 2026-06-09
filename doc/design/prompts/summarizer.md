@@ -1,7 +1,7 @@
 # Summarizer prompt
 
 System prompt used by the conversation compressor (see
-[chat_context_management.md](../chat_context_management.md)). One LLM call
+[chat_context_management.md](../../backlog/EPIC-001-chat-context-management/chat_context_management.md)). One LLM call
 per compression run produces the inline `summary` text, the LLM-extracted
 metadata (`topics`), and per-user profile-update deltas (`profile_updates`).
 
@@ -9,7 +9,7 @@ metadata (`topics`), and per-user profile-update deltas (`profile_updates`).
 extracted mechanically by the compressor from the chunk itself (set of
 `user_id`s for `kind == "user"` messages, and set of skill names parsed
 from `task_result` content respectively). See
-[Summarizer envelope](../chat_context_management.md#summarizer-envelope)
+[Summarizer envelope](../../backlog/EPIC-001-chat-context-management/chat_context_management.md#summarizer-envelope)
 for the full assembled record schema.
 
 LLM call configuration:
@@ -18,7 +18,7 @@ LLM call configuration:
 - Application-side validation is strict: one `json.loads` + Pydantic
   schema check, fail-fast on any deviation. A failed run is logged and
   the compression iteration is skipped per
-  [Compression apply](../chat_context_management.md#compression-apply).
+  [Compression apply](../../backlog/EPIC-001-chat-context-management/chat_context_management.md#compression-apply).
 
 ## Call structure
 
@@ -189,7 +189,7 @@ Notes:
   inactive registered user is sent.
 - `task_result` content is expected to embed the skill name (e.g. as
   `[web_search] (...) ...`). This relies on the
-  [`task_result` skill-name pre-requisite](../chat_context_management.md#prerequisite-skill-name-in-task_result-content)
+  [`task_result` skill-name pre-requisite](../../backlog/EPIC-001-chat-context-management/chat_context_management.md#prerequisite-skill-name-in-task_result-content)
   being in place.
 - No previous summaries are passed. Compressed history is intentionally
   re-derived chunk-by-chunk (Variant C — parallel summaries, never

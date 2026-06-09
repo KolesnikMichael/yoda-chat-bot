@@ -1,5 +1,6 @@
 ---
 id: TASK-007
+epic: EPIC-001
 title: "timeout trigger wiring"
 status: todo
 priority: medium
@@ -23,7 +24,7 @@ Wire the timeout-trigger into the existing `compress_conversations` and the appl
 
 ## Program
 
-Part of the Chat Context Management chain — see the program map in [[main#Chat Context Management]].
+Part of the Chat Context Management chain — see the program map in [[EPIC-001-chat-context-management/epic|EPIC-001]].
 
 ## Scope boundary
 
@@ -43,7 +44,7 @@ Part of the Chat Context Management chain — see the program map in [[main#Chat
 - [[design]] — architectural solution
 - [[plan]] — implementation plan
 - [[chat_context_management]] — master design
-- [[main#Chat Context Management]] — program map and position in the chain
+- [[EPIC-001-chat-context-management/epic|EPIC-001]] — program map and position in the chain
 
 ## Dependencies
 

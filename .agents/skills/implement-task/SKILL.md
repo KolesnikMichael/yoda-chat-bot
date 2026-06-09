@@ -40,13 +40,21 @@ git checkout main && git pull
 git status   # must be clean — if not, STOP and ask user
 ```
 
-Read `branch:` from `plan.md` frontmatter. If empty, **fill it** before creating the branch (pattern: `feat/TASK-NNN-short-slug`, match task folder name).
+**Resolve the branch (epic takes precedence):**
 
-```bash
-git checkout -b <branch from frontmatter>
-```
+- If `task.md` has `epic: EPIC-NNN` → use the **shared epic branch** from `EPIC-NNN-*/epic.md` `branch:` (`feat/EPIC-NNN-slug`). Do **not** create a per-task branch. Create it only if it does not exist yet (first task of the epic); otherwise check it out and continue committing on it:
 
-If already on the correct branch with the task's commits and user is resuming, skip recreate but still verify `git status`.
+  ```bash
+  git checkout <epic branch> 2>/dev/null || git checkout -b <epic branch>
+  ```
+
+- Otherwise (standalone task) → read `branch:` from `plan.md`. If empty, **fill it** first (pattern: `feat/TASK-NNN-short-slug`, match the task folder name), then:
+
+  ```bash
+  git checkout -b <branch from plan frontmatter>
+  ```
+
+If already on the correct branch with the task's (or epic's) commits and the user is resuming, skip recreate but still verify `git status`. On a shared epic branch, expect prior member-task commits to be present — that is normal, not a dirty tree.
 
 ### Step 2: Validate `plan.md`
 

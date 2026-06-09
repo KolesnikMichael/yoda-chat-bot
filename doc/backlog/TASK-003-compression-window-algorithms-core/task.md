@@ -1,5 +1,6 @@
 ---
 id: TASK-003
+epic: EPIC-001
 title: "compression window algorithms core"
 status: todo
 priority: medium
@@ -25,7 +26,7 @@ Implement `CompressionCore` — pure, sync logic for compression-window selectio
 
 ## Program
 
-Part of the Chat Context Management chain — see the program map in [[main#Chat Context Management]].
+Part of the Chat Context Management chain — see the program map in [[EPIC-001-chat-context-management/epic|EPIC-001]].
 
 ## Scope boundary
 
@@ -47,7 +48,7 @@ Part of the Chat Context Management chain — see the program map in [[main#Chat
 - [[design]] — architectural solution
 - [[plan]] — implementation plan
 - [[chat_context_management]] — master design
-- [[main#Chat Context Management]] — program map and position in the chain
+- [[EPIC-001-chat-context-management/epic|EPIC-001]] — program map and position in the chain
 
 ## Dependencies
 

@@ -46,8 +46,9 @@ Per task folder (`doc/backlog/TASK-NNN-name/`):
 
 Broader context (read selectively):
 
+- If `task.md` frontmatter has `epic: EPIC-NNN`, read `doc/backlog/EPIC-NNN-*/epic.md` (decomposition, this task's deliverable + scope) and the master-design anchors it lists. Stay within the slice the epic assigns this task; do not absorb sibling tasks' scope.
 - `doc/backlog/main.md` — project status and informal backlog notes
-- `doc/design/` — system-level design docs (e.g. `chat_context_management.md`, `conversation_modes.md`)
+- `doc/design/` — system-level design docs
 - `doc/design/decisions/ADR-*.md` — linked or relevant ADRs
 - Related tasks via `[[TASK-NNN]]` links in `task.md`
 

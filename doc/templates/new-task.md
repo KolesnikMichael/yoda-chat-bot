@@ -4,6 +4,12 @@ const name = await tp.system.prompt("Hyphenated name (e.g. skill-selection)");
 
 if (!num || !name) { new Notice("Task creation cancelled."); return; }
 
+const epicFolder = (await tp.system.prompt("Epic folder or blank for a standalone task") || "").trim();
+const epicMatch  = epicFolder.match(/^(EPIC-\d+)/);
+const epic       = epicMatch ? epicMatch[1] : "";
+const inEpic     = epic.length > 0;
+const epicBranch = inEpic ? "feat/" + epicFolder : "";
+
 const id    = "TASK-" + num.padStart(3, "0");
 const folder = "backlog/" + id + "-" + name;
 const title  = name.replace(/-/g, " ");
@@ -21,7 +27,7 @@ const requirements = [
   "",
   "# " + id + ": " + title + " — Requirements",
   "",
-  "← [[task|Back to task]]",
+  "← [[backlog/TASK-007-timeout-trigger-wiring/task|Back to task]]",
   "",
   "## Context",
   "",
@@ -56,7 +62,7 @@ const design = [
   "",
   "# " + id + ": " + title + " — Design",
   "",
-  "← [[task|Back to task]] | [[requirements|Requirements]]",
+  "← [[backlog/TASK-007-timeout-trigger-wiring/task|Back to task]] | [[requirements|Requirements]]",
   "",
   "## Solution overview",
   "",
@@ -113,7 +119,7 @@ const plan = [
   "",
   "# " + id + ": " + title + " — Implementation plan",
   "",
-  "← [[task|Back to task]] | [[requirements|Requirements]] | [[design|Design]]",
+  "← [[backlog/TASK-007-timeout-trigger-wiring/task|Back to task]] | [[requirements|Requirements]] | [[design|Design]]",
   "",
   "## Overview",
   "",
@@ -131,6 +137,7 @@ const plan = [
   "- [[requirements]] — FR-1…FR-N and acceptance criteria",
   "- [[design]] — «Architecture», «Interfaces», «System impact»",
   "- AGENTS.md (IODA + coding guidelines), coding_behavior.md",
+  ...(inEpic ? ["- [[" + epicFolder + "/epic|" + epic + "]] + its master design — cross-task context (read first)"] : []),
   "- <!-- ADR-XXX, related TASK design.md, runbooks — as needed -->",
   "",
   "## Pre-flight",
@@ -140,7 +147,9 @@ const plan = [
   "",
   "- [ ] `git checkout main && git pull` — main is up to date",
   "- [ ] `git status` — working tree is clean",
-  "- [ ] `git checkout -b <branch from frontmatter>` — feature branch created",
+  ...(inEpic
+    ? ["- [ ] `git checkout " + epicBranch + "` — shared epic branch (create on the first task, reuse afterwards)"]
+    : ["- [ ] `git checkout -b <branch from frontmatter>` — feature branch created"]),
   "- [ ] `.venv` active and dependencies installed",
   "- [ ] Baseline tests green: `.venv/bin/python -m pytest`",
   "",
@@ -226,6 +235,7 @@ await tp.file.create_new(plan,         "plan",         false, folder);
 tR += [
   "---",
   "id: " + id,
+  "epic: " + epic,
   'title: "' + title + '"',
   "status: todo",
   "priority: medium",
@@ -240,11 +250,18 @@ tR += [
   "",
   "One paragraph: what needs to be done and why.",
   "",
+  ...(inEpic ? [
+    "## Epic",
+    "",
+    "Part of [[" + epicFolder + "/epic|" + epic + "]] — read the epic (decomposition, shared branch) and its master design first for cross-task context.",
+    "",
+  ] : []),
   "## Related documents",
   "",
   "- [[requirements]] — requirements and acceptance criteria",
   "- [[design]] — architectural solution",
   "- [[plan]] — implementation plan",
+  ...(inEpic ? ["- [[" + epicFolder + "/epic|" + epic + "]] — epic decomposition and master design"] : []),
   "",
   "## Dependencies",
   "",
