@@ -93,10 +93,11 @@ const tasks = dv.pages('"backlog"')
   .where(p => p.file.name === "task" && p.epic === EPIC)
   .sort(p => p.id);
 dv.table(
-  ["ID", "Title", "Status", "Priority", "Size"],
+  ["ID", "Title", "Link", "Status", "Priority", "Size"],
   tasks.map(p => [
-    p.file.link,
+    p.id,
     p.title,
+    p.file.link,
     statusLabel[p.status] ?? p.status,
     p.priority,
     p.size
