@@ -17,7 +17,8 @@ doc/                      ← vault root, read from here
 │     ├── task.md         ← task definition, status, context, and relationships
 │     ├── requirements.md ← what needs to be done and acceptance criteria
 │     ├── design.md       ← how it works, solutions, diagrams
-│     └── plan.md         ← step-by-step implementation plan
+│     ├── plan.md         ← step-by-step implementation plan
+│     └── implementation-notes.md ← (optional) incidents, workarounds, ADR candidates from execution
 ├── design/               ← project-level architectural documents
 │  └── decisions/         ← architecture decision records
 ├── runbooks/             ← operational procedures
@@ -33,19 +34,19 @@ tasks are implemented on it rather than on per-task branches.
 ## How to read a task
 
 Always start with `task.md` — it provides context and links to other files.
-If it has `epic: EPIC-NNN`, read that epic's `epic.md` + the master-design sections it
-points to **first**, then stay within the slice the epic assigns. Then read only what you need:
+If it has `epic: EPIC-NNN`, read that epic's `epic.md` + the master-design sections
+listed in the task's `## Master design` **first**, then stay within the slice the epic
+assigns (`## Scope boundary`). Then read only what you need:
 
-| Question                                 | File              |
-| ---------------------------------------- | ----------------- |
-| What needs to be done?                   | `requirements.md` |
-| How does it work?                        | `design.md`       |
-| What exactly is to be done?              | `plan.md`         |
-| How does this task fit the bigger effort?| `EPIC-NNN/epic.md`|
+| Question                                 | File                 |
+| ---------------------------------------- | -------------------- |
+| What needs to be done?                   | `requirements.md`    |
+| How does it work?                        | `design.md`          |
+| What exactly is to be done?              | `plan.md`            |
+| How does this task fit the bigger effort?| `EPIC-NNN/epic.md`   |
 | Cross-cutting architecture of the epic?  | `EPIC-NNN/design.md` |
-| How is the system structured as a whole? | `design/`         |
-| How to perform the operation?            | `runbooks/`       |
-|                                          |                   |
+| How is the system structured as a whole? | `design/`            |
+| How to perform the operation?            | `runbooks/`          |
 
 ## Task Frontmatter (task.md)
 
@@ -56,6 +57,8 @@ title: improve skill selection # task title
 status: todo # todo | in-progress | in-review | blocked | done
 priority: medium # low | medium | high | critical
 size: M # XS | S | M | L | XL
+created: YYYY-MM-DD
+updated: YYYY-MM-DD # bump whenever the task or its artifacts change
 tags:
   - agent
   - prompt
@@ -95,7 +98,7 @@ grep -rl "epic: EPIC-001" doc/backlog/*/task.md
 - Acceptance criteria are in `requirements.md` (sections FR-N)
 - When a task is completed: `status` → `done`
 - Epic decomposition (task list, dependency graph) lives in `epic.md`, not in `main.md`
-- An epic's cross-cutting design lives in `EPIC-NNN/design.md`; member tasks reference it instead of restating decisions
+- An epic's cross-cutting design lives in the epic's master design (linked from `epic.md`; `design.md` by template); member tasks reference it instead of restating decisions
 - All tasks of an epic share the epic's branch; do not open per-task branches for epic members
 
 ## What an agent should NOT do

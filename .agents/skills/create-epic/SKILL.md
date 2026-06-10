@@ -1,13 +1,12 @@
 ---
 name: create-epic
-description: Decomposes a large body of work into a connected set of backlog tasks and fills the epic.md decomposition map + epic-level master design outline. Use when the user asks to plan, decompose, or break down an epic (EPIC-NNN); provides an epic folder, epic id, or "decompose epic N". Runs BEFORE the per-task flow; each resulting task then goes through requirements → design → plan → implementation. It is designed to give the agent harness a connected, context-scoped task set.
+description: Decomposes a large body of work into a connected set of backlog tasks and fills the epic.md decomposition map + epic-level master design outline. Use when the user asks to plan, decompose, or break down an epic (EPIC-NNN); provides an epic folder, epic id, or "decompose epic N". Runs BEFORE the per-task flow; each resulting task then goes through requirements → design → plan → implementation → close. It is designed to give the agent harness a connected, context-scoped task set.
 ---
 
 # Create Epic
 
 Turn one large, connected effort into a set of backlog tasks that can each run through
-`requirements → design → plan → implement` **without dragging the whole vault into context**.
-This skill is the pipeline head for multi-task work: **decompose epic** → (per task) create requirements → design → plan → implement.
+`requirements → design → plan → implement → close`. This skill is the pipeline head for multi-task work.
 
 An epic is a first-class entity, analogous to a task but at a higher level:
 
@@ -18,8 +17,6 @@ doc/backlog/
     design.md    ← master design (cross-cutting architecture; source of truth for member tasks)
   TASK-NNN-slug/ ← flat task folders, each carrying `epic: EPIC-NNN` frontmatter
 ```
-
-Tasks stay **flat** in `doc/backlog/` and link to the epic by the `epic:` attribute — not by nesting.
 
 ## Input (resolve first)
 
@@ -35,7 +32,7 @@ The user may pass **one** of:
 If multiple folders match or none exist, stop and ask.
 
 ```bash
-ls -d doc/backlog/EPIC-001-*
+ls -d doc/backlog/EPIC-{NNN}-*   # substitute the zero-padded id, e.g. EPIC-001
 ```
 
 ## Prerequisites
@@ -90,7 +87,7 @@ Each task should:
 - be **independently implementable and testable**, ending in a green suite (its own Checkpoint);
 - own **one coherent slice** (ideally one or few IODA layers);
 - have an explicit **deliverable** (observable user/system value or a foundation other tasks build on);
-- carry a **minimal context slice**: the exact master-design sections it needs + the sibling tasks it depends on. This is the whole point — it keeps each task's context tight.
+- carry a **minimal context slice**: the exact master-design sections it needs + the sibling tasks it depends on. This is the whole point of the epic split — it keeps each task's context tight.
 
 ### 3. Draft the task set
 
@@ -116,9 +113,9 @@ Confirm the **shared branch** in frontmatter (`branch: feat/EPIC-NNN-slug`); mem
 
 ### 6. Hand off task creation
 
-Per the project rule, **task folders are created from the template by the developer, not the agent.** Produce a handoff list so the developer can instantiate each task with the `new-task` Templater template, passing the **epic folder** at the prompt so `epic:` frontmatter, the `## Epic` link, and the shared-branch pre-flight are wired automatically.
+Produce a handoff list so the developer can instantiate each task with the `new-task` Templater template, passing the **epic folder** at the prompt so `epic:` frontmatter, the `## Epic` link, and the shared-branch pre-flight are wired automatically.
 
-For each task list: `TASK-NNN | title | size | depends-on | master-design anchors` — these become the seed for that task's `task.md` Description, `## Epic`, and `## Dependencies`.
+For each task list: `TASK-NNN | title | size | depends-on | master-design anchors | in/out scope one-liners` — these seed the task's `task.md` Description, `## Master design`, `## Scope boundary`, and `## Dependencies` sections (the template stubs them for epic members).
 
 ## Do not
 
@@ -126,7 +123,7 @@ For each task list: `TASK-NNN | title | size | depends-on | master-design anchor
 - Put the decomposition map in `main.md` — it belongs in `epic.md`
 - Nest task folders under the epic folder — tasks stay flat with an `epic:` attribute
 - Produce tasks that cannot end in a green suite on their own
-- Give a task a context slice wider than it needs (defeats the purpose of the epic split)
+- Give a task a context slice wider than it needs
 - Assign per-task branches — the epic owns one shared branch
 
 ## Output
@@ -137,4 +134,4 @@ When done, briefly report:
 2. Task count + one-line each (id, title, size)
 3. Dependency highlights (roots, the milestone task, parallelisable sets)
 4. Shared branch name
-5. Handoff: the ordered list of tasks for the developer to create from the template (with the epic folder), then start the per-task flow with **create-requirements** on the first unblocked task.
+5. Handoff: the ordered task list; next step is **create-requirements** on the first unblocked task.

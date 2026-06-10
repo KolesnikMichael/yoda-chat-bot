@@ -1,6 +1,11 @@
+---
+name: implement-task
+description: Executes a backlog task's plan.md step by step with pre-flight gate, TDD verify loop, resumable last_step tracking, checkpoints, and Definition-of-Done close-out. Use when the user asks to implement, execute, continue, or resume a backlog task; provides a plan path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → close. It is designed to guide the agent through the entire implementation process to achieve the best possible outcome.
+---
+
 # Implement Task
 
-Execute `plan.md` for a backlog task. This skill continues the agent pipeline: create `requirements.md` → create `design.md` → create `plan.md` → **implement plan**.
+Execute `plan.md` for a backlog task. This skill continues the agent pipeline: create `requirements.md` → create `design.md` → create `plan.md` → **implement plan** → close task.
 
 The plan holds **what** to do (steps, verify, files). This skill holds **how the agent must behave** (pre-flight gate, resume, checkpoints, DoD).
 
@@ -18,7 +23,7 @@ The user may pass **one** of:
 If multiple folders match or none exist, stop and ask.
 
 ```bash
-ls -d doc/backlog/TASK-007-*
+ls -d doc/backlog/TASK-{NNN}-*   # substitute the zero-padded id, e.g. TASK-007
 ```
 
 ## Prerequisites
@@ -29,7 +34,7 @@ Before any code change:
 
 ## Phase 0 — Pre-flight
 
-⛔ **Do not edit repository code** until all the steps in this phase pass unless the user explicitly approves skipping a step.
+**Do not edit repository code** until all the steps in this phase pass unless the user explicitly approves skipping a step.
 
 ### Step 1: Prepare your workplace
 
@@ -72,18 +77,12 @@ Execute **every** checklist item in `plan.md` **Pre-flight** (`.venv` active, de
 
 If a required key, service, or dependency is unavailable — **STOP**; report which item failed and what is needed.
 
-### Step 4: Update plan frontmatter on first start
+### Step 4: Update statuses on first start
 
 When pre-flight passes and work begins:
 
-```yaml
-status: in-progress
-started: YYYY-MM-DD
-branch: feat/TASK-NNN-...
-last_step:    # keep empty until first step completes
-```
-
-Set `task.md` `status: in-progress` if still `todo`.
+- `task.md`: set `status: in-progress` if still `todo`; set `updated: <today>`.
+- `plan.md` frontmatter: `last_step` stays empty until the first step completes. For a standalone task, `branch:` was filled in Step 1; for an epic member it stays empty (the epic owns the branch).
 
 ## Phase 1 — Load execution state
 
@@ -166,7 +165,7 @@ When all plan steps are checked:
     - something discovered during implementation affects `design.md` or architecture — note the signal and which document needs updating.
     - a decision made during implementation has cross-task or architectural reach — flag it as an **ADR candidate**.
 
-   These notes are the input for a postmortem pass (ADR creation, follow-up tasks, design reconciliation).
+   These notes are the input for **close-task** (design reconciliation, ADR creation, follow-up tasks, epic close-out).
 
 Report briefly:
 
@@ -175,6 +174,7 @@ Report briefly:
 - Verify results (full `pytest` run, manual AC)
 - Open items / deferred follow-ups
 - Items from `implementation-notes.md` (incl. ADR candidates)
+- Next step: invoke **close-task** to verify DoD, harvest the notes, and run the epic close-out check.
 
 ## Do not
 
