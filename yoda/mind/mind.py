@@ -267,7 +267,11 @@ class Mind:
         if result.clarification:
             line = f"Ask the user (rephrase naturally in your voice): {result.clarification}"
         elif result.answer:
-            line = f"Agent completed a task. Result: {result.answer}. Communicate this to the user naturally"
+            tools = ", ".join(result.tools_used) if result.tools_used else "none"
+            line = (
+                f"Agent completed a task. Tools used: {tools}. "
+                f"Result: {result.answer}. Communicate this to the user naturally"
+            )
         else:
             return
 

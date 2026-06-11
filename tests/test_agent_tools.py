@@ -392,6 +392,53 @@ async def test_update_profile_saves_fields():
 
 
 @pytest.mark.asyncio
+async def test_update_profile_saves_skill_preferences():
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage_api = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage_api)
+    tool = UpdateProfileTool(memory_provider=memory)
+
+    call = ToolCall(
+        tool_name="update_profile",
+        arguments={
+            "fields": {
+                "skill_preferences": {"web_search": ["accuweather.com"]},
+            },
+        },
+        metadata={"user_id": 123, "chat_id": 42},
+    )
+
+    result = await tool.execute(call)
+
+    assert result.success is True
+    stored = json.loads(storage_api.data["user_profiles"]["123@42"])
+    assert stored["skill_preferences"] == {"web_search": ["accuweather.com"]}
+
+
+@pytest.mark.asyncio
+async def test_update_profile_rejects_delta_keys():
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage_api = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage_api)
+    tool = UpdateProfileTool(memory_provider=memory)
+
+    call = ToolCall(
+        tool_name="update_profile",
+        arguments={"fields": {"interests_to_add": ["x"]}},
+        metadata={"user_id": 123, "chat_id": 42},
+    )
+
+    result = await tool.execute(call)
+
+    assert result.success is False
+    assert "interests_to_add" in result.output
+
+
+@pytest.mark.asyncio
 async def test_update_profile_rejects_unknown_fields():
     from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
     from yoda.mind.memory.memory import MemoryProvider

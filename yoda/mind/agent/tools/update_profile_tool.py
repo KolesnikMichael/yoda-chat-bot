@@ -12,6 +12,7 @@ ALLOWED_FIELDS = {
     "preferred_name", "gender",
     "location", "timezone", "occupation",
     "interests", "facts",
+    "skill_preferences",
 }
 
 

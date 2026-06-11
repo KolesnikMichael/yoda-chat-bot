@@ -2,11 +2,11 @@
 id: TASK-000
 epic: EPIC-001
 title: "compression prerequisites"
-status: todo
+status: done
 priority: medium
 size: S
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-12
 tags:
   - chat-context
 ---

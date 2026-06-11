@@ -7,6 +7,7 @@ from yoda.mind.cognition import CognitionCore
 from yoda.mind.memory.data.system_prompt import DEFAULT_SYSTEM_PROMPT
 from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.memory.data.message import Message
+from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.memory.memory import (
     CONVERSATION_STASH_REDIS_KEY,
     CONVERSATION_STASH_SCHEMA_VERSION,
@@ -350,6 +351,181 @@ async def test_conversation_stash_save_empty_deletes_key():
     memory = MemoryProvider(storage_api=storage)
     await memory.save_conversation_stash()
     assert CONVERSATION_STASH_REDIS_KEY not in storage.strings
+
+
+# --- Profile update tests (TASK-000) ---
+
+def test_profile_update_interests_to_add_dedup_case_insensitive():
+    current = UserProfile(interests=["Python"])
+    updated = MemoryCore.apply_profile_updates(
+        current, {"interests_to_add": ["python", "Rust"]}
+    )
+    assert updated.interests == ["Python", "Rust"]
+    assert "interests_to_add" not in updated.to_dict()
+
+
+def test_profile_update_facts_to_add_dedup_case_insensitive():
+    current = UserProfile(facts=["Lives in SPb"])
+    updated = MemoryCore.apply_profile_updates(
+        current, {"facts_to_add": ["lives in spb", "Works remotely"]}
+    )
+    assert updated.facts == ["Lives in SPb", "Works remotely"]
+
+
+def test_profile_update_skill_preferences_to_add():
+    current = UserProfile(
+        skill_preferences={"web_search": ["accuweather.com"]}
+    )
+    updated = MemoryCore.apply_profile_updates(
+        current,
+        {
+            "skill_preferences_to_add": {
+                "web_search": ["weather.com"],
+                "text_to_image": ["anime style"],
+            },
+        },
+    )
+    assert updated.skill_preferences == {
+        "web_search": ["accuweather.com", "weather.com"],
+        "text_to_image": ["anime style"],
+    }
+
+
+def test_profile_update_skill_preferences_to_add_unknown_skill():
+    current = UserProfile()
+    updated = MemoryCore.apply_profile_updates(
+        current,
+        {"skill_preferences_to_add": {"new_skill": ["pref1"]}},
+    )
+    assert updated.skill_preferences == {"new_skill": ["pref1"]}
+
+
+def test_profile_update_delta_keys_absent_from_to_dict():
+    updated = MemoryCore.apply_profile_updates(
+        UserProfile(),
+        {"interests_to_add": ["x"], "facts_to_add": ["y"]},
+    )
+    d = updated.to_dict()
+    assert "interests_to_add" not in d
+    assert "facts_to_add" not in d
+    assert "skill_preferences_to_add" not in d
+
+
+def test_profile_update_mixed_delta_and_replace():
+    current = UserProfile(interests=["A"])
+    updated = MemoryCore.apply_profile_updates(
+        current,
+        {"interests_to_add": ["b"], "interests": ["Z"]},
+    )
+    assert updated.interests == ["Z"]
+
+
+def test_profile_update_empty_delta_lists_noop():
+    current = UserProfile(interests=["A"], facts=["B"])
+    updated = MemoryCore.apply_profile_updates(
+        current,
+        {"interests_to_add": [], "facts_to_add": []},
+    )
+    assert updated.interests == ["A"]
+    assert updated.facts == ["B"]
+
+
+def test_profile_update_does_not_mutate_input():
+    current = UserProfile(interests=["A"])
+    original_interests = current.interests
+    MemoryCore.apply_profile_updates(current, {"interests_to_add": ["B"]})
+    assert current.interests is original_interests
+    assert current.interests == ["A"]
+
+
+@pytest.mark.asyncio
+async def test_user_profile_legacy_load_without_skill_preferences():
+    storage = FakeStorageApi()
+    storage.data["user_profiles"] = {
+        "1@1": json.dumps({
+            "preferred_name": "Luke",
+            "interests": ["Jedi"],
+            "schema_version": 2,
+        })
+    }
+    memory_provider = MemoryProvider(storage_api=storage)
+
+    profile = await memory_provider.get_user_profile(user_id=1, chat_id=1)
+
+    assert profile.skill_preferences == {}
+
+
+@pytest.mark.asyncio
+async def test_user_profile_replace_skill_preferences_roundtrip():
+    storage = FakeStorageApi()
+    memory_provider = MemoryProvider(storage_api=storage)
+
+    await memory_provider.update_user_profile(
+        user_id=1,
+        chat_id=1,
+        user_profile={
+            "skill_preferences": {"web_search": ["accuweather.com"]},
+        },
+    )
+
+    stored = json.loads(storage.data["user_profiles"]["1@1"])
+    assert stored["skill_preferences"] == {"web_search": ["accuweather.com"]}
+
+    profile = await memory_provider.get_user_profile(user_id=1, chat_id=1)
+    assert profile.skill_preferences == {"web_search": ["accuweather.com"]}
+
+
+@pytest.mark.asyncio
+async def test_user_profile_delta_only_sets_updated_on():
+    storage = FakeStorageApi()
+    memory_provider = MemoryProvider(storage_api=storage)
+
+    await memory_provider.update_user_profile(
+        user_id=1,
+        chat_id=1,
+        user_profile={"facts_to_add": ["New fact"]},
+    )
+
+    stored = json.loads(storage.data["user_profiles"]["1@1"])
+    assert stored["facts"] == ["New fact"]
+    assert stored["updated_on"] != ""
+    assert "facts_to_add" not in stored
+
+
+@pytest.mark.asyncio
+async def test_user_profile_delta_keys_not_persisted():
+    storage = FakeStorageApi()
+    memory_provider = MemoryProvider(storage_api=storage)
+
+    await memory_provider.update_user_profile(
+        user_id=1,
+        chat_id=1,
+        user_profile={
+            "interests_to_add": ["Python"],
+            "skill_preferences_to_add": {"web_search": ["x.com"]},
+        },
+    )
+
+    stored = json.loads(storage.data["user_profiles"]["1@1"])
+    assert "interests_to_add" not in stored
+    assert "skill_preferences_to_add" not in stored
+    assert stored["interests"] == ["Python"]
+    assert stored["skill_preferences"] == {"web_search": ["x.com"]}
+
+
+@pytest.mark.asyncio
+async def test_user_profile_scalar_replace_unchanged():
+    storage = FakeStorageApi()
+    memory_provider = MemoryProvider(storage_api=storage)
+
+    await memory_provider.update_user_profile(
+        user_id=1,
+        chat_id=1,
+        user_profile={"timezone": "Europe/Moscow"},
+    )
+
+    stored = json.loads(storage.data["user_profiles"]["1@1"])
+    assert stored["timezone"] == "Europe/Moscow"
 
 
 @pytest.mark.asyncio

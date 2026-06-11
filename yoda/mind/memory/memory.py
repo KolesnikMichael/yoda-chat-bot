@@ -1,3 +1,4 @@
+import copy
 import datetime as dtm
 import json
 import logging
@@ -16,6 +17,20 @@ logger = logging.getLogger(__name__)
 # Ephemeral Redis STRING: written on graceful shutdown, consumed and deleted on next startup.
 CONVERSATION_STASH_REDIS_KEY = "conversation_stash"
 CONVERSATION_STASH_SCHEMA_VERSION = 2
+
+PROFILE_DELTA_KEYS = frozenset({
+    "interests_to_add",
+    "facts_to_add",
+    "skill_preferences_to_add",
+})
+
+
+def _append_case_insensitive(target: list[str], items: list[str]) -> None:
+    existing_lower = {s.lower() for s in target}
+    for item in items:
+        if item.lower() not in existing_lower:
+            target.append(item)
+            existing_lower.add(item.lower())
 
 
 class MemoryCore:
@@ -82,6 +97,34 @@ class MemoryCore:
                 chat_id=chat_id, messages=messages
             )
         return out
+
+    @staticmethod
+    def apply_profile_updates(current: UserProfile, fields: dict) -> UserProfile:
+        """Return a new UserProfile with delta merges and replace setattr applied.
+
+        Processing order:
+        1. Delta keys (append-with-case-insensitive-dedup); keys not stored on profile.
+        2. Keys in UserProfile.__dataclass_fields__ → setattr (replace semantics).
+        3. Unknown keys → ignored.
+        """
+        profile = copy.deepcopy(current)
+
+        if "interests_to_add" in fields:
+            _append_case_insensitive(profile.interests, fields["interests_to_add"])
+        if "facts_to_add" in fields:
+            _append_case_insensitive(profile.facts, fields["facts_to_add"])
+        if "skill_preferences_to_add" in fields:
+            for skill_name, items in fields["skill_preferences_to_add"].items():
+                bucket = profile.skill_preferences.setdefault(skill_name, [])
+                _append_case_insensitive(bucket, items)
+
+        for k, v in fields.items():
+            if k in PROFILE_DELTA_KEYS:
+                continue
+            if k in UserProfile.__dataclass_fields__:
+                setattr(profile, k, v)
+
+        return profile
 
 
 class MemoryProvider:
@@ -185,9 +228,7 @@ class MemoryProvider:
         else:
             current = UserProfile()
 
-        for k, v in user_profile.items():
-            if k in UserProfile.__dataclass_fields__:
-                setattr(current, k, v)
+        current = MemoryCore.apply_profile_updates(current, user_profile)
 
         current.updated_on = dtm.datetime.now(dtm.UTC).isoformat()
         await self._storage_api.hset("user_profiles", user_profile_id, json.dumps(current.to_dict()))

@@ -93,6 +93,96 @@ async def test_chat_intent_goes_to_yoda():
     assert len(agent.run_calls) == 0
 
 
+def _system_task_lines(conversation) -> list[str]:
+    return [
+        m.text for m in conversation.messages
+        if m.role == "system" and "Agent completed a task" in m.text
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_task_stores_tools_used_single():
+    agent_result = AgentResult(
+        answer="Weather is sunny", tools_used=["search_web"],
+    )
+    mind, lang, agent, memory, sender = _build_mind(
+        intent="agent_task", agent_result=agent_result)
+
+    await mind.process_message_batch(
+        1, [_make_pending("what's the weather?", user_id=1)])
+
+    conversation = memory.get_conversation(1)
+    lines = _system_task_lines(conversation)
+    assert len(lines) == 1
+    assert "Tools used: search_web" in lines[0]
+    assert "Result: Weather is sunny" in lines[0]
+
+
+@pytest.mark.asyncio
+async def test_agent_task_stores_tools_used_none_when_empty():
+    agent_result = AgentResult(answer="Done!", tools_used=[])
+    mind, lang, agent, memory, sender = _build_mind(
+        intent="agent_task", agent_result=agent_result)
+
+    await mind.process_message_batch(1, [_make_pending("do it", user_id=1)])
+
+    conversation = memory.get_conversation(1)
+    lines = _system_task_lines(conversation)
+    assert len(lines) == 1
+    assert "Tools used: none" in lines[0]
+
+
+@pytest.mark.asyncio
+async def test_agent_task_stores_tools_used_order():
+    agent_result = AgentResult(
+        answer="Done", tools_used=["search_web", "update_profile"],
+    )
+    mind, lang, agent, memory, sender = _build_mind(
+        intent="agent_task", agent_result=agent_result)
+
+    await mind.process_message_batch(1, [_make_pending("task", user_id=1)])
+
+    conversation = memory.get_conversation(1)
+    lines = _system_task_lines(conversation)
+    assert "Tools used: search_web, update_profile" in lines[0]
+
+
+@pytest.mark.asyncio
+async def test_agent_clarification_has_no_tools_used():
+    agent_result = AgentResult(clarification="What timezone are you in?")
+    mind, lang, agent, memory, sender = _build_mind(
+        intent="agent_task", agent_result=agent_result)
+
+    await mind.process_message_batch(
+        1, [_make_pending("remind me later", user_id=1)])
+
+    conversation = memory.get_conversation(1)
+    for m in conversation.messages:
+        if m.role == "system":
+            assert "Tools used:" not in m.text
+
+
+@pytest.mark.asyncio
+async def test_deliver_scheduled_reminder_has_no_tools_used():
+    lang = FakeLanguageProvider()
+    memory = FakeMemoryProvider()
+    sender = FakeSender()
+    mind = Mind(
+        language_provider=lang,
+        perception=_default_perception(),
+        memory_provider=memory,
+        affect_provider=AffectProvider(),
+        cognition_provider=None,
+    )
+    mind.bind_message_sender(sender)
+
+    await mind.deliver_scheduled_reminder(42, 42, "call mom")
+
+    conversation = memory.get_conversation(42)
+    for m in conversation.messages:
+        assert "Tools used:" not in m.text
+
+
 @pytest.mark.asyncio
 async def test_agent_task_delegates_to_agent():
     agent_result = AgentResult(answer="Reminder set for 15:30")
