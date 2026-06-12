@@ -20,6 +20,7 @@ from yoda.mind.perception.perception import Perception
 from yoda.mind.cognition import CognitionProvider
 from yoda.mind.mind import Mind
 from yoda.mind.memory.memory import MemoryProvider
+from yoda.mind.memory.data.chat_compression_settings import ChatCompressionSettings
 from yoda.mind.memory.data.emotional_state import EmotionalState
 from yoda.mind.affect import AffectProvider
 from yoda.mind.agent.agent_provider import AgentProvider
@@ -113,6 +114,9 @@ def main() -> None:
         default_language = audio_settings["default_language"]
         memory_settings = mind_settings["memory"]
         emotions_settings = mind_settings["emotions"]
+        _chat_compression_settings = ChatCompressionSettings.from_dict(
+            memory_settings["chat_compression"]
+        )
     except KeyError as e:
         missing_key = e.args[0]
         raise ValueError(

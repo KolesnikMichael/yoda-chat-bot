@@ -2,11 +2,11 @@
 id: TASK-001
 epic: EPIC-001
 title: "message kinds and conversation state v3"
-status: todo
+status: done
 priority: high
 size: M
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-12
 tags:
   - chat-context
 ---

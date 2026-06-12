@@ -76,8 +76,12 @@ async def test_text_batch_sends_response():
         m for m in conversation.messages
         if m.role == "system" and "sent text message" in m.text
     )
+    assert user_line.kind == "user"
     assert user_line.message_id == 1
     assert user_line.user_id == 1
+    assistant_msgs = [m for m in conversation.messages if m.kind == "assistant"]
+    assert len(assistant_msgs) == 1
+    assert conversation.messages[0].kind == "prompt"
 
 
 @pytest.mark.asyncio

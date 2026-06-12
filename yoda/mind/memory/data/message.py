@@ -1,9 +1,20 @@
 from dataclasses import dataclass
+from typing import Literal
+
+MessageKind = Literal[
+    "prompt",
+    "user",
+    "assistant",
+    "task_result",
+    "user_introduction",
+    "summary",
+]
 
 
 @dataclass
 class Message:
     role: str
+    kind: MessageKind
     text: str = ""
     media_type: str = "text"
     timestamp: str = ""

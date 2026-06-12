@@ -26,7 +26,9 @@ def test_build_intent_context_messages_empty_conversation():
 
 def test_build_intent_context_messages_only_bootstrap_system():
     conv = Conversation(
-        chat_id=1, messages=[Message(role="system", text="bootstrap")])
+        chat_id=1,
+        messages=[Message(role="system", kind="prompt", text="bootstrap")],
+    )
     assert CognitionCore.build_intent_context_messages(conv) == []
 
 
@@ -34,10 +36,10 @@ def test_build_intent_context_messages_excludes_bootstrap_tail():
     conv = Conversation(
         chat_id=1,
         messages=[
-            Message(role="system", text="bootstrap"),
-            Message(role="user", text="u1"),
-            Message(role="assistant", text="a1"),
-            Message(role="system", text="Agent completed: ok"),
+            Message(role="system", kind="prompt", text="bootstrap"),
+            Message(role="user", kind="user", text="u1"),
+            Message(role="assistant", kind="assistant", text="a1"),
+            Message(role="system", kind="task_result", text="Agent completed: ok"),
         ],
     )
     out = CognitionCore.build_intent_context_messages(conv)
@@ -49,10 +51,10 @@ def test_build_intent_context_messages_excludes_bootstrap_tail():
 
 
 def test_build_intent_context_messages_limit_four():
-    tail = [Message(role="user", text=f"m{i}") for i in range(6)]
+    tail = [Message(role="user", kind="user", text=f"m{i}") for i in range(6)]
     conv = Conversation(
         chat_id=1,
-        messages=[Message(role="system", text="b"), *tail],
+        messages=[Message(role="system", kind="prompt", text="b"), *tail],
     )
     out = CognitionCore.build_intent_context_messages(conv)
     assert len(out) == 4
@@ -67,10 +69,11 @@ def test_build_routing_context():
     conv = Conversation(
         chat_id=1,
         messages=[
-            Message(role="system", text="bootstrap"),
-            Message(role="user", text="prior"),
+            Message(role="system", kind="prompt", text="bootstrap"),
+            Message(role="user", kind="user", text="prior"),
             Message(
                 role="system",
+                kind="user",
                 text='On 2026-03-20 Luke sent text message: "hello"',
             ),
         ],
@@ -84,9 +87,9 @@ def test_build_intent_context_messages_exclude_trailing():
     conv = Conversation(
         chat_id=1,
         messages=[
-            Message(role="system", text="bootstrap"),
-            Message(role="user", text="old"),
-            Message(role="system", text="current turn line"),
+            Message(role="system", kind="prompt", text="bootstrap"),
+            Message(role="user", kind="user", text="old"),
+            Message(role="system", kind="user", text="current turn line"),
         ],
     )
     assert CognitionCore.build_intent_context_messages(

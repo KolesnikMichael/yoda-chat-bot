@@ -91,6 +91,7 @@ class Mind:
             conversation, messages = MemoryCore.add_conversation_line(
                 conversation=conversation,
                 chat_id=chat_id,
+                kind="user",
                 role=entry["role"],
                 line=entry["text"],
                 system_prompt=system_prompt,
@@ -166,6 +167,7 @@ class Mind:
         conversation, messages = MemoryCore.add_conversation_line(
             conversation=conversation,
             chat_id=chat_id,
+            kind="task_result",
             role="system",
             line=line,
             system_prompt=system_prompt,
@@ -188,6 +190,7 @@ class Mind:
         conversation, messages = MemoryCore.add_conversation_line(
             conversation=conversation,
             chat_id=chat_id,
+            kind="task_result",
             role="system",
             line=line,
             system_prompt=system_prompt,
@@ -280,6 +283,7 @@ class Mind:
         conversation, messages = MemoryCore.add_conversation_line(
             conversation=conversation,
             chat_id=chat_id,
+            kind="task_result",
             role="system",
             line=line,
             system_prompt=system_prompt,
@@ -305,6 +309,7 @@ class Mind:
             conversation, _ = MemoryCore.add_conversation_line(
                 conversation=conversation,
                 chat_id=chat_id,
+                kind="assistant",
                 role="assistant",
                 line=part["text"],
                 system_prompt=system_prompt,

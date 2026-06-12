@@ -6,17 +6,27 @@ from dataclasses import asdict
 
 from .data.chat import Chat
 from .data.conversation import Conversation
-from .data.message import Message
+from .data.message import Message, MessageKind
+from .data.summary_outbox_entry import SummaryOutboxEntry
 from .data.system_prompt import DEFAULT_SYSTEM_PROMPT
 from .data.user import User
 from .data.user_profile import UserProfile
-from .migration import migrate
+from .migration import MigrationError, migrate
 
 logger = logging.getLogger(__name__)
 
 # Ephemeral Redis STRING: written on graceful shutdown, consumed and deleted on next startup.
 CONVERSATION_STASH_REDIS_KEY = "conversation_stash"
-CONVERSATION_STASH_SCHEMA_VERSION = 2
+CONVERSATION_STASH_SCHEMA_VERSION = 3
+
+KNOWN_TASK_RESULT_PREFIXES = (
+    "SCHEDULED REMINDER:",
+    "SCHEDULED TASK FAILED:",
+    "Agent completed a task",
+    "Ask the user (rephrase naturally",
+)
+
+VISIBLE_KINDS: frozenset[MessageKind] = frozenset({"user", "assistant"})
 
 PROFILE_DELTA_KEYS = frozenset({
     "interests_to_add",
@@ -39,9 +49,52 @@ class MemoryCore:
         return str(chat_id)
 
     @staticmethod
+    def parse_message_timestamp(timestamp: str) -> float:
+        if not timestamp:
+            return 0.0
+        normalized = timestamp.replace("Z", "+00:00")
+        if " " in normalized and "T" not in normalized:
+            normalized = normalized.replace(" ", "T", 1)
+        try:
+            return dtm.datetime.fromisoformat(normalized).timestamp()
+        except ValueError:
+            return 0.0
+
+    @staticmethod
+    def infer_kind(
+        msg: dict,
+        *,
+        is_first: bool,
+        chat_id: int,
+        message_index: int,
+    ) -> MessageKind:
+        role = msg.get("role", "")
+        text = msg.get("text", "")
+        user_id = msg.get("user_id")
+
+        if role == "assistant":
+            return "assistant"
+        if is_first:
+            return "prompt"
+        if user_id is not None:
+            return "user"
+        if role == "system":
+            for prefix in KNOWN_TASK_RESULT_PREFIXES:
+                if text.startswith(prefix):
+                    return "task_result"
+            raise MigrationError(
+                chat_id=chat_id,
+                message_index=message_index,
+                text_prefix=text[:80],
+            )
+        return "user"
+
+    @staticmethod
     def add_conversation_line(
         conversation: Conversation | None,
         chat_id: int,
+        *,
+        kind: MessageKind,
         role: str,
         line: str,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
@@ -56,12 +109,17 @@ class MemoryCore:
 
         conversation.ensure_system_prompt(system_prompt)
         conversation.add_message(
+            kind=kind,
             role=role,
             text=line,
             timestamp=timestamp,
             message_id=message_id,
             user_id=user_id,
         )
+        if kind in VISIBLE_KINDS:
+            conversation.visible_messages += 1
+            parsed = MemoryCore.parse_message_timestamp(timestamp)
+            conversation.last_visible_at = max(conversation.last_visible_at, parsed)
         return conversation, conversation.to_llm_messages()
 
     @staticmethod
@@ -71,6 +129,13 @@ class MemoryCore:
             wire_conversations[key] = {
                 "chat_id": conv.chat_id,
                 "messages": [asdict(m) for m in conv.messages],
+                "last_visible_at": conv.last_visible_at,
+                "last_compressed_at": conv.last_compressed_at,
+                "visible_messages": conv.visible_messages,
+                "introduced_users": sorted(conv.introduced_users),
+                "pending_vectorization": [
+                    asdict(entry) for entry in conv.pending_vectorization
+                ],
             }
         return {
             "schema_version": CONVERSATION_STASH_SCHEMA_VERSION,
@@ -93,8 +158,26 @@ class MemoryCore:
                 for msg in payload.get("messages", [])
                 if isinstance(msg, dict)
             ]
+            pending_raw = payload.get("pending_vectorization", [])
+            pending_vectorization = [
+                SummaryOutboxEntry(**entry)
+                for entry in pending_raw
+                if isinstance(entry, dict)
+            ]
+            introduced_raw = payload.get("introduced_users", [])
+            introduced_users = (
+                set(int(uid) for uid in introduced_raw)
+                if isinstance(introduced_raw, list)
+                else set()
+            )
             out[MemoryCore.conversation_key(chat_id)] = Conversation(
-                chat_id=chat_id, messages=messages
+                chat_id=chat_id,
+                messages=messages,
+                last_visible_at=float(payload.get("last_visible_at", 0.0)),
+                last_compressed_at=float(payload.get("last_compressed_at", 0.0)),
+                visible_messages=int(payload.get("visible_messages", 0)),
+                introduced_users=introduced_users,
+                pending_vectorization=pending_vectorization,
             )
         return out
 
