@@ -6,7 +6,7 @@ status: in-progress
 priority: high
 branch: feat/EPIC-001-chat-context-management
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-12
 tags:
   - chat-context
 ---

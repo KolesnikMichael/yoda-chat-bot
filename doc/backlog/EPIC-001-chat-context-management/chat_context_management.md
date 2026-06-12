@@ -146,38 +146,60 @@ from 2 to 3 in the same release that introduces `Message.kind`. The
 v2 → v3 migration step runs in the following order, on each stashed
 conversation:
 
-1. For each `Message` in the conversation, infer `kind` from existing
-   fields. Pre-existing stashes contain only `prompt` / `user` /
-   `assistant` / `task_result` worth of content (no `summary`, no
-   `user_introduction` — both are new in this design), so inference
-   reduces to:
+1. For each message dict in the conversation wire payload, infer `kind`
+   from existing fields and write `msg["kind"]` before hydration.
+   Pre-existing stashes contain only `prompt` / `user` / `assistant` /
+   `task_result` worth of content (no `summary`, no `user_introduction`
+   — both are new in this design), so inference reduces to
+   `MemoryCore.infer_kind` (registered from `_conversation_stash_v2_to_v3`
+   in `migration.py`):
 
    ```python
-   def infer_kind(msg: Message, is_first: bool) -> str:
-       if msg.role == "assistant":
+   KNOWN_TASK_RESULT_PREFIXES = (
+       "SCHEDULED REMINDER:",
+       "SCHEDULED TASK FAILED:",
+       "Agent completed a task",
+       "Ask the user (rephrase naturally",
+   )
+
+   def infer_kind(
+       msg: dict,
+       *,
+       is_first: bool,
+       chat_id: int,
+       message_index: int,
+   ) -> MessageKind:
+       role = msg.get("role", "")
+       text = msg.get("text", "")
+       user_id = msg.get("user_id")
+
+       if role == "assistant":
            return "assistant"
        # Pre-migration role is "system" for everything except
        # assistant replies; perception wraps user-originated messages
        # as system role with user_id preserved.
        if is_first:
            return "prompt"
-       if msg.user_id is not None:
+       if user_id is not None:
            return "user"
        # role == "system", user_id is None, not first → bot-initiated
        # task delivery (agent result or scheduled reminder).
-       known_prefixes = (
-           "SCHEDULED REMINDER:",
-           "SCHEDULED TASK FAILED:",
-           "Agent completed a task",
-           "Ask the user (rephrase naturally",
-       )
-       if msg.text.startswith(known_prefixes):
-           return "task_result"
-       raise MigrationError(
-           f"Unknown system-message prefix at chat_id=..., "
-           f"message_id=...: {msg.text[:80]!r}"
-       )
+       if role == "system":
+           for prefix in KNOWN_TASK_RESULT_PREFIXES:
+               if text.startswith(prefix):
+                   return "task_result"
+           raise MigrationError(
+               chat_id=chat_id,
+               message_index=message_index,
+               text_prefix=text[:80],
+           )
+       return "user"
    ```
+
+   `MigrationError` (in `migration.py`) carries `chat_id`,
+   `message_index`, and `text_prefix` so restore logs locate the
+   offending stash message; `MemoryProvider.restore_conversation_stash`
+   leaves the Redis key in place on failure.
 
    Migration is **fail-fast**: an unknown system-message prefix
    aborts the run so the operator can examine the offending message
