@@ -27,7 +27,7 @@ The user may pass **one** of:
 | Path to `epic.md` | Epic folder = parent directory |
 | Path to epic folder (e.g. `doc/backlog/EPIC-001-chat-context-management/`) | `epic.md` + `design.md` inside |
 | Epic id (`EPIC-001`, `001`, `1`) | Find folder: `doc/backlog/EPIC-{NNN}-*/` (zero-pad to 3 digits) |
-| «Декомпозируй эпик N» / «decompose EPIC-NNN» | Same as epic id |
+| «decompose EPIC N» / «decompose EPIC-NNN» | Same as epic id |
 
 If multiple folders match or none exist, stop and ask.
 
@@ -83,6 +83,14 @@ Decomposition and integration boundary are **chosen together** — they are coup
 
 Record the result in the epic's **`## Delivery profile`** block (`integration_strategy`, `integration_boundary`, `decomposition_principle`, and the two compatibility horizons `internal_compat` + `external_contract`). Keep the two horizons separate: `internal_compat` governs states *between member tasks*; `external_contract` governs the epic's obligation to already-deployed/persisted state at merge and is always in force regardless of `internal_compat`. Downstream `create-requirements` / `create-design` / `create-plan` read this block to avoid over- or under-engineering compatibility.
 
+**Branch mapping.** Branch assignment is integration logic and belongs here. Decide each member task's branch from `integration_strategy` and record the mapping in `epic.md` as a single source of truth:
+
+- `epic-branch` — one shared branch for all members. Record it in the `## Delivery profile` block (and `branch:` frontmatter). No per-task column.
+- `trunk-based` — members land on trunk via short-lived per-task branches (or directly behind flags). State the branch pattern (e.g. `feat/TASK-NNN-slug`, merged independently) in the `## Delivery profile` block. No per-task column.
+- `sequential-branches` / release-per-checkpoint — members map to different branches by checkpoint. Add a **`Branch`** (or `Checkpoint`) column to the decomposition table giving each task its branch, and add a reference line in the `## Delivery profile` block pointing to that column.
+
+`create-plan` leaves epic-member `branch:` empty; `implement-task` resolves the actual branch from here per the strategy above.
+
 For most layered epics, prefer cutting by **dependency layer**, not by user-facing feature:
 
 ```
@@ -110,13 +118,13 @@ Keep tasks balanced: split anything that would be `XL`; merge trivially-coupled 
 
 - **Dependency graph** — a `mermaid graph TD` over the task ids.
 - **Milestone** — the earliest task after which the epic delivers standalone user value (lets you stop or re-prioritise safely).
-- **Parallelisation** — which tasks are independent once their deps are done. (All run on the shared epic branch, so parallel tasks are still committed sequentially; the graph just guides safe ordering.)
+- **Parallelisation** — which tasks are independent once their deps are done. (Under `epic-branch` all run on one branch, so parallel tasks are still committed sequentially; the graph just guides safe ordering. Under multi-branch strategies, parallel tasks may live on separate branches per the branch mapping.)
 
 ### 5. Fill epic.md
 
 Fill the **`## Delivery profile`** block (from step 2) and the **Decomposition** section of `epic.md`: principle, the task table, the dependency mermaid, milestone, and parallelisation notes. Leave the **Member tasks (live rollup)** dataview block as-is — it auto-populates once tasks carry `epic: EPIC-NNN`. Set `updated` in frontmatter.
 
-Confirm the **shared branch** in frontmatter (`branch: feat/EPIC-NNN-slug`); member tasks inherit it.
+Record the **branch mapping** (step 2): for `epic-branch` / `trunk-based` in the `## Delivery profile` block (confirm `branch: feat/EPIC-NNN-slug` in frontmatter for `epic-branch`); for `sequential-branches` / release-per-checkpoint add the `Branch`/`Checkpoint` column to the decomposition table with a reference from `## Delivery profile`.
 
 ### 6. Hand off task creation
 

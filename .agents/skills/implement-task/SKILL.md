@@ -47,10 +47,13 @@ git status   # must be clean — if not, STOP and ask user
 
 **Resolve the branch (epic takes precedence):**
 
-- If `task.md` has `epic: EPIC-NNN` → use the **shared epic branch** from `EPIC-NNN-*/epic.md` `branch:` (`feat/EPIC-NNN-slug`). Do **not** create a per-task branch. Create it only if it does not exist yet (first task of the epic); otherwise check it out and continue committing on it:
+- If `task.md` has `epic: EPIC-NNN` → resolve the branch from `EPIC-NNN-*/epic.md` per its **`## Delivery profile`** (`plan.md` `branch:` stays empty for epic members — never the source of truth):
+  - `epic-branch` → the single shared branch (`branch:` frontmatter / Delivery profile). Do **not** create per-task branches; create it only on the first task of the epic, otherwise check it out and keep committing.
+  - `trunk-based` → the per-task branch pattern stated in the Delivery profile (e.g. `feat/TASK-NNN-slug`), merged independently to trunk.
+  - `sequential-branches` / release-per-checkpoint → this task's branch from the decomposition table's `Branch`/`Checkpoint` column.
 
   ```bash
-  git checkout <epic branch> 2>/dev/null || git checkout -b <epic branch>
+  git checkout <resolved branch> 2>/dev/null || git checkout -b <resolved branch>
   ```
 
 - Otherwise (standalone task) → read `branch:` from `plan.md`. If empty, **fill it** first (pattern: `feat/TASK-NNN-short-slug`, match the task folder name), then:
