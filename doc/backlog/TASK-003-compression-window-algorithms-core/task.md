@@ -2,7 +2,7 @@
 id: TASK-003
 epic: EPIC-001
 title: "compression window algorithms core"
-status: todo
+status: done
 priority: medium
 size: M
 created: 2026-06-09
