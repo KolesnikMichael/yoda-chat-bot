@@ -822,7 +822,401 @@ async def test_conversation_stash_migrates_v1_content_field():
     conv = memory.get_conversation(9)
     assert conv is not None
     assert conv.messages[0].kind == "prompt"
-    assert conv.messages[1].text == "legacy"
-    assert conv.messages[1].kind == "user"
+    assert conv.messages[1].kind == "user_introduction"
+    assert conv.messages[2].text == "legacy"
+    assert conv.messages[2].kind == "user"
     assert conv.visible_messages == 1
     assert conv.introduced_users == {7}
+
+
+# --- User introduction (TASK-002) ---
+
+
+def test_format_user_profile_snapshot_empty_profile():
+    text = MemoryCore.format_user_profile_snapshot(UserProfile())
+    assert text == (
+        "User profile snapshot:\n"
+        "Preferred name: (not set)\n"
+        "Gender: (not set)\n"
+        "Location: (not set)\n"
+        "Timezone: (not set)\n"
+        "Occupation: (not set)\n"
+        "Interests:\n"
+        "  (none)\n"
+        "Facts:\n"
+        "  (none)\n"
+        "Skill preferences:\n"
+        "(no profile information stored yet)"
+    )
+
+
+def test_format_user_profile_snapshot_populated_profile():
+    profile = UserProfile(
+        preferred_name="Luke",
+        gender="male",
+        location="Tatooine",
+        timezone="UTC",
+        occupation="Jedi",
+        interests=["Flying", "The Force"],
+        facts=["Force-sensitive"],
+        skill_preferences={
+            "web_search": ["weather.com"],
+            "text_to_image": [],
+        },
+        schema_version=2,
+        updated_on="2026-06-14T00:00:00+00:00",
+    )
+    text = MemoryCore.format_user_profile_snapshot(profile)
+    assert "Preferred name: Luke" in text
+    assert "Gender: male" in text
+    assert "- Flying" in text
+    assert "- The Force" in text
+    assert "- Force-sensitive" in text
+    assert "  web_search:" in text
+    assert "  - weather.com" in text
+    assert "text_to_image" not in text
+    assert "schema_version" not in text
+    assert "updated_on" not in text
+    assert "(no profile information stored yet)" not in text
+
+
+def test_format_user_profile_snapshot_is_deterministic():
+    profile = UserProfile(
+        preferred_name="Leia",
+        skill_preferences={"z_skill": ["z"], "a_skill": ["a"]},
+    )
+    first = MemoryCore.format_user_profile_snapshot(profile)
+    second = MemoryCore.format_user_profile_snapshot(profile)
+    assert first == second
+    assert first.index("  a_skill:") < first.index("  z_skill:")
+
+
+def test_conversation_needs_introduction_reconciliation_true():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(role="user", kind="user", text="hi", user_id=7),
+        ],
+        introduced_users={7},
+    )
+    assert MemoryCore.conversation_needs_introduction_reconciliation(conv) is True
+
+
+def test_conversation_needs_introduction_reconciliation_false_when_markers_present():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(
+                role="system",
+                kind="user_introduction",
+                text="snap",
+                user_id=7,
+            ),
+            Message(role="user", kind="user", text="hi", user_id=7),
+        ],
+        introduced_users={7},
+    )
+    assert MemoryCore.conversation_needs_introduction_reconciliation(conv) is False
+
+
+def test_conversation_needs_introduction_reconciliation_false_when_no_users():
+    conv = Conversation(
+        chat_id=1,
+        messages=[Message(role="system", kind="prompt", text="sys")],
+        introduced_users={7},
+    )
+    assert MemoryCore.conversation_needs_introduction_reconciliation(conv) is False
+
+
+def test_rebuild_introduced_users_from_markers():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="user_introduction", text="a", user_id=1),
+            Message(role="user", kind="user", text="hi", user_id=1),
+            Message(role="system", kind="user_introduction", text="b", user_id=2),
+            Message(role="user", kind="user", text="hey", user_id=2),
+        ],
+        introduced_users={99},
+    )
+    MemoryCore.rebuild_introduced_users(conv)
+    assert conv.introduced_users == {1, 2}
+
+
+def test_ensure_user_introductions_in_range_single_user():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(role="user", kind="user", text="hi", user_id=7),
+        ],
+    )
+    MemoryCore.ensure_user_introductions_in_range(
+        conv, 0, len(conv.messages), lambda uid: f"intro-{uid}"
+    )
+    assert conv.messages[1].kind == "user_introduction"
+    assert conv.messages[1].user_id == 7
+    assert conv.messages[1].text == "intro-7"
+    assert conv.messages[2].kind == "user"
+    assert conv.introduced_users == {7}
+    assert conv.visible_messages == 0
+
+
+def test_ensure_user_introductions_in_range_two_users():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(role="user", kind="user", text="a", user_id=1),
+            Message(role="assistant", kind="assistant", text="reply"),
+            Message(role="user", kind="user", text="b", user_id=2),
+        ],
+    )
+    MemoryCore.ensure_user_introductions_in_range(
+        conv, 0, 4, lambda uid: f"intro-{uid}"
+    )
+    kinds = [m.kind for m in conv.messages]
+    assert kinds == [
+        "prompt",
+        "user_introduction",
+        "user",
+        "assistant",
+        "user_introduction",
+        "user",
+    ]
+    assert conv.introduced_users == {1, 2}
+
+
+def test_ensure_user_introductions_in_range_idempotent():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(role="user", kind="user", text="hi", user_id=7),
+        ],
+    )
+    MemoryCore.ensure_user_introductions_in_range(
+        conv, 0, len(conv.messages), lambda uid: "intro"
+    )
+    count_after_first = len(conv.messages)
+    MemoryCore.ensure_user_introductions_in_range(
+        conv, 0, len(conv.messages), lambda uid: "intro"
+    )
+    assert len(conv.messages) == count_after_first
+
+
+def test_ensure_user_introductions_in_range_respects_bounds():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(role="user", kind="user", text="a", user_id=1),
+            Message(role="user", kind="user", text="b", user_id=2),
+        ],
+    )
+    MemoryCore.ensure_user_introductions_in_range(
+        conv, 1, 2, lambda uid: f"intro-{uid}"
+    )
+    assert conv.messages[1].kind == "user_introduction"
+    assert conv.messages[1].user_id == 1
+    assert conv.messages[2].kind == "user"
+    assert conv.messages[3].kind == "user"
+    assert conv.introduced_users == {1}
+
+
+@pytest.mark.asyncio
+async def test_append_conversation_line_inserts_introduction_on_first_user():
+    storage = FakeStorageApi()
+    storage.data["user_profiles"] = {
+        "7@1": json.dumps({
+            "preferred_name": "Luke",
+            "schema_version": 2,
+        })
+    }
+    memory = MemoryProvider(storage_api=storage)
+
+    conversation, messages = await memory.append_conversation_line(
+        conversation=None,
+        chat_id=1,
+        kind="user",
+        role="user",
+        line="hello",
+        system_prompt="sys",
+        user_id=7,
+    )
+
+    assert conversation.messages[1].kind == "user_introduction"
+    assert conversation.messages[2].kind == "user"
+    assert "Preferred name: Luke" in conversation.messages[1].text
+    assert conversation.visible_messages == 1
+    assert conversation.introduced_users == {7}
+    assert any("Preferred name: Luke" in m["content"] for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_append_conversation_line_skips_introduction_for_known_user():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(
+                role="system",
+                kind="user_introduction",
+                text="snap",
+                user_id=7,
+            ),
+            Message(role="user", kind="user", text="first", user_id=7),
+        ],
+        visible_messages=1,
+        introduced_users={7},
+    )
+
+    conversation, _ = await memory.append_conversation_line(
+        conversation=conv,
+        chat_id=1,
+        kind="user",
+        role="user",
+        line="second",
+        user_id=7,
+    )
+
+    intro_count = sum(
+        1 for m in conversation.messages if m.kind == "user_introduction"
+    )
+    assert intro_count == 1
+    assert len(conversation.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_append_conversation_line_stash_roundtrip_preserves_kinds():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    conversation, _ = await memory.append_conversation_line(
+        conversation=None,
+        chat_id=42,
+        kind="user",
+        role="user",
+        line="hi",
+        user_id=7,
+    )
+    memory.save_conversation(conversation)
+    wire = MemoryCore.conversations_to_stash_dict(memory._conversations)
+    restored = MemoryCore.stash_dict_to_conversations(wire)["42"]
+    kinds = [m.kind for m in restored.messages]
+    assert "user_introduction" in kinds
+    assert restored.messages[-1].user_id == 7
+
+
+@pytest.mark.asyncio
+async def test_reconcile_user_introductions_if_needed_repairs_migrated_tail():
+    storage = FakeStorageApi()
+    storage.data["user_profiles"] = {
+        "7@1": json.dumps({"preferred_name": "Luke", "schema_version": 2}),
+        "8@1": json.dumps({"preferred_name": "Leia", "schema_version": 2}),
+    }
+    memory = MemoryProvider(storage_api=storage)
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(role="user", kind="user", text="a", user_id=7),
+            Message(role="user", kind="user", text="b", user_id=8),
+        ],
+        introduced_users={7, 8},
+    )
+
+    await memory._reconcile_user_introductions_if_needed(conv)
+
+    assert MemoryCore.conversation_needs_introduction_reconciliation(conv) is False
+    assert conv.messages[1].kind == "user_introduction"
+    assert conv.messages[3].kind == "user_introduction"
+    assert conv.introduced_users == {7, 8}
+
+
+@pytest.mark.asyncio
+async def test_reconcile_user_introductions_if_needed_noop_when_already_reconciled():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(
+                role="system",
+                kind="user_introduction",
+                text="snap",
+                user_id=7,
+            ),
+            Message(role="user", kind="user", text="hi", user_id=7),
+        ],
+        introduced_users={7},
+    )
+    original_len = len(conv.messages)
+
+    await memory._reconcile_user_introductions_if_needed(conv)
+
+    assert len(conv.messages) == original_len
+
+
+@pytest.mark.asyncio
+async def test_reconcile_user_introductions_if_needed_noop_on_empty_conversation():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    conv = Conversation(chat_id=1)
+
+    await memory._reconcile_user_introductions_if_needed(conv)
+
+    assert conv.messages == []
+
+
+@pytest.mark.asyncio
+async def test_restore_conversation_stash_v2_adds_user_introductions():
+    storage = FakeStorageApi()
+    storage.data["user_profiles"] = {
+        "7@1": json.dumps({"preferred_name": "Luke", "schema_version": 2}),
+    }
+    storage.strings[CONVERSATION_STASH_REDIS_KEY] = json.dumps({
+        "schema_version": 2,
+        "conversations": {
+            "1": {
+                "chat_id": 1,
+                "messages": [
+                    {"role": "system", "text": "bootstrap", "user_id": None, "timestamp": ""},
+                    {
+                        "role": "system",
+                        "text": 'On 2026-03-09 Luke sent text message: "hi"',
+                        "user_id": 7,
+                        "timestamp": "2026-03-09 21:36:51+00:00",
+                    },
+                    {"role": "assistant", "text": "hello", "user_id": None, "timestamp": ""},
+                ],
+            },
+        },
+    })
+    memory = MemoryProvider(storage_api=storage)
+    await memory.restore_conversation_stash()
+
+    conv = memory.get_conversation(1)
+    assert conv is not None
+    assert conv.messages[1].kind == "user_introduction"
+    assert "Preferred name: Luke" in conv.messages[1].text
+    llm = conv.to_llm_messages()
+    assert any("Preferred name: Luke" in m["content"] for m in llm)
+
+
+def test_to_llm_messages_does_not_reconcile():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="sys"),
+            Message(role="user", kind="user", text="hi", user_id=7),
+        ],
+        introduced_users={7},
+    )
+    llm = conv.to_llm_messages()
+    assert len(llm) == 2
+    assert all("User profile snapshot" not in m["content"] for m in llm)

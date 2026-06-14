@@ -29,6 +29,53 @@ class FakeMemoryProvider:
     async def get_user_profile(self, user_id: int, chat_id: int) -> UserProfile:
         return UserProfile(timezone="Europe/Moscow")
 
+    async def append_conversation_line(
+        self,
+        conversation: Conversation | None,
+        chat_id: int,
+        *,
+        kind,
+        role: str,
+        line: str,
+        system_prompt: str = "Reply as Yoda from Star Wars",
+        timestamp: str = "",
+        message_id: int | None = None,
+        user_id: int | None = None,
+    ) -> tuple[Conversation, list[dict]]:
+        profile_text: str | None = None
+        introduced_users = conversation.introduced_users if conversation else set()
+        needs_introduction = (
+            kind == "user"
+            and user_id is not None
+            and user_id not in introduced_users
+        )
+        if needs_introduction:
+            profile = await self.get_user_profile(user_id, chat_id)
+            profile_text = MemoryCore.format_user_profile_snapshot(profile)
+
+        conversation, _ = MemoryCore.add_conversation_line(
+            conversation=conversation,
+            chat_id=chat_id,
+            kind=kind,
+            role=role,
+            line=line,
+            system_prompt=system_prompt,
+            timestamp=timestamp,
+            message_id=message_id,
+            user_id=user_id,
+        )
+
+        if needs_introduction and profile_text is not None and user_id is not None:
+            user_index = len(conversation.messages) - 1
+            MemoryCore.ensure_user_introductions_in_range(
+                conversation,
+                user_index,
+                user_index + 1,
+                lambda uid, text=profile_text: text,
+            )
+
+        return conversation, conversation.to_llm_messages()
+
 
 class FakeSender:
     def __init__(self) -> None:

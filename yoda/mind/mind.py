@@ -88,7 +88,7 @@ class Mind:
 
         messages = None
         for entry in perceived:
-            conversation, messages = MemoryCore.add_conversation_line(
+            conversation, messages = await self.memory_provider.append_conversation_line(
                 conversation=conversation,
                 chat_id=chat_id,
                 kind="user",

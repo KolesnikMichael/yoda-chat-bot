@@ -194,7 +194,10 @@ async def test_agent_task_delegates_to_agent():
 
     assert len(agent.run_calls) == 1
     assert agent.run_calls[0][0] == "remind me in 30 minutes"
-    assert agent.run_calls[0][4] == []
+    recent = agent.run_calls[0][4]
+    assert len(recent) == 1
+    assert "User profile snapshot" in recent[0]["content"]
+    assert "Europe/Moscow" in recent[0]["content"]
     assert len(sender.calls) == 1
     assert "Reminder set for 15:30" in sender.calls[0][1]
 

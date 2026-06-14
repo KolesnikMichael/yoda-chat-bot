@@ -2,6 +2,7 @@ import copy
 import datetime as dtm
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import asdict
 
 from .data.chat import Chat
@@ -209,6 +210,113 @@ class MemoryCore:
 
         return profile
 
+    @staticmethod
+    def format_user_profile_snapshot(profile: UserProfile) -> str:
+        """Return deterministic introduction text; excludes schema_version and updated_on."""
+
+        def _scalar(value: str) -> str:
+            return value if value else "(not set)"
+
+        lines = [
+            "User profile snapshot:",
+            f"Preferred name: {_scalar(profile.preferred_name)}",
+            f"Gender: {_scalar(profile.gender)}",
+            f"Location: {_scalar(profile.location)}",
+            f"Timezone: {_scalar(profile.timezone)}",
+            f"Occupation: {_scalar(profile.occupation)}",
+            "Interests:",
+        ]
+        if profile.interests:
+            lines.extend(f"- {item}" for item in profile.interests)
+        else:
+            lines.append("  (none)")
+
+        lines.append("Facts:")
+        if profile.facts:
+            lines.extend(f"- {item}" for item in profile.facts)
+        else:
+            lines.append("  (none)")
+
+        lines.append("Skill preferences:")
+        skills_with_items = [
+            (name, items)
+            for name, items in sorted(profile.skill_preferences.items())
+            if items
+        ]
+        for skill_name, items in skills_with_items:
+            lines.append(f"  {skill_name}:")
+            lines.extend(f"  - {item}" for item in items)
+
+        all_empty = (
+            not profile.preferred_name
+            and not profile.gender
+            and not profile.location
+            and not profile.timezone
+            and not profile.occupation
+            and not profile.interests
+            and not profile.facts
+            and not skills_with_items
+        )
+        if all_empty:
+            lines.append("(no profile information stored yet)")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def conversation_needs_introduction_reconciliation(conversation: Conversation) -> bool:
+        has_user = any(msg.kind == "user" for msg in conversation.messages)
+        has_introduction = any(
+            msg.kind == "user_introduction" for msg in conversation.messages
+        )
+        return (
+            has_user
+            and bool(conversation.introduced_users)
+            and not has_introduction
+        )
+
+    @staticmethod
+    def rebuild_introduced_users(conversation: Conversation) -> None:
+        conversation.introduced_users = {
+            msg.user_id
+            for msg in conversation.messages
+            if msg.kind == "user_introduction" and msg.user_id is not None
+        }
+
+    @staticmethod
+    def ensure_user_introductions_in_range(
+        conversation: Conversation,
+        start: int,
+        end: int,
+        intro_text_for_user_id: Callable[[int], str],
+    ) -> None:
+        first_user_index: dict[int, int] = {}
+        for index in range(start, end):
+            msg = conversation.messages[index]
+            if msg.kind != "user" or msg.user_id is None:
+                continue
+            if msg.user_id not in first_user_index:
+                first_user_index[msg.user_id] = index
+
+        insertions: list[tuple[int, int]] = []
+        for user_id, index in first_user_index.items():
+            if index > 0:
+                prev = conversation.messages[index - 1]
+                if prev.kind == "user_introduction" and prev.user_id == user_id:
+                    continue
+            insertions.append((index, user_id))
+
+        for index, user_id in sorted(insertions, key=lambda item: item[0], reverse=True):
+            conversation.messages.insert(
+                index,
+                Message(
+                    role="system",
+                    kind="user_introduction",
+                    text=intro_text_for_user_id(user_id),
+                    user_id=user_id,
+                ),
+            )
+            conversation.introduced_users.add(user_id)
+
 
 class MemoryProvider:
     def __init__(self, storage_api):
@@ -226,6 +334,80 @@ class MemoryProvider:
     def forget_conversation(self, chat_id: int) -> None:
         key = MemoryCore.conversation_key(chat_id)
         self._conversations.pop(key, None)
+
+    async def append_conversation_line(
+        self,
+        conversation: Conversation | None,
+        chat_id: int,
+        *,
+        kind: MessageKind,
+        role: str,
+        line: str,
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        timestamp: str = "",
+        message_id: int | None = None,
+        user_id: int | None = None,
+    ) -> tuple[Conversation, list[dict]]:
+        profile_text: str | None = None
+        introduced_users = conversation.introduced_users if conversation else set()
+        needs_introduction = (
+            kind == "user"
+            and user_id is not None
+            and user_id not in introduced_users
+        )
+        if needs_introduction:
+            profile = await self.get_user_profile(user_id, chat_id)
+            profile_text = MemoryCore.format_user_profile_snapshot(profile)
+
+        conversation, _ = MemoryCore.add_conversation_line(
+            conversation=conversation,
+            chat_id=chat_id,
+            kind=kind,
+            role=role,
+            line=line,
+            system_prompt=system_prompt,
+            timestamp=timestamp,
+            message_id=message_id,
+            user_id=user_id,
+        )
+
+        if needs_introduction and profile_text is not None and user_id is not None:
+            user_index = len(conversation.messages) - 1
+            MemoryCore.ensure_user_introductions_in_range(
+                conversation,
+                user_index,
+                user_index + 1,
+                lambda uid, text=profile_text: text,
+            )
+
+        return conversation, conversation.to_llm_messages()
+
+    async def _reconcile_user_introductions_if_needed(
+        self,
+        conversation: Conversation,
+    ) -> None:
+        if not MemoryCore.conversation_needs_introduction_reconciliation(conversation):
+            return
+
+        user_ids = {
+            msg.user_id
+            for msg in conversation.messages
+            if msg.kind == "user" and msg.user_id is not None
+        }
+        snapshots: dict[int, str] = {}
+        for uid in user_ids:
+            profile = await self.get_user_profile(uid, conversation.chat_id)
+            snapshots[uid] = MemoryCore.format_user_profile_snapshot(profile)
+
+        empty_snapshot = MemoryCore.format_user_profile_snapshot(UserProfile())
+        end = len(conversation.messages)
+        MemoryCore.ensure_user_introductions_in_range(
+            conversation,
+            0,
+            end,
+            lambda uid: snapshots.get(uid, empty_snapshot),
+        )
+        MemoryCore.rebuild_introduced_users(conversation)
 
     async def save_conversation_stash(self) -> None:
         if not self._conversations:
@@ -257,6 +439,8 @@ class MemoryProvider:
                 "Conversation stash: restore failed, key left in place for inspection"
             )
             return
+        for conversation in restored.values():
+            await self._reconcile_user_introductions_if_needed(conversation)
         self._conversations = restored
         await self._storage_api.delete(CONVERSATION_STASH_REDIS_KEY)
         logger.info(f"Conversation stash: restored {len(restored)} chat(s), key removed")
