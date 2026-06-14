@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 doc: requirements
-updated: 2026-06-12
+updated: 2026-06-14
 ---
 
 # TASK-002: user introduction on ingest — Requirements
@@ -14,7 +14,9 @@ The Chat Context Management program ([[chat_context_management]], [[EPIC-001-cha
 
 On ingest of a participant's first `user`-kind message, the system must lazily insert a `user_introduction` immediately before that message and record the participant in `introduced_users` for O(1) lookup on later messages. The same path serves private and group chats ([[chat_context_management#Private vs. group chats]]). A reusable Core helper, parameterised by message range, must be designed now so [[TASK-006-compression-apply-and-size-trigger/task|TASK-006]] can reuse it for compression refresh (transformation step 8) and graft/merge reconciliation on `new_arrivals` without refactoring.
 
-Stakeholders: Yoda (profile context in LLM input), operators upgrading deployments where TASK-001 migration may have backfilled `introduced_users` from historical `user` authors without creating `user_introduction` messages, and TASK-006 (depends on the shared Core helper contract).
+[[EPIC-001-chat-context-management/epic|EPIC-001]] delivery profile: `internal_compat: none` (member tasks land together on the shared branch — no FRs for partial epic rollout) and `external_contract: migrate-on-merge` (first boot after merge must upgrade real v2 stashes safely). TASK-001's v2→v3 migration backfills `introduced_users` from historical `user` authors but does not create `user_introduction` messages; this task runs a **one-time post-migration reconciliation** per affected conversation at stash restore — not on every LLM read.
+
+Stakeholders: Yoda (profile context in LLM input), operators upgrading deployments with existing conversation stashes, and TASK-006 (depends on the shared Core helper contract).
 
 ## Functional requirements
 
@@ -70,13 +72,24 @@ The set must stay consistent with introductions present in the live tail and sup
 - [ ] `introduced_users` continues to serialise as a sorted JSON integer array in the stash and deserialises to `set[int]` (behaviour established in TASK-001).
 - [ ] Ingest of `user_introduction` messages themselves does not modify `introduced_users` (only the introduction logic on `user` ingest and the Core helper do).
 
-### FR-6: Migration and pre-TASK-002 stash compatibility
+### FR-6: One-time post-migration reconciliation (`external_contract`)
 
-TASK-001 v2→v3 migration backfills `introduced_users` from historical `user` authors without creating `user_introduction` messages. TASK-002 must not leave those conversations permanently without profile context.
+TASK-001 v2→v3 migration backfills `introduced_users` from historical `user` authors without creating `user_introduction` messages ([[chat_context_management#Persistence and migration]]). That leaves a **transient post-migration state** per upgraded conversation: historical `user`-kind messages, non-empty `introduced_users`, zero `user_introduction` markers. Ingest cannot repair this (`user_id ∈ introduced_users` → no-op per FR-3). This task must run the FR-4 Core helper **once per affected conversation** when the conversation is restored from stash — before any message processing or LLM call — so profile context is present on first boot after epic merge.
+
+**Post-migration mismatch predicate** (all must hold):
+
+- at least one message with `kind == "user"`;
+- `conversation.introduced_users` is non-empty;
+- no message with `kind == "user_introduction"` in `conversation.messages`.
 
 **Acceptance criteria:**
-- [ ] Given a conversation loaded from stash with one or more historical `user`-kind messages, non-empty `introduced_users`, and zero `user_introduction` messages, the next ingest or reconciliation pass leaves the tail satisfying FR-5's invariant (missing introductions inserted, set corrected).
-- [ ] New conversations (empty `introduced_users`, no `user_introduction` messages) behave per FR-3 without special cases visible to callers.
+
+- [ ] **Trigger:** Reconciliation runs from a single dedicated entry point invoked by `MemoryProvider.restore_conversation_stash` for each hydrated conversation that satisfies the post-migration mismatch predicate (covers v2→v3 upgrade on first boot and a v3 stash that still lacks markers, e.g. crash before last save).
+- [ ] **Action:** The entry point prefetches profiles, runs the FR-4 Core helper over the full live tail `[0, len(messages))`, and leaves FR-5's invariant satisfied (missing introductions inserted immediately before each user's first `user`-kind message; `introduced_users` corrected to match markers actually present).
+- [ ] **One-shot per restore:** Conversations that do not satisfy the mismatch predicate are not scanned. After a successful pass the predicate is false; a subsequent restore of a stash that already contains `user_introduction` messages does not run reconciliation again.
+- [ ] **Not on hot paths:** `Conversation.to_llm_messages()`, `MemoryCore.add_conversation_line`, and other recurring ingest/reply paths do **not** invoke post-migration reconciliation or re-check the mismatch predicate — steady-state LLM reads and ingests assume the tail is already consistent.
+- [ ] **Before first use:** Reconciliation completes for all restored conversations during startup restore, before `Mind` (or any other caller) can process messages or obtain LLM-bound history for those chats.
+- [ ] **New conversations:** Chats created after deploy (empty `introduced_users`, no `user_introduction` messages) never satisfy the mismatch predicate and behave per FR-3 only.
 
 ### FR-7: Private and group chat parity
 
@@ -95,13 +108,15 @@ End-to-end coverage for the primary ingest scenarios named in the task scope.
 - [ ] **Private chat:** first user message → exactly one `user_introduction` before it in `messages`; LLM message list includes the snapshot; second user message → no second introduction; `introduced_users == {user_id}`.
 - [ ] **Group chat:** two users' first messages → two introductions in speak order, each before the corresponding user's first message; `introduced_users` contains both ids.
 - [ ] **Repeated messages:** third and later messages from an already-introduced user do not change introduction count or `introduced_users` membership.
+- [ ] **Migrated stash:** `restore_conversation_stash` on a v3 payload (or v2 upgraded in the same restore) with historical `user` messages, backfilled `introduced_users`, and no `user_introduction` messages → after restore completes, `to_llm_messages()` includes one introduction per distinct historical `user` author, placed before that author's first `user` message, without any subsequent user ingest or extra reconciliation pass.
 - [ ] Non-visible counter invariant: total `visible_messages` after introductions equals the count of `user` + `assistant` messages only (introductions excluded).
 
 ## Constraints & assumptions
 
+- **Constraint (delivery profile):** Per [[EPIC-001-chat-context-management/epic#Delivery profile|EPIC-001 delivery profile]] — `internal_compat: none` means no acceptance criteria for intermediate deploy states between member tasks (all ship on the epic branch until merge). `external_contract: migrate-on-merge` means FR-6 and the migrated-stash integration criterion remain mandatory for production stashes upgraded on first boot after merge.
 - **Constraint:** Follow IODA — snapshot formatting and range helper in `MemoryCore` (Core); profile fetch in `MemoryProvider` (Provider); ingest orchestration at the boundary where user messages enter memory (`Mind` and/or `MemoryProvider`, per design); Data types unchanged except any small DTO helpers colocated with Core.
-- **Constraint:** Depends on [[TASK-001-message-kinds-and-conversation-state-v3/task|TASK-001]] (kinds, `introduced_users` field, stash v3) and [[TASK-000-compression-prerequisites/task|TASK-000]] (`skill_preferences` on `UserProfile`) being merged before implementation.
-- **Constraint:** `introduced_users` ingest lookup remains O(1); tail scans are confined to the Core helper's explicit range parameter (used by compression/reconciliation in TASK-006), not on every ingest once a user is introduced.
+- **Constraint:** Depends on [[TASK-001-message-kinds-and-conversation-state-v3/task|TASK-001]] (kinds, `introduced_users` field, stash v3) and [[TASK-000-compression-prerequisites/task|TASK-000]] (`skill_preferences` on `UserProfile`) being `done` before implementation.
+- **Constraint:** `introduced_users` ingest lookup remains O(1) in steady state; tail scans via the Core helper are limited to the one-time post-migration restore pass (FR-6), explicit range invocations from TASK-006 (compression refresh, graft/merge), and unit tests — not on every ingest or every `to_llm_messages()` call.
 - **Constraint:** User-visible Telegram behaviour is unchanged — introductions are internal context, not sent as chat replies.
 - **Assumption:** `Perception` / `Mind` always set `user_id` on user-originated lines; introduction logic keys off `user_id`, not role alone.
 - **Assumption:** Exact snapshot string format (labels, ordering, empty-field omission) is a design choice as long as FR-2 acceptance criteria hold; TASK-006 refresh reuses the same builder.
@@ -114,4 +129,6 @@ End-to-end coverage for the primary ingest scenarios named in the task scope.
 - Compression triggers, `Maintenance`, summariser, or profile delta application ([[TASK-003-compression-window-algorithms-core/task|TASK-003]]–[[TASK-005-summarizer-provider-and-profile-extraction/task|TASK-005]]).
 - Re-introducing users mid-tail because `UserProfile` changed without compression (no "profile changed" or "long silence" triggers).
 - Emitting `summary` messages or modifying `visible_messages` / `last_compressed_at` on compression apply.
-- Changing v2→v3 migration logic in `migration.py` unless required solely to satisfy FR-6 (prefer runtime reconciliation over re-migration).
+- Changing v2→v3 migration logic in `migration.py` (TASK-001 owns migration; TASK-002 reconciles at restore per FR-6).
+- Perpetual reconciliation guards on `to_llm_messages()` or other hot paths (post-migration repair is restore-only).
+- Defensive behaviour for partial epic rollout or member tasks deployed without their dependencies (`internal_compat: none` — not a deploy scenario for this epic).

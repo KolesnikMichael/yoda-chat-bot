@@ -28,6 +28,20 @@ Outcomes:
 - Summaries are stored in Chroma and recallable via `recall_conversation`.
 - Triggers (size + timeout) drive compression without manual intervention.
 
+## Delivery profile
+
+- **integration_strategy:** epic-branch        <!-- how code lands: epic-branch | trunk-based | sequential-branches -->
+- **integration_boundary:** epic               <!-- earliest external contact: task | checkpoint | epic -->
+- **decomposition_principle:** functional      <!-- functional (by IODA layer) | vertical-slice (e2e) -->
+- **internal_compat:** none                    <!-- compat required BETWEEN member tasks: none | additive | full -->
+- **external_contract:** migrate-on-merge      <!-- epic ↔ deployed/persisted state at merge: none | additive | migrate-on-merge -->
+- **branch:** `feat/EPIC-001-chat-context-management` — single shared branch for all member tasks (see [Shared branch](#shared-branch)); member-task `plan.md` `branch:` stays empty.
+
+> `internal_compat` is strictly *between member tasks* (all on the shared branch, no
+> mid-epic deploy). The epic's obligation to already-deployed Redis/ChromaDB state is a
+> **separate** horizon set by `external_contract` and is always in force at merge —
+> here the conversation-stash v2→v3 migration must meet existing production stashes.
+
 ## Shared branch
 
 All member tasks are implemented on a single branch: `feat/EPIC-001-chat-context-management`.
