@@ -207,5 +207,5 @@ graph LR
 - [x] IODA respected: Core helpers sync and pure; Provider owns async prefetch; Mind only swaps call site
 - [x] `ensure_user_introductions_in_range` contract stable for TASK-006 import
 - [x] No reconciliation on `to_llm_messages()`, `MemoryCore.add_conversation_line`, or ingest hot paths
-- [ ] `task.md`: `status: done`, `updated: 2026-06-14`
-- [ ] `design.md` updated only if execution diverges (e.g. snapshot layout tweak)
+- [x] `task.md`: `status: done`, `updated: 2026-06-14`
+- [x] `design.md` updated only if execution diverges (e.g. snapshot layout tweak) — no divergence; as-designed

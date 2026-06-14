@@ -6,7 +6,7 @@ status: todo
 priority: medium
 size: M
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-14
 tags:
   - chat-context
 ---

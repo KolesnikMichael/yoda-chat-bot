@@ -77,15 +77,25 @@ logic.
 
 Wherever a candidate compression boundary is produced — middle of
 conversation for the size-trigger, gap location for the timeout-trigger,
-or any future trigger — the boundary is then **shifted so that the live
-tail starts at a `user` (private chat) or `user_introduction` (group chat)
-message**.
+or any future trigger — the boundary is then **shifted forward so that the
+live tail starts at a `user` message** (same rule for private and group
+chats).
+
+Alignment does **not** target `user_introduction`: intro markers appear
+only before a participant's *first* `user` message, so a long group tail
+may contain no introduction anywhere in the forward slice — requiring one
+would push the split to the end and block compression. Any
+`user_introduction` messages that fall into the compressed chunk are
+stripped before summarisation and re-inserted on apply (transformation
+step 8); the post-apply invariant is enforced there, not at window
+selection time.
 
 The rule is partially redundant for the timeout-trigger: gap detection by
-visibility already lands the boundary on `user`/`assistant`, so the rule is
-satisfied by construction. It is recorded as universal so that any future
-trigger inherits it without re-derivation, and it is the only source of
-correctness for the size-trigger.
+visibility already lands the boundary on `user`/`assistant`, so only a
+forward shift from `assistant` to the next `user` may be needed. It is
+recorded as universal so that any future trigger inherits it without
+re-derivation, and it is the only source of correctness for the
+size-trigger.
 
 ### Conversation state fields
 
@@ -452,9 +462,9 @@ Consequences:
   *Example:* a user accidentally schedules a daily 3am news digest. The
   digest itself, the early-morning fallout, and the full morning
   conversation all land in one chunk — the desired behaviour.
-- The boundary lands automatically on a `user` (or `user_introduction`) message
-  through gap-by-visibility, so the universal alignment rule is satisfied
-  by construction here.
+- The boundary lands automatically on a `user` message through
+  gap-by-visibility (or a forward shift from `assistant`), so the
+  universal alignment rule is satisfied by construction here.
 - A continuously active chat with no internal pause longer than
   GAP_THRESHOLD never produces a chunk via this trigger, even once
   it eventually goes quiet. That is intentional: there is no natural

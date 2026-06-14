@@ -2,7 +2,7 @@
 id: TASK-002
 epic: EPIC-001
 title: "user introduction on ingest"
-status: in-progress
+status: done
 priority: medium
 size: S
 created: 2026-06-09
