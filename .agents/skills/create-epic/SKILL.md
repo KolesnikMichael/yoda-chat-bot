@@ -62,7 +62,7 @@ Copy and track:
 - [ ] Epic folder resolved
 - [ ] epic.md Goal/Outcomes read; master design read
 - [ ] Project docs/code reviewed for feasibility and seams
-- [ ] Decomposition principle chosen
+- [ ] Decomposition principle + delivery profile chosen (jointly)
 - [ ] Task set drafted (id, title, size, deliverable, deps, context slice)
 - [ ] Dependency graph + milestone + parallelisation defined
 - [ ] epic.md Decomposition filled
@@ -74,9 +74,16 @@ Copy and track:
 
 Read `epic.md` Goal/Outcomes and the master `design.md`. Skim the relevant `yoda/` modules and `tests/` to find natural seams (IODA layers, existing chokepoints, persistence boundaries).
 
-### 2. Choose a decomposition principle
+### 2. Choose a decomposition principle and delivery profile
 
-Prefer cutting by **dependency layer**, not by user-facing feature:
+Decomposition and integration boundary are **chosen together** — they are coupled, not independent:
+
+- **functional** (by IODA/dependency layer) almost always implies `integration_boundary: epic`: a single layer (e.g. "just the schema") ships no standalone value, so nothing reaches prod until the epic merges → `internal_compat: none`.
+- **vertical-slice** (end-to-end features) enables an earlier boundary (`task` / `checkpoint`) for early e2e testing, but then each slice must stay backward-compatible with deployed state → `internal_compat: additive` (or `full`).
+
+Record the result in the epic's **`## Delivery profile`** block (`integration_strategy`, `integration_boundary`, `decomposition_principle`, and the two compatibility horizons `internal_compat` + `external_contract`). Keep the two horizons separate: `internal_compat` governs states *between member tasks*; `external_contract` governs the epic's obligation to already-deployed/persisted state at merge and is always in force regardless of `internal_compat`. Downstream `create-requirements` / `create-design` / `create-plan` read this block to avoid over- or under-engineering compatibility.
+
+For most layered epics, prefer cutting by **dependency layer**, not by user-facing feature:
 
 ```
 data model / schema → ingest behaviour → pure Core algorithms → Integration shell → Providers → full apply pipeline → wiring → external stores → agent skills
@@ -107,7 +114,7 @@ Keep tasks balanced: split anything that would be `XL`; merge trivially-coupled 
 
 ### 5. Fill epic.md
 
-Fill the **Decomposition** section of `epic.md`: principle, the task table, the dependency mermaid, milestone, and parallelisation notes. Leave the **Member tasks (live rollup)** dataview block as-is — it auto-populates once tasks carry `epic: EPIC-NNN`. Set `updated` in frontmatter.
+Fill the **`## Delivery profile`** block (from step 2) and the **Decomposition** section of `epic.md`: principle, the task table, the dependency mermaid, milestone, and parallelisation notes. Leave the **Member tasks (live rollup)** dataview block as-is — it auto-populates once tasks carry `epic: EPIC-NNN`. Set `updated` in frontmatter.
 
 Confirm the **shared branch** in frontmatter (`branch: feat/EPIC-NNN-slug`); member tasks inherit it.
 

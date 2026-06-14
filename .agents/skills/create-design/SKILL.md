@@ -48,6 +48,10 @@ Per task folder (`doc/backlog/TASK-NNN-name/`):
 Broader context (read selectively):
 
 - **Epic membership:** if `task.md` has `epic: EPIC-NNN`, the epic's **master design** (the file `epic.md` links as `Master design`; `design.md` by template) is the **source of truth** for cross-cutting architecture. Read `EPIC-NNN-*/epic.md` + the master-design sections listed in `task.md` `## Master design`, then **reference** them (`[[<master-design>#Section]]`) instead of restating decisions. Put only this task's local design here; raise any cross-task decision to the master design (flag it in the report).
+- **Delivery profile (epic members).** Read the epic's `## Delivery profile` before choosing contracts. Apply two compatibility horizons:
+  - **internal_compat** — state reachable *between* member tasks. If `none`, do NOT design defensive machinery for intermediate cross-task deploy states (they cannot occur on the shared branch).
+  - **external_contract** — the epic's obligation to already-deployed/persisted state at merge. ALWAYS in force regardless of `internal_compat`: keep migration/upgrade design that meets real Redis/ChromaDB data on first boot after merge.
+  - Never collapse the two.
 - `doc/design/` — system-level design docs
 - `doc/design/decisions/ADR-*.md` — binding decisions (patterns, conventions, …)
 - `design.md` and `requirements.md` of dependency tasks linked from `task.md` for contract continuity
@@ -187,6 +191,7 @@ Every FR-N should be traceable to at least one of: overview, architecture, a key
 - Change backlog folder structure or create tasks without explicit instruction
 - Edit `requirements.md` unless the user asks (report gaps and proposed FR wording in chat instead)
 - Duplicate long FR prose into design
+- Design defensive machinery for intermediate states excluded by the epic's `internal_compat`; but never drop `external_contract` upgrade safety
 - Leave template placeholders (`Option A`, `Component A`, `Name`) in the final file
 - Start design when `requirements.md` is still a stub
 - Leave **System impact** empty or filled with aggregates like «mind changes» — `create-plan` cannot derive an artifact inventory from such rows
@@ -206,5 +211,5 @@ When done, briefly report:
 7. Plan readiness: **Open questions** = `None.` (or non-blocking) **and** «System impact» lists concrete files/classes with IODA categories → ready to invoke **create-plan**. Otherwise list what still needs to be closed.
 8. Size estimate: `XS` | `S` | `M` | `L` | `XL` — one-line rationale.
     - `XS` → suggest skipping plan, go straight to implement-task
-    - `XL` → suggest splitting; list proposed sub-tasks
-    - `S`–`L` → proceed to create-plan
+    - `XL` → suggest invoking **create-epic** with the produced `design.md` as an input
+    - `S`–`L` → suggest proceeding to **create-plan**
