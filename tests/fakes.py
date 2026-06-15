@@ -1,9 +1,32 @@
 """Shared test doubles for Mind pipeline tests."""
 
+import json
+
+from pydantic import BaseModel
+
 from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.data.routing_context import RoutingContext
 from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.memory.memory import MemoryCore
+
+
+class FakeLLMApi:
+    def __init__(self, responses: list[str] | None = None) -> None:
+        self._responses = list(responses or [])
+        self.parse_calls: list[tuple[str, list[dict], type[BaseModel]]] = []
+
+    async def parse_chat_async(
+        self,
+        model_name: str,
+        messages: list[dict],
+        response_format: type[BaseModel],
+    ) -> BaseModel:
+        self.parse_calls.append((model_name, messages, response_format))
+        if not self._responses:
+            raise RuntimeError("FakeLLMApi has no predetermined responses")
+        raw = self._responses.pop(0)
+        data = json.loads(raw)
+        return response_format(**data)
 
 
 class FakeMemoryProvider:

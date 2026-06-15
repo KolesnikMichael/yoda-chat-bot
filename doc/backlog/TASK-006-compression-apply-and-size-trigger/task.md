@@ -6,7 +6,7 @@ status: todo
 priority: high
 size: L
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-15
 tags:
   - chat-context
 ---
@@ -15,7 +15,7 @@ tags:
 
 ## Description
 
-Implement the full compression apply pipeline: a per-conversation `asyncio.Lock`; snapshot → transformation on the copy (steps 1–10) → graft+merge with `new_arrivals` reconciliation; inline `summary` blocks with `MAX_SUMMARY_COUNT` FIFO eviction into `pending_vectorization`; the `Chat.history` audit entry; and the `user_introduction` strip (step 2) + refresh (step 8) + merge reconciliation reusing the Core helper from TASK-002. The summarisation/profile call is delegated to the `SummarizerProvider` from TASK-005 (invoked between snapshot and apply, with profile updates committed before the `user_introduction` refresh). Wire **only the size-trigger** into `compress_conversations`. This is the program's main integration milestone — after it, long chats compress inline without Chroma.
+Implement the full compression apply pipeline: a per-conversation `asyncio.Lock`; snapshot → transformation on the copy (steps 1–10) → graft+merge with `new_arrivals` reconciliation; inline `summary` blocks with `MAX_SUMMARY_COUNT` FIFO eviction into `pending_vectorization`; the `Chat.history` audit entry; and the `user_introduction` strip (step 2) + refresh (step 8) + merge reconciliation reusing the Core helper from TASK-002. The summarisation call is delegated to `SummarizerProvider` (TASK-005); transformation step 5 applies the returned per-user `profile_updates` **deltas** via `MemoryProvider.update_user_profile` (not wholesale profile replacement) **before** the `user_introduction` refresh (step 8). Wire **only the size-trigger** into `compress_conversations`. This is the program's main integration milestone — after it, long chats compress inline without Chroma.
 
 ## Master design
 
@@ -36,7 +36,7 @@ Part of the Chat Context Management chain — see the program map in [[EPIC-001-
 **In scope:**
 - Snapshot / transformation on the copy / apply graft+merge (including concurrent ingest during the LLM call)
 - `user_introduction` strip (step 2) + refresh (step 8) + merge reconciliation — **reusing the TASK-002 Core helper**, not a new implementation
-- Invoking `SummarizerProvider` (TASK-005) for the summary/profile call; enforcing the ordering invariant: profile updates commit (step 5) **before** the `user_introduction` refresh (step 8)
+- Invoking `SummarizerProvider` (TASK-005) for the summarisation call; loading current `UserProfile` snapshots as LLM context only; applying returned `profile_updates` deltas in transformation step 5 via `MemoryProvider.update_user_profile` (TASK-000 merge semantics) **before** the `user_introduction` refresh (step 8)
 - Inline `summary` blocks; FIFO eviction → `pending_vectorization` (the outbox accumulates; flush is still a no-op here)
 - `Chat.history` compression audit entry
 - Size-trigger wiring in `Maintenance.compress_conversations` (using the `CompressionCore` size-window + firing predicate)

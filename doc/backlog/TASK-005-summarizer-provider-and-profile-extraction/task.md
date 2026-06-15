@@ -2,11 +2,11 @@
 id: TASK-005
 epic: EPIC-001
 title: "summarizer provider and profile extraction"
-status: todo
+status: done
 priority: high
 size: M
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-15
 tags:
   - chat-context
 ---
@@ -15,7 +15,7 @@ tags:
 
 ## Description
 
-Implement the summarisation unit as a self-contained Operation, decoupled from the apply mechanics so it can be developed and tested against a fake LLM: a `SummarizerProvider` that runs one LLM call per chunk and parses the JSON envelope (`summary`, `topics`, `profile_updates`), the mechanical computation of `participants` and `skills` from the chunk, and the application of `profile_updates` deltas through `MemoryProvider.update_user_profile`. This pulls the LLM/profile concern out of the apply pipeline (TASK-006), shrinking the program's largest task and giving the riskiest model interaction its own test surface.
+Implement the summarisation unit as a self-contained Operation, decoupled from the apply mechanics so it can be developed and tested against a fake LLM: a `SummarizerProvider` that runs one LLM call per chunk and parses the JSON envelope (`summary`, `topics`, `profile_updates`), the mechanical computation of `participants` and `skills` from the chunk, and the validation/redaction of per-user `profile_updates` deltas returned to the caller (TASK-006 applies them via `MemoryProvider.update_user_profile` in transformation step 5). This pulls the LLM/profile concern out of the apply pipeline, shrinking the program's largest task and giving the riskiest model interaction its own test surface.
 
 ## Master design
 

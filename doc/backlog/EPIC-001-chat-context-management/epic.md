@@ -6,7 +6,7 @@ status: in-progress
 priority: high
 branch: feat/EPIC-001-chat-context-management
 created: 2026-06-09
-updated: 2026-06-12
+updated: 2026-06-15
 tags:
   - chat-context
 ---
@@ -60,7 +60,7 @@ schema → ingest behaviour → pure Core algorithms → Maintenance shell → s
 | [[TASK-002-user-introduction-on-ingest/task\|TASK-002]] | user introduction on ingest | S | lazy `user_introduction` + `introduced_users` + reusable Core helper |
 | [[TASK-003-compression-window-algorithms-core/task\|TASK-003]] | compression window algorithms core | M | `CompressionCore`: window selection + trigger firing predicates |
 | [[TASK-004-maintenance-integration-shell/task\|TASK-004]] | maintenance integration shell | S | `Maintenance` integration, periodic loop, dry-run stubs |
-| [[TASK-005-summarizer-provider-and-profile-extraction/task\|TASK-005]] | summarizer provider and profile extraction | M | `SummarizerProvider`, mechanical participants/skills, profile delta application |
+| [[TASK-005-summarizer-provider-and-profile-extraction/task\|TASK-005]] | summarizer provider and profile extraction | M | `SummarizerProvider`, mechanical participants/skills, profile delta extraction and redaction |
 | [[TASK-006-compression-apply-and-size-trigger/task\|TASK-006]] | compression apply and size trigger | L | full apply pipeline + size-trigger |
 | [[TASK-007-timeout-trigger-wiring/task\|TASK-007]] | timeout trigger wiring | S | timeout-trigger wired to the existing apply |
 | [[TASK-008-summary-store-and-outbox-flush/task\|TASK-008]] | summary store and outbox flush | M | Chroma, embeddings, `flush_summary_outbox` |
