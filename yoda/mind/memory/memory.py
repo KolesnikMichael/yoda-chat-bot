@@ -2,7 +2,7 @@ import copy
 import datetime as dtm
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict
 
 from .data.chat import Chat
@@ -334,6 +334,19 @@ class MemoryProvider:
     def forget_conversation(self, chat_id: int) -> None:
         key = MemoryCore.conversation_key(chat_id)
         self._conversations.pop(key, None)
+
+    def iter_conversations(self) -> Iterator[Conversation]:
+        return iter(self._conversations.values())
+
+    async def get_chat_type(self, chat_id: int) -> str:
+        raw = await self._storage_api.hget("chats", str(chat_id))
+        if raw is None:
+            raise ValueError(f"Missing chat_type for chat_id={chat_id}")
+        data = migrate("chats", json.loads(raw))
+        chat = Chat(**{k: v for k, v in data.items() if k in Chat.__dataclass_fields__})
+        if not chat.chat_type:
+            raise ValueError(f"Missing chat_type for chat_id={chat_id}")
+        return chat.chat_type
 
     async def append_conversation_line(
         self,

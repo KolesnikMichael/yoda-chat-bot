@@ -4,15 +4,17 @@
 
 - Stop calculating chat_type each time - it doesn't change
 - Add modify_job tool for manage_jobs skill, otherwise job just gets cancelled
-- Request like "wake me up with a weather forecast" triggers schedule_message skill instead of recurrent search_web - probably because search_web frontmatter doesn't tell anything about scheduling
 - Job's description repeats message_text, but at least skill name should be present in description, so that list_jobs is aware of task nature. Ideally it should contain distilled_task
 - Double check: distilled_task is missing on Phase 2
-- Choose skill prompt looks suboptimal:
-  - Not to say terribly structured, excessive, confusing and misleading, 
+- Request like "wake me up with a weather forecast" triggers schedule_message skill instead of recurrent search_web - probably because skill selection prompt doesn't include 'when to use' frontmatter section. Overall, choose skill prompt looks suboptimal, not to say terribly structured, excessive, confusing and misleaing, 
   - Missing ask_user format and example
   - Skills are ordered in a strange way
   - Skill descriptions are incoherent
+  - Aforementioned absence of 'when to use' hints
+  - Weirdly put intent messages
 - Search_web preference not taken into account, should be put into description (probably because of wrong skill applied - verify)
+- Agent: no test for batched ask_user + failing companion tool (e.g. update_profile) — suspend path works but untested
+- Agent: Mind._handle_agent_task / resume have no try/except — LLM, Redis session, or other failures during agent run can crash message handling
 
 ## Add
 
@@ -20,7 +22,7 @@
 - Retry after 429 where needed
 - Scheduling jobs: Daylight saving is unlikely taken into account (and there are countries that do not use it)
 - Admin notifications
-- _classify_intent returns "chat" but it's never handled. It should be handled explicitly, and last elif in Mind.process_message_batch should log WARNING or something
+- `_classify_intent` returns "chat" but it's never handled. It should be handled explicitly, and last elif in Mind.process_message_batch should log WARNING or something
 - Record skill usages in Chat.history:
   - create_picture: iterations
   - manage_jobs: task
@@ -59,7 +61,6 @@
 - No connection pooling for Redis - what's that?
 - The winner's approach:
 [https://github.com/idzivinskyi/bitgn-trustworthy-agent/tree/main](https://github.com/idzivinskyi/bitgn-trustworthy-agent/tree/main)
-- ReAct loop doesn't survive tool crashes like exception when using ask_user - still true?
 - Misplaced DTOs in `yoda/mind/memory/data/` (don't belong to memory persistence): - still true?
   - `pending_message.py` — perception/embodiment concept
   - `system_prompt.py` — mind-level

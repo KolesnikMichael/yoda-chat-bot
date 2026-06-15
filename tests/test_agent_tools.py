@@ -483,7 +483,7 @@ async def test_update_profile_rejects_missing_metadata():
 
 @pytest.mark.asyncio
 async def test_reconcile_removes_stale_keeps_live():
-    from yoda.yoda_chat_bot import reconcile_active_jobs
+    from yoda.mind.maintenance import reconcile_active_jobs
 
     storage_api = FakeStorageApi()
     scheduler_api = FakeSchedulerApi()
@@ -501,7 +501,7 @@ async def test_reconcile_removes_stale_keeps_live():
 
 @pytest.mark.asyncio
 async def test_reconcile_across_multiple_chats():
-    from yoda.yoda_chat_bot import reconcile_active_jobs
+    from yoda.mind.maintenance import reconcile_active_jobs
 
     storage_api = FakeStorageApi()
     scheduler_api = FakeSchedulerApi()
@@ -521,7 +521,7 @@ async def test_reconcile_across_multiple_chats():
 
 @pytest.mark.asyncio
 async def test_reconcile_no_stale_returns_zero():
-    from yoda.yoda_chat_bot import reconcile_active_jobs
+    from yoda.mind.maintenance import reconcile_active_jobs
 
     storage_api = FakeStorageApi()
     scheduler_api = FakeSchedulerApi()

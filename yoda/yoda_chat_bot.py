@@ -49,24 +49,11 @@ from yoda.mind.agent.tools.image_to_text_tool import ImageToTextTool
 from yoda.mind.agent.tools.text_to_image_tool import TextToImageTool
 from yoda.mind.agent.tools.send_picture_tool import SendPictureTool
 from yoda.mind.agent.skills.catalog import SkillCatalog
+from yoda.mind.data.maintenance_settings import MaintenanceSettings
+from yoda.mind.maintenance import Maintenance
 
 
 logger = logging.getLogger(__name__)
-
-
-async def reconcile_active_jobs(storage_api: StorageApi, scheduler_api: SchedulerApi) -> int:
-    live_ids = scheduler_api.get_job_ids()
-    all_keys = await storage_api.keys("active_jobs:*")
-    removed = 0
-    for key in all_keys:
-        entries = await storage_api.hgetall(key)
-        for job_id in entries:
-            if job_id not in live_ids:
-                await storage_api.hdel(key, job_id)
-                removed += 1
-    if removed:
-        logger.info(f"Reconciled active_jobs: removed {removed} stale entries")
-    return removed
 
 
 def parse_arguments():
@@ -114,7 +101,8 @@ def main() -> None:
         default_language = audio_settings["default_language"]
         memory_settings = mind_settings["memory"]
         emotions_settings = mind_settings["emotions"]
-        _chat_compression_settings = ChatCompressionSettings.from_dict(
+        maintenance_settings = MaintenanceSettings.from_dict(mind_settings["maintenance"])
+        chat_compression_settings = ChatCompressionSettings.from_dict(
             memory_settings["chat_compression"]
         )
     except KeyError as e:
@@ -167,6 +155,14 @@ def main() -> None:
         redis_db=memory_settings.get("redis_db", 0),
     )
 
+    maintenance = Maintenance(
+        storage_api=storage_api,
+        scheduler_api=scheduler_api,
+        memory_provider=memory_provider,
+        compression_settings=chat_compression_settings,
+        maintenance_settings=maintenance_settings,
+    )
+
     tavily_api = TavilyApi(api_key=tavily_api_key)
 
     try:
@@ -177,28 +173,9 @@ def main() -> None:
         raise ValueError(
             f"Settings missing text_to_image key: {e.args[0]}") from e
 
-    async def periodic_job_cleanup() -> None:
-        while True:
-            await asyncio.sleep(24 * 60 * 60)
-            try:
-                await reconcile_active_jobs(storage_api, scheduler_api)
-            except Exception:
-                logger.warning("Periodic job cleanup failed", exc_info=True)
-
-    periodic_cleanup_holder: dict[str, asyncio.Task | None] = {"task": None}
-
     async def on_post_stop(_application) -> None:
         logger.info("post_stop: started")
-        t = periodic_cleanup_holder.get("task")
-        if t is not None and not t.done():
-            t.cancel()
-            try:
-                await t
-            except asyncio.CancelledError:
-                pass
-            logger.info("post_stop: periodic job cleanup task cancelled")
-        elif t is not None:
-            logger.info("post_stop: periodic job cleanup task already finished")
+        await maintenance.stop()
 
         try:
             await body.flush_pending_batches()
@@ -295,8 +272,8 @@ def main() -> None:
         await memory_provider.restore_conversation_stash()
         scheduler_api.start()
         await asyncio.sleep(2)  # let APScheduler process misfired jobs
-        await reconcile_active_jobs(storage_api, scheduler_api)
-        periodic_cleanup_holder["task"] = asyncio.create_task(periodic_job_cleanup())
+        await maintenance.run_initial_pass()
+        maintenance.start()
 
     body.wake_up(mind, on_start=on_app_start)
     logger.info("main(): returned after run_polling (process should exit)")

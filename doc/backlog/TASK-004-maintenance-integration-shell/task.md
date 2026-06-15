@@ -2,11 +2,11 @@
 id: TASK-004
 epic: EPIC-001
 title: "maintenance integration shell"
-status: todo
+status: done
 priority: medium
 size: S
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-15
 tags:
   - chat-context
 ---
