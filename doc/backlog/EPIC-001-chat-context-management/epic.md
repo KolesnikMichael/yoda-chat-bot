@@ -6,7 +6,7 @@ status: in-progress
 priority: high
 branch: feat/EPIC-001-chat-context-management
 created: 2026-06-09
-updated: 2026-06-15
+updated: 2026-06-18
 tags:
   - chat-context
 ---
@@ -65,6 +65,7 @@ schema → ingest behaviour → pure Core algorithms → Maintenance shell → s
 | [[TASK-007-timeout-trigger-wiring/task\|TASK-007]] | timeout trigger wiring | S | timeout-trigger wired to the existing apply |
 | [[TASK-008-summary-store-and-outbox-flush/task\|TASK-008]] | summary store and outbox flush | M | Chroma, embeddings, `flush_summary_outbox` |
 | [[TASK-009-recall-conversation-skill/task\|TASK-009]] | recall conversation skill | S | agent skill `recall_conversation` |
+| [[TASK-011-inline-summary-excess-rebalance/task\|TASK-011]] | inline summary excess rebalance | S | excess → `max` when inline summary count exceeds cap (follow-up from TASK-006) |
 
 **Dependency graph:**
 
@@ -85,6 +86,7 @@ graph TD
     T5 --> T6
     T6 --> T7
     T6 --> T8[TASK-008]
+    T6 --> T11[TASK-011]
     T8 --> T9[TASK-009]
 ```
 

@@ -6,7 +6,7 @@ status: todo
 priority: medium
 size: S
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-17
 tags:
   - chat-context
 ---
@@ -55,4 +55,4 @@ Part of the Chat Context Management chain — see the program map in [[EPIC-001-
 
 ## Notes
 
-A small wiring stage once TASK-006 is done. The apply pipeline is reused without changes.
+A small wiring stage once TASK-006 is done. The apply pipeline is reused without changes (still in-memory commit per ADR-000).

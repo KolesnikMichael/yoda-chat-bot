@@ -1220,3 +1220,182 @@ def test_to_llm_messages_does_not_reconcile():
     llm = conv.to_llm_messages()
     assert len(llm) == 2
     assert all("User profile snapshot" not in m["content"] for m in llm)
+
+
+@pytest.mark.asyncio
+async def test_conversation_lock_serializes_same_chat_id():
+    import asyncio
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    order: list[str] = []
+
+    async def first() -> None:
+        async with memory.conversation_lock(1):
+            order.append("first-start")
+            await asyncio.sleep(0.05)
+            order.append("first-end")
+
+    async def second() -> None:
+        await asyncio.sleep(0.01)
+        async with memory.conversation_lock(1):
+            order.append("second")
+
+    await asyncio.gather(first(), second())
+    assert order == ["first-start", "first-end", "second"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_lock_different_chat_ids_do_not_block():
+    import asyncio
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    order: list[str] = []
+
+    async def chat_one() -> None:
+        async with memory.conversation_lock(1):
+            order.append("one-start")
+            await asyncio.sleep(0.05)
+            order.append("one-end")
+
+    async def chat_two() -> None:
+        async with memory.conversation_lock(2):
+            order.append("two")
+
+    await asyncio.gather(chat_one(), chat_two())
+    assert "two" in order
+    assert order.index("two") < order.index("one-end")
+
+
+@pytest.mark.asyncio
+async def test_take_compression_snapshot_captures_conversation():
+    from yoda.mind.memory.data.compression_snapshot import CompressionSnapshot
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    conversation = Conversation(chat_id=5, visible_messages=2)
+    conversation.messages = [
+        Message(role="system", kind="prompt", text="sys"),
+        Message(role="user", kind="user", text="hi", user_id=1),
+    ]
+    memory.save_conversation(conversation)
+
+    snapshot = await memory.take_compression_snapshot(5)
+
+    assert snapshot is not None
+    assert snapshot.n_old == 2
+    assert snapshot.copy.visible_messages == 2
+    assert snapshot.copy.messages[1].text == "hi"
+    assert snapshot.copy is not conversation
+
+
+@pytest.mark.asyncio
+async def test_take_compression_snapshot_returns_none_for_missing_chat():
+    memory = MemoryProvider(storage_api=FakeStorageApi())
+    assert await memory.take_compression_snapshot(99) is None
+
+
+@pytest.mark.asyncio
+async def test_append_chat_history_event_appends_to_chats_hash():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    await storage.hset("chats", "3", json.dumps({"chat_type": "private", "history": []}))
+
+    await memory.append_chat_history_event(3, {"event": "compression", "ts": "2026-06-18T00:00:00+00:00"})
+
+    saved = json.loads(storage.data["chats"]["3"])
+    assert saved["history"][-1]["event"] == "compression"
+
+
+@pytest.mark.asyncio
+async def test_commit_compression_grafts_arrivals_and_merges_counters():
+    from yoda.mind.memory.data.compression_snapshot import CompressionSnapshot, CompressionTransformResult
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    live = Conversation(chat_id=1, visible_messages=4)
+    live.messages = [
+        Message(role="system", kind="prompt", text="sys"),
+        Message(role="user", kind="user", text="old", user_id=1),
+        Message(role="assistant", kind="assistant", text="old-a"),
+    ]
+    live.introduced_users = {1}
+    memory.save_conversation(live)
+
+    working = Conversation(chat_id=1, visible_messages=2, last_compressed_at=50.0)
+    working.messages = [
+        Message(role="system", kind="prompt", text="sys"),
+        Message(role="system", kind="summary", text='{"v":1,"summary_id":"s","added_at":"t","text":"sum"}'),
+    ]
+    working.introduced_users = {1}
+    result = CompressionTransformResult(
+        copy=working,
+        removed_users=set(),
+        audit_entry={"event": "compression"},
+        chunk_visible_count=2,
+    )
+    snapshot = CompressionSnapshot(n_old=3, copy=working, snapshot_ts=50.0)
+
+    live.messages.append(Message(role="user", kind="user", text="arrival", user_id=1))
+    live.visible_messages = 5
+
+    await memory.commit_compression(
+        1,
+        snapshot,
+        result,
+        set(),
+        lambda uid: "intro",
+    )
+
+    committed = memory.get_conversation(1)
+    assert committed is not None
+    assert committed.messages[-1].text == "arrival"
+    assert committed.messages[1].kind == "summary"
+    assert committed.visible_messages == 3
+    assert committed.last_compressed_at == 50.0
+
+
+@pytest.mark.asyncio
+async def test_commit_compression_tripwire_when_messages_shrink():
+    from yoda.mind.memory.data.compression_snapshot import CompressionSnapshot, CompressionTransformResult
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    live = Conversation(chat_id=1)
+    live.messages = [Message(role="system", kind="prompt", text="sys")]
+    memory.save_conversation(live)
+    snapshot = CompressionSnapshot(n_old=5, copy=live, snapshot_ts=1.0)
+    result = CompressionTransformResult(
+        copy=live,
+        removed_users=set(),
+        audit_entry={"event": "compression"},
+        chunk_visible_count=0,
+    )
+
+    with pytest.raises(ValueError, match="Compression graft tripwire"):
+        await memory.commit_compression(1, snapshot, result, set(), lambda uid: "intro")
+
+
+@pytest.mark.asyncio
+async def test_append_message_holds_conversation_lock():
+    import asyncio
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+
+    async with memory.conversation_lock(8):
+        append_task = asyncio.create_task(
+            memory.append_message(
+                conversation=None,
+                chat_id=8,
+                kind="assistant",
+                role="assistant",
+                line="blocked until lock released",
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert append_task.done() is False
+
+    conversation, _ = await append_task
+    assert conversation.messages[-1].text == "blocked until lock released"

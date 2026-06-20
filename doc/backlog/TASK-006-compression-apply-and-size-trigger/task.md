@@ -2,11 +2,11 @@
 id: TASK-006
 epic: EPIC-001
 title: "compression apply and size trigger"
-status: todo
+status: done
 priority: high
 size: L
 created: 2026-06-09
-updated: 2026-06-15
+updated: 2026-06-18
 tags:
   - chat-context
 ---
@@ -26,6 +26,7 @@ Implement the full compression apply pipeline: a per-conversation `asyncio.Lock`
 - [[chat_context_management#Summarizer envelope]] (`SummarizerProvider` contract)
 - [[chat_context_management#Size-trigger — emergency cutoff]]
 - [[chat_context_management#Chathistory schema]]
+- [[ADR-000-sensitive-data-persistence]] (apply is in-memory; conversation stash is graceful-shutdown-only)
 
 ## Program
 
@@ -70,4 +71,4 @@ Part of the Chat Context Management chain — see the program map in [[EPIC-001-
 
 ## Notes
 
-The largest stage (L), even after extracting the summariser into TASK-005. Program milestone: user value without vector recall. Do not split the apply itself — the snapshot/transform/graft invariants give no valid intermediate state.
+The largest stage (L), even after extracting the summariser into TASK-005. Program milestone: user value without vector recall. Do not split the apply itself — the snapshot/transform/graft invariants give no valid intermediate state. Apply commits in-memory only per ADR-000; `pending_vectorization` is checkpointed with the rest of the conversation on graceful shutdown, not on each apply.

@@ -11,7 +11,7 @@ from yoda.mind.data.routing_context import RoutingContext
 
 from .affect import AffectCore, AffectProvider
 from .cognition import CognitionCore, CognitionProvider
-from .memory.memory import MemoryCore, MemoryProvider
+from .memory.memory import MemoryProvider
 from .perception.language import LanguageProvider
 from .perception.perception import Perception
 
@@ -164,7 +164,7 @@ class Mind:
             f"Tell the user briefly in your voice. "
             f"Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
         )
-        conversation, messages = MemoryCore.add_conversation_line(
+        conversation, messages = await self.memory_provider.append_message(
             conversation=conversation,
             chat_id=chat_id,
             kind="task_result",
@@ -187,7 +187,7 @@ class Mind:
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
         line = f"SCHEDULED REMINDER: {reminder_text}. Deliver this reminder naturally. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
-        conversation, messages = MemoryCore.add_conversation_line(
+        conversation, messages = await self.memory_provider.append_message(
             conversation=conversation,
             chat_id=chat_id,
             kind="task_result",
@@ -280,7 +280,7 @@ class Mind:
 
         line = f"{line}. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
 
-        conversation, messages = MemoryCore.add_conversation_line(
+        conversation, messages = await self.memory_provider.append_message(
             conversation=conversation,
             chat_id=chat_id,
             kind="task_result",
@@ -306,7 +306,7 @@ class Mind:
         reply_timestamp = f"{dtm.datetime.now(dtm.UTC)}"
         parts = CognitionCore.process_reply(reply)
         for part in parts:
-            conversation, _ = MemoryCore.add_conversation_line(
+            conversation, _ = await self.memory_provider.append_message(
                 conversation=conversation,
                 chat_id=chat_id,
                 kind="assistant",

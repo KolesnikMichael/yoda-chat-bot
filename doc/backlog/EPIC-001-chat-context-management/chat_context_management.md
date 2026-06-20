@@ -36,7 +36,7 @@ Kind = Literal[
 | `assistant` | Yoda's reply | `Mind._reply_and_send` |
 | `task_result` | non-visible system message carrying the outcome of a delegated agent task, a fired scheduled reminder, or a scheduled-task failure notice. All are bot-initiated payloads with the same downstream treatment by triggers and summarisation; merging them keeps the enum minimal. | `Mind._handle_agent_result`, `Mind.deliver_scheduled_reminder`, `Mind.notify_scheduled_failure` |
 | `user_introduction` | non-visible system message carrying a snapshot of a participant's `UserProfile`, lazily inserted before that user's first appearance in the live tail and refreshed at compression. Does not exist in the codebase yet — see [`user_introduction` lifecycle](#user_introduction-lifecycle). | `MemoryProvider` ingest hook + `user_introduction` lifecycle refresh |
-| `summary` | compression block produced by this design | `Maintenance.compress_conversations` (via `MemoryProvider.apply_compression`) |
+| `summary` | compression block produced by this design | `Maintenance._run_size_trigger_compression` (orchestration); `MemoryProvider.take_compression_snapshot` / `commit_compression` (lock, graft, `Chat.history` persist) |
 
 `kind` is set by the producer at message creation time, not inferred
 downstream. Inference is used only during the v2 → v3 migration of
@@ -139,8 +139,9 @@ conversation stash.
   `MAX_SUMMARY_COUNT` eviction fires; drained by
   [`Maintenance.flush_summary_outbox`](#single-ticking-loop) once
   embedding and Chroma write succeed. Lives on `Conversation` (rather
-  than as a separate Redis key) so that the apply commit and the
-  outbox push are persisted atomically by the same stash write. See
+  than as a separate Redis key) so that apply-side message changes and
+  outbox updates move together in one in-memory object and are captured
+  together whenever the conversation stash is saved. See
   [Persistence flow](#persistence-flow). Default empty.
 
 The `0.0` default on both timestamps makes
@@ -709,6 +710,18 @@ vector-store persistence, and failure handling are still
 [open](#open-questions); this section assumes only that snapshot and
 apply each happen indivisibly with respect to ingest.
 
+**Orchestration (as built in TASK-006).** There is no single
+`MemoryProvider.apply_compression` entry point. `Maintenance.compress_conversations`
+evaluates triggers per conversation; on size trigger it runs
+`Maintenance._run_size_trigger_compression`, which:
+snapshot via `MemoryProvider.take_compression_snapshot` (under lock) →
+transformation on the deep copy (`CompressionApplyCore`, `SummarizerProvider`,
+profile deltas via `MemoryProvider.update_user_profile`) without holding
+the lock during the LLM call → graft+merge via
+`MemoryProvider.commit_compression` (under lock, includes `Chat.history`
+audit persist). Timeout-trigger wiring reuses the same pipeline
+(TASK-007).
+
 ### Snapshot
 
 At the start of the run, with the live conversation briefly held in a
@@ -1022,9 +1035,7 @@ holding for hundreds of microseconds:
   Three cheap operations.
 - **Apply:** `live.messages = copy.messages + new_arrivals`, the
   merge of derived fields, the merge of `user_introduction` on
-  `new_arrivals`, the post-apply Redis stash (which also persists
-  `pending_vectorization` — see [Persistence
-  flow](#persistence-flow)). Bounded sequential writes.
+  `new_arrivals`. Bounded sequential writes.
 
 Everything between — the LLM call and the rest of the transformation
 on `copy` — runs without the lock and never blocks ingest.
@@ -1044,8 +1055,8 @@ introduces in-place message mutation or deletion.
 
 Vector-store externalisation of evicted `summary` blocks is decoupled
 from the apply via the per-`Conversation` outbox
-(`pending_vectorization`). The apply commits the outbox push together
-with the inline state in one Redis stash; a separate background
+(`pending_vectorization`). The apply updates the outbox in-memory
+together with inline state; a separate background
 sub-routine drains the outbox into Chroma. See [Persistence
 flow](#persistence-flow) for the full design.
 
@@ -1182,8 +1193,9 @@ deduplication step against inline content. Recall semantics become
 Externalisation uses the **transactional outbox** idiom, with the
 outbox kept on the `Conversation` itself
 (`pending_vectorization`, see [Conversation state
-fields](#conversation-state-fields)) so that the apply commit and
-the outbox push are persisted atomically in one Redis stash write.
+fields](#conversation-state-fields)) so that apply-side changes to
+inline messages and outbox entries stay on the same object and are
+checkpointed together by conversation-stash saves.
 Compression therefore never blocks on, never fails because of, and
 never has to be rolled back due to vector-store availability.
 
@@ -1193,9 +1205,9 @@ When [Compression apply](#compression-apply) evicts the oldest
 `summary` block(s) from the inline tail under `MAX_SUMMARY_COUNT`
 pressure, those blocks are appended to
 `copy.pending_vectorization` (transformation step 7). The graft +
-merge that commits the apply also persists
-`pending_vectorization` via the post-apply stash — see [Lock
-model](#lock-model). The compression run then returns success,
+merge that commits the apply updates `pending_vectorization` on the
+live in-memory conversation as part of the same apply state change —
+see [Lock model](#lock-model). The compression run then returns success,
 regardless of whether the vector store is reachable.
 
 #### Outbox flush
@@ -1212,8 +1224,9 @@ order:
 2. `VectorProvider.persist_summaries(chat_id, records)` writes them
    to Chroma.
 3. On success, the corresponding entries are removed from
-   `pending_vectorization` (atomically, via the same Conversation
-   stash mechanism that the compression apply uses).
+   `pending_vectorization` on the same `Conversation` object; the
+   next conversation-stash checkpoint therefore persists the
+   outbox *without* those flushed entries.
 4. On failure, the entries stay in `pending_vectorization`; the
    next tick retries.
 
@@ -1228,11 +1241,13 @@ record.id = sha256(
 )
 ```
 
-If a flush attempt half-succeeds — embedding done, Chroma write
-failed at the network layer but actually landed — the next retry
-overwrites the same record instead of inserting a duplicate. The
-outbox flush is therefore safely idempotent at the cost of one extra
-embedding call on retry (not free, but cheap and bounded).
+If a flush attempt half-succeeds within the **same process** —
+embedding done, Chroma write failed at the network layer but actually
+landed — the next retry overwrites the same record instead of
+inserting a duplicate. The outbox flush is therefore safely idempotent
+at the cost of one extra embedding call on retry (not free, but cheap
+and bounded). Orphan cleanup after abnormal termination is handled
+separately — see [Crash recovery](#crash-recovery).
 
 #### Outbox health threshold
 
@@ -1257,17 +1272,45 @@ ever becomes a problem.
 
 #### Crash recovery
 
-Because the outbox lives on `Conversation`, the apply commit and the
-outbox push share a single Redis stash and are therefore atomic
-together. On restart after a crash:
+Conversation stash is written only on **graceful shutdown** and
+consumed on the **next startup**: `restore_conversation_stash` reads
+it, hydrates in-memory conversations, and **deletes the Redis key
+immediately**. There is no rolling checkpoint during normal operation
+and no “previous stash” left in Redis after a successful boot.
 
-- If the stash had succeeded → apply and outbox push are both
-  durable; flush picks up where it left off.
-- If the stash had not yet succeeded → neither apply nor outbox
-  push is persisted; the conversation reverts to its pre-snapshot
-  state. The next compression run reattempts the same chunk. With
-  deterministic record id (above), any half-completed Chroma write
-  from a previous attempt is overwritten cleanly.
+**Planned restart (graceful shutdown → startup):**
+
+- Shutdown wrote a conversation stash; startup restored it and removed
+  the key.
+- Inline state and `pending_vectorization` from that checkpoint are
+  back in memory together; `flush_summary_outbox` resumes from the
+  recovered outbox.
+
+**Abnormal termination (crash, kill, OOM — no graceful shutdown):**
+
+- No conversation stash is created for that run. Any stash from an
+  *earlier* graceful shutdown was already consumed and deleted on
+  startup, so Redis holds **no** conversation checkpoint after the
+  crash.
+- All in-memory state since boot is lost: messages, compression
+  counters, `pending_vectorization`, and any compression applies not
+  yet captured by a prior graceful shutdown.
+- A half-completed Chroma write from a flush attempt before the crash
+  cannot be repaired by deterministic-id retry: the outbox entry that
+  drove the flush is gone, so there is nothing to re-embed or
+  overwrite with. Such records are **orphans** and must be **deleted
+  from Chroma** (startup reconciliation or a flush-side cleanup step
+  — exact mechanism is a TASK-008 design choice).
+- Compression may run again later on the same chunk if triggers still
+  fire; that produces a new summary with new ids — it does not
+  resurrect the lost outbox entry.
+
+Within a **single process lifetime** (no crash), a failed flush where
+Chroma actually landed despite a reported error is still handled by
+deterministic record id: the next retry overwrites the same record
+while the outbox entry remains in memory — see
+[Deterministic record id](#deterministic-record-id). That idempotency
+does not apply across abnormal termination.
 
 ### Recall path
 
@@ -1406,15 +1449,15 @@ overlaps significantly with mainstream patterns. The table below
 captures the overlap explicitly so future contributors don't relitigate
 "are we reinventing the wheel?".
 
-| concern                           | LangChain¹ | LlamaIndex² | MemGPT / Letta            | Mem0                        | Yoda                                                |
-| --------------------------------- | ---------- | ----------- | ------------------------- | --------------------------- | --------------------------------------------------- |
-| compression trigger               | token budget | token budget | token budget            | n/a (facts-focused)         | size-trigger (token budget) **+** timeout-trigger (activity) |
-| summary shape                     | one rolling summary | one rolling summary | "archival memory" entries | per-fact records         | multiple parallel summary blocks (variant C)        |
-| retrieval                         | n/a        | over messages | explicit `recall` tool   | similarity over facts       | Chroma per-chat collection over summary blocks, agent skill `recall_conversation` |
-| fact / profile extraction         | no         | no           | partial (core memory)    | yes (primary feature)       | yes (during compression)                            |
-| multi-user / group chats          | no         | no           | no                       | partial                     | yes (`user_introduction` lazy injection)                  |
-| visibility / kind distinction     | no         | no           | partial (system vs msg)  | n/a                         | yes (gap detection on visible only)                 |
-| activity-aware timing             | no         | no           | no                       | no                          | yes (quiet-for-N-runs)                              |
+| concern                       | LangChain¹          | LlamaIndex²         | MemGPT / Letta            | Mem0                  | Yoda                                                                              |
+| ----------------------------- | ------------------- | ------------------- | ------------------------- | --------------------- | --------------------------------------------------------------------------------- |
+| compression trigger           | token budget        | token budget        | token budget              | n/a (facts-focused)   | size-trigger (token budget) **+** timeout-trigger (activity)                      |
+| summary shape                 | one rolling summary | one rolling summary | "archival memory" entries | per-fact records      | multiple parallel summary blocks (variant C)                                      |
+| retrieval                     | n/a                 | over messages       | explicit `recall` tool    | similarity over facts | Chroma per-chat collection over summary blocks, agent skill `recall_conversation` |
+| fact / profile extraction     | no                  | no                  | partial (core memory)     | yes (primary feature) | yes (during compression)                                                          |
+| multi-user / group chats      | no                  | no                  | no                        | partial               | yes (`user_introduction` lazy injection)                                          |
+| visibility / kind distinction | no                  | no                  | partial (system vs msg)   | n/a                   | yes (gap detection on visible only)                                               |
+| activity-aware timing         | no                  | no                  | no                        | no                    | yes (quiet-for-N-runs)                                                            |
 
 ¹ `ConversationSummaryBufferMemory`.
 ² `ChatSummaryMemoryBuffer`.

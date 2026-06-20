@@ -1,11 +1,15 @@
+import asyncio
 import copy
 import datetime as dtm
 import json
 import logging
-from collections.abc import Callable, Iterator
+import time
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 
 from .data.chat import Chat
+from .data.compression_snapshot import CompressionSnapshot, CompressionTransformResult
 from .data.conversation import Conversation
 from .data.message import Message, MessageKind
 from .data.summary_outbox_entry import SummaryOutboxEntry
@@ -322,6 +326,101 @@ class MemoryProvider:
     def __init__(self, storage_api):
         self._storage_api = storage_api
         self._conversations: dict[str, Conversation] = {}
+        self._compression_locks: dict[int, asyncio.Lock] = {}
+
+    @asynccontextmanager
+    async def conversation_lock(self, chat_id: int) -> AsyncIterator[None]:
+        if chat_id not in self._compression_locks:
+            self._compression_locks[chat_id] = asyncio.Lock()
+        async with self._compression_locks[chat_id]:
+            yield
+
+    async def take_compression_snapshot(self, chat_id: int) -> CompressionSnapshot | None:
+        async with self.conversation_lock(chat_id):
+            live = self.get_conversation(chat_id)
+            if live is None:
+                return None
+            return CompressionSnapshot(
+                n_old=len(live.messages),
+                copy=copy.deepcopy(live),
+                snapshot_ts=time.time(),
+            )
+
+    async def append_chat_history_event(self, chat_id: int, event: dict) -> None:
+        raw = await self._storage_api.hget("chats", str(chat_id))
+        if raw:
+            data = migrate("chats", json.loads(raw))
+            chat = Chat(**{k: v for k, v in data.items() if k in Chat.__dataclass_fields__})
+        else:
+            chat = Chat()
+        chat.history.append(event)
+        chat.updated_on = dtm.datetime.now(dtm.UTC).isoformat()
+        await self._storage_api.hset("chats", str(chat_id), json.dumps(chat.to_dict()))
+
+    async def commit_compression(
+        self,
+        chat_id: int,
+        snapshot: CompressionSnapshot,
+        result: CompressionTransformResult,
+        removed_users: set[int],
+        intro_text_for_user_id: Callable[[int], str],
+    ) -> None:
+        from .compression_apply_core import CompressionApplyCore
+
+        async with self.conversation_lock(chat_id):
+            live = self.get_conversation(chat_id)
+            if live is None:
+                raise ValueError(f"No conversation for chat_id={chat_id}")
+            if len(live.messages) < snapshot.n_old:
+                raise ValueError(
+                    f"Compression graft tripwire: len(live.messages)={len(live.messages)} "
+                    f"< n_old={snapshot.n_old} for chat_id={chat_id}"
+                )
+            new_arrivals = live.messages[snapshot.n_old:]
+            live.messages = result.copy.messages + new_arrivals
+            live.last_compressed_at = result.copy.last_compressed_at
+            live.visible_messages = (
+                result.copy.visible_messages
+                + CompressionApplyCore.visible_count(new_arrivals)
+            )
+            live.introduced_users = set(result.copy.introduced_users)
+            copy_end_index = len(result.copy.messages)
+            CompressionApplyCore.reconcile_arrivals_introductions(
+                live,
+                copy_end_index,
+                removed_users,
+                intro_text_for_user_id,
+            )
+            live.pending_vectorization = list(result.copy.pending_vectorization)
+            self.save_conversation(live)
+            await self.append_chat_history_event(chat_id, result.audit_entry)
+
+    async def append_message(
+        self,
+        conversation: Conversation | None,
+        chat_id: int,
+        *,
+        kind: MessageKind,
+        role: str,
+        line: str,
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        timestamp: str = "",
+        message_id: int | None = None,
+        user_id: int | None = None,
+    ) -> tuple[Conversation, list[dict]]:
+        async with self.conversation_lock(chat_id):
+            conversation, _ = MemoryCore.add_conversation_line(
+                conversation=conversation,
+                chat_id=chat_id,
+                kind=kind,
+                role=role,
+                line=line,
+                system_prompt=system_prompt,
+                timestamp=timestamp,
+                message_id=message_id,
+                user_id=user_id,
+            )
+            return conversation, conversation.to_llm_messages()
 
     def get_conversation(self, chat_id: int) -> Conversation | None:
         key = MemoryCore.conversation_key(chat_id)
@@ -361,39 +460,40 @@ class MemoryProvider:
         message_id: int | None = None,
         user_id: int | None = None,
     ) -> tuple[Conversation, list[dict]]:
-        profile_text: str | None = None
-        introduced_users = conversation.introduced_users if conversation else set()
-        needs_introduction = (
-            kind == "user"
-            and user_id is not None
-            and user_id not in introduced_users
-        )
-        if needs_introduction:
-            profile = await self.get_user_profile(user_id, chat_id)
-            profile_text = MemoryCore.format_user_profile_snapshot(profile)
+        async with self.conversation_lock(chat_id):
+            profile_text: str | None = None
+            introduced_users = conversation.introduced_users if conversation else set()
+            needs_introduction = (
+                kind == "user"
+                and user_id is not None
+                and user_id not in introduced_users
+            )
+            if needs_introduction:
+                profile = await self.get_user_profile(user_id, chat_id)
+                profile_text = MemoryCore.format_user_profile_snapshot(profile)
 
-        conversation, _ = MemoryCore.add_conversation_line(
-            conversation=conversation,
-            chat_id=chat_id,
-            kind=kind,
-            role=role,
-            line=line,
-            system_prompt=system_prompt,
-            timestamp=timestamp,
-            message_id=message_id,
-            user_id=user_id,
-        )
-
-        if needs_introduction and profile_text is not None and user_id is not None:
-            user_index = len(conversation.messages) - 1
-            MemoryCore.ensure_user_introductions_in_range(
-                conversation,
-                user_index,
-                user_index + 1,
-                lambda uid, text=profile_text: text,
+            conversation, _ = MemoryCore.add_conversation_line(
+                conversation=conversation,
+                chat_id=chat_id,
+                kind=kind,
+                role=role,
+                line=line,
+                system_prompt=system_prompt,
+                timestamp=timestamp,
+                message_id=message_id,
+                user_id=user_id,
             )
 
-        return conversation, conversation.to_llm_messages()
+            if needs_introduction and profile_text is not None and user_id is not None:
+                user_index = len(conversation.messages) - 1
+                MemoryCore.ensure_user_introductions_in_range(
+                    conversation,
+                    user_index,
+                    user_index + 1,
+                    lambda uid, text=profile_text: text,
+                )
+
+            return conversation, conversation.to_llm_messages()
 
     async def _reconcile_user_introductions_if_needed(
         self,

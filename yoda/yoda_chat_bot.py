@@ -51,6 +51,8 @@ from yoda.mind.agent.tools.send_picture_tool import SendPictureTool
 from yoda.mind.agent.skills.catalog import SkillCatalog
 from yoda.mind.data.maintenance_settings import MaintenanceSettings
 from yoda.mind.maintenance import Maintenance
+from yoda.mind.memory.data.summarizer_settings import SummarizerSettings
+from yoda.mind.memory.summarizer import SummarizerProvider
 
 
 logger = logging.getLogger(__name__)
@@ -155,12 +157,16 @@ def main() -> None:
         redis_db=memory_settings.get("redis_db", 0),
     )
 
+    summarizer_settings = SummarizerSettings.from_settings(settings_json)
+    summarizer_provider = SummarizerProvider(llm_api=llm_api, settings=summarizer_settings)
+
     maintenance = Maintenance(
         storage_api=storage_api,
         scheduler_api=scheduler_api,
         memory_provider=memory_provider,
         compression_settings=chat_compression_settings,
         maintenance_settings=maintenance_settings,
+        summarizer_provider=summarizer_provider,
     )
 
     tavily_api = TavilyApi(api_key=tavily_api_key)

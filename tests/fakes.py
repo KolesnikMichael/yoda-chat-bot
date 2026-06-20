@@ -99,6 +99,32 @@ class FakeMemoryProvider:
 
         return conversation, conversation.to_llm_messages()
 
+    async def append_message(
+        self,
+        conversation: Conversation | None,
+        chat_id: int,
+        *,
+        kind,
+        role: str,
+        line: str,
+        system_prompt: str = "Reply as Yoda from Star Wars",
+        timestamp: str = "",
+        message_id: int | None = None,
+        user_id: int | None = None,
+    ) -> tuple[Conversation, list[dict]]:
+        conversation, _ = MemoryCore.add_conversation_line(
+            conversation=conversation,
+            chat_id=chat_id,
+            kind=kind,
+            role=role,
+            line=line,
+            system_prompt=system_prompt,
+            timestamp=timestamp,
+            message_id=message_id,
+            user_id=user_id,
+        )
+        return conversation, conversation.to_llm_messages()
+
 
 class FakeSender:
     def __init__(self) -> None:

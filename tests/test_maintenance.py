@@ -10,7 +10,10 @@ from yoda.mind.data.maintenance_settings import MaintenanceSettings
 from yoda.mind.maintenance import RECONCILE_EVERY_N_TICKS, Maintenance, reconcile_active_jobs
 from yoda.mind.memory.data.chat_compression_settings import ChatCompressionSettings
 from yoda.mind.memory.data.conversation import Conversation
+from yoda.mind.memory.data.message import Message
+from yoda.mind.memory.data.summarizer_result import SummarizerResult
 from yoda.mind.memory.memory import MemoryProvider
+from yoda.mind.memory.summarizer import SummarizerProvider
 
 
 class FakeStorageApi:
@@ -56,17 +59,31 @@ def make_maintenance(
     scheduler_api: FakeSchedulerApi | None = None,
     memory_provider: MemoryProvider | None = None,
     tick_minutes: int = 1,
+    summarizer_provider: SummarizerProvider | None = None,
 ) -> Maintenance:
     storage = storage_api or FakeStorageApi()
     scheduler = scheduler_api or FakeSchedulerApi()
     memory = memory_provider or MemoryProvider(storage_api=storage)
+    summarizer = summarizer_provider or _StubSummarizerProvider()
     return Maintenance(
         storage_api=storage,
         scheduler_api=scheduler,
         memory_provider=memory,
         compression_settings=default_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=tick_minutes),
+        summarizer_provider=summarizer,
     )
+
+
+class _StubSummarizerProvider:
+    async def summarise(self, chunk, participant_profiles):
+        return SummarizerResult(
+            summary="stub summary",
+            topics=[],
+            participants=[],
+            skills=[],
+            profile_updates={},
+        )
 
 
 # --- Stage 1: MaintenanceSettings ---
@@ -381,3 +398,76 @@ async def test_reconcile_active_jobs_from_maintenance_module():
     assert removed == 1
     assert await storage.hget("active_jobs:42", "job_live") is not None
     assert await storage.hget("active_jobs:42", "job_stale") is None
+
+
+@pytest.mark.asyncio
+async def test_size_trigger_apply_invokes_compression(caplog):
+    from tests.test_compression_apply import (
+        FakeSummarizerProvider,
+        build_compressible_conversation,
+        low_compression_settings,
+    )
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    await storage.hset("chats", "42", json.dumps({"chat_type": "private"}))
+    conversation = build_compressible_conversation(chat_id=42, pair_count=6)
+    memory.save_conversation(conversation)
+    summarizer = FakeSummarizerProvider()
+    maintenance = Maintenance(
+        storage_api=storage,
+        scheduler_api=FakeSchedulerApi(),
+        memory_provider=memory,
+        compression_settings=low_compression_settings(),
+        maintenance_settings=MaintenanceSettings(tick_minutes=1),
+        summarizer_provider=summarizer,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="yoda.mind.maintenance"):
+        await maintenance.compress_conversations()
+
+    assert "compression applied: chat_id=42 trigger=size" in caplog.text
+    live = memory.get_conversation(42)
+    assert live is not None
+    assert any(message.kind == "summary" for message in live.messages)
+
+
+@pytest.mark.asyncio
+async def test_timeout_no_apply_without_size_trigger(caplog):
+    from tests.test_compression_apply import FakeSummarizerProvider
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    await storage.hset("chats", "7", json.dumps({"chat_type": "private"}))
+    quiet_seconds = 8 * 3600.0
+    last_visible_at = 100.0
+    conversation = Conversation(
+        chat_id=7,
+        visible_messages=61,
+        last_visible_at=last_visible_at,
+        last_compressed_at=0.0,
+    )
+    memory.save_conversation(conversation)
+    summarizer = FakeSummarizerProvider()
+    maintenance = Maintenance(
+        storage_api=storage,
+        scheduler_api=FakeSchedulerApi(),
+        memory_provider=memory,
+        compression_settings=default_compression_settings(),
+        maintenance_settings=MaintenanceSettings(tick_minutes=1),
+        summarizer_provider=summarizer,
+    )
+
+    with patch("yoda.mind.maintenance.time.time", return_value=last_visible_at + quiet_seconds):
+        with caplog.at_level(logging.DEBUG, logger="yoda.mind.maintenance"):
+            await maintenance.compress_conversations()
+
+    assert "compression trigger candidate" in caplog.text
+    assert "timeout" in caplog.text
+    assert "compression applied" not in caplog.text
+    assert summarizer.calls == []
+
+
+def test_make_maintenance_accepts_summarizer_provider():
+    maintenance = make_maintenance()
+    assert maintenance._summarizer_provider is not None

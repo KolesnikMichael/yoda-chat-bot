@@ -6,7 +6,7 @@ status: todo
 priority: medium
 size: S
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-17
 tags:
   - chat-context
 ---
@@ -20,6 +20,7 @@ Add the agent skill `recall_conversation(query, k, optional filters)` — embed 
 ## Master design
 
 - [[chat_context_management#Recall path]]
+- [[ADR-000-sensitive-data-persistence]] (recall returns derived summaries from Chroma only)
 
 ## Program
 
