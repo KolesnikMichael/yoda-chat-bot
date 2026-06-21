@@ -53,6 +53,7 @@ Read [doc/AGENTS.md](../../../doc/AGENTS.md) first for vault structure and the *
 | `EPIC-NNN/epic.md` | **Output** — fill Goal/Outcomes alignment + the whole **Decomposition** section |
 | `EPIC-NNN/design.md` | **Input/Output** — master design; ensure it is coherent enough to cut tasks against; extend its outline if needed |
 | `doc/design/`, `doc/design/decisions/` | Existing system architecture and ADRs the epic must respect |
+| `doc/templates/new-task.md` | **Reference** — layout for member-task folders the agent creates in step 6 |
 
 ## Workflow
 
@@ -62,36 +63,42 @@ Copy and track:
 - [ ] Epic folder resolved
 - [ ] epic.md Goal/Outcomes read; master design read
 - [ ] Project docs/code reviewed for feasibility and seams
-- [ ] Decomposition principle + delivery profile chosen (jointly)
+- [ ] Decomposition principle + delivery profile options drafted for user consideration
+- [ ] Decomposition principle + delivery profile approved by user; epic.md Delivery profile filled
 - [ ] Task set drafted (id, title, size, deliverable, deps, context slice)
 - [ ] Dependency graph + milestone + parallelisation defined
-- [ ] epic.md Decomposition filled
-- [ ] Frontmatter updated (updated date)
-- [ ] Per-task creation handoff produced
+- [ ] Task set presented for approval; remarks addressed
+- [ ] epic.md Decomposition filled; frontmatter updated
+- [ ] Member task folders + stub docs created (new-task.md layout)
+- [ ] Each task.md filled from decomposition
 ```
 
 ### 1. Understand the whole
 
 Read `epic.md` Goal/Outcomes and the master `design.md`. Skim the relevant `yoda/` modules and `tests/` to find natural seams (IODA layers, existing chokepoints, persistence boundaries).
 
-### 2. Choose a decomposition principle and delivery profile
+### 2. Choose decomposition principle and delivery profile — approval gate
 
 Decomposition and integration boundary are **chosen together** — they are coupled, not independent:
 
 - **functional** (by IODA/dependency layer) almost always implies `integration_boundary: epic`: a single layer (e.g. "just the schema") ships no standalone value, so nothing reaches prod until the epic merges → `internal_compat: none`.
 - **vertical-slice** (end-to-end features) enables an earlier boundary (`task` / `checkpoint`) for early e2e testing, but then each slice must stay backward-compatible with deployed state → `internal_compat: additive` (or `full`).
 
-Record the result in the epic's **`## Delivery profile`** block (`integration_strategy`, `integration_boundary`, `decomposition_principle`, and the two compatibility horizons `internal_compat` + `external_contract`). Keep the two horizons separate: `internal_compat` governs states *between member tasks*; `external_contract` governs the epic's obligation to already-deployed/persisted state at merge and is always in force regardless of `internal_compat`. Downstream `create-requirements` / `create-design` / `create-plan` read this block to avoid over- or under-engineering compatibility.
+**Branch mapping** couples to `integration_strategy`:
 
-**Branch mapping.** Branch assignment is integration logic and belongs here. Decide each member task's branch from `integration_strategy` and record the mapping in `epic.md` as a single source of truth:
-
-- `epic-branch` — one shared branch for all members. Record it in the `## Delivery profile` block (and `branch:` frontmatter). No per-task column.
-- `trunk-based` — members land on trunk via short-lived per-task branches (or directly behind flags). State the branch pattern (e.g. `feat/TASK-NNN-slug`, merged independently) in the `## Delivery profile` block. No per-task column.
-- `sequential-branches` / release-per-checkpoint — members map to different branches by checkpoint. Add a **`Branch`** (or `Checkpoint`) column to the decomposition table giving each task its branch, and add a reference line in the `## Delivery profile` block pointing to that column.
+- `epic-branch` — one shared branch for all members (`branch:` frontmatter + `## Delivery profile`). No per-task column.
+- `trunk-based` — short-lived per-task branches (or flags on trunk). State the branch pattern in `## Delivery profile`.
+- `sequential-branches` / release-per-checkpoint — a **`Branch`** (or `Checkpoint`) column in the decomposition table; reference it from `## Delivery profile`.
 
 `create-plan` leaves epic-member `branch:` empty; `implement-task` resolves the actual branch from here per the strategy above.
 
-For most layered epics, prefer cutting by **dependency layer**, not by user-facing feature:
+**Evaluate and present (do not decompose yet).** Draft up to **three** viable combinations of `decomposition_principle` + delivery profile (`integration_strategy`, `integration_boundary`, `internal_compat`, `external_contract`, branch mapping). For each option give a **brief** summary: what it implies for task count, ordering, compatibility work, and branch workflow. End with **one recommendation** from the perspective of **implementation simplicity** (least ceremony, fewest cross-task contracts, clearest checkpoints).
+
+**Stop and wait for explicit user approval** of one option (or a user-specified variant). Do not proceed to steps 3–6 until approved.
+
+**After approval:** record the chosen profile in `epic.md` **`## Delivery profile`** (and `branch:` frontmatter when using `epic-branch`). Keep the two compatibility horizons separate: `internal_compat` governs states *between member tasks*; `external_contract` governs the epic's obligation to already-deployed/persisted state at merge and is always in force regardless of `internal_compat`. Downstream `create-requirements` / `create-design` / `create-plan` read this block.
+
+For most layered epics, the recommended default is cutting by **dependency layer**, not by user-facing feature:
 
 ```
 data model / schema → ingest behaviour → pure Core algorithms → Integration shell → Providers → full apply pipeline → wiring → external stores → agent skills
@@ -114,39 +121,61 @@ For every task, record:
 
 Keep tasks balanced: split anything that would be `XL`; merge trivially-coupled `XS` slices only if they share the same layer.
 
+Resolve the next free `TASK-NNN` ids before presenting:
+
+```bash
+grep -rh '^id: TASK-' doc/backlog/*/task.md | sort
+```
+
 ### 4. Define ordering and value
 
 - **Dependency graph** — a `mermaid graph TD` over the task ids.
 - **Milestone** — the earliest task after which the epic delivers standalone user value (lets you stop or re-prioritise safely).
 - **Parallelisation** — which tasks are independent once their deps are done. (Under `epic-branch` all run on one branch, so parallel tasks are still committed sequentially; the graph just guides safe ordering. Under multi-branch strategies, parallel tasks may live on separate branches per the branch mapping.)
 
-### 5. Fill epic.md
+### 5. Present task set for approval — approval gate
 
-Fill the **`## Delivery profile`** block (from step 2) and the **Decomposition** section of `epic.md`: principle, the task table, the dependency mermaid, milestone, and parallelisation notes. Leave the **Member tasks (live rollup)** dataview block as-is — it auto-populates once tasks carry `epic: EPIC-NNN`. Set `updated` in frontmatter.
+Present the full draft decomposition concisely: the task table (id, title, size, deliverable), dependency graph, milestone, and parallelisation notes.
 
-Record the **branch mapping** (step 2): for `epic-branch` / `trunk-based` in the `## Delivery profile` block (confirm `branch: feat/EPIC-NNN-slug` in frontmatter for `epic-branch`); for `sequential-branches` / release-per-checkpoint add the `Branch`/`Checkpoint` column to the decomposition table with a reference from `## Delivery profile`.
+**Stop and wait for explicit user approval.** If the user has remarks, revise steps 3–4 and re-present until accepted. Do not write `epic.md` Decomposition or create task folders until the task set is approved.
 
-### 6. Hand off task creation
+### 6. Finalize epic and create member tasks
 
-Produce a handoff list so the developer can instantiate each task with the `new-task` Templater template, passing the **epic folder** at the prompt so `epic:` frontmatter, the `## Epic` link, and the shared-branch pre-flight are wired automatically.
+After the task set is approved:
 
-For each task list: `TASK-NNN | title | size | depends-on | master-design anchors | in/out scope one-liners` — these seed the task's `task.md` Description, `## Master design`, `## Scope boundary`, and `## Dependencies` sections (the template stubs them for epic members).
+1. **Fill `epic.md`** — the **Decomposition** section (principle aligned with `decomposition_principle`, task table, dependency mermaid, milestone, parallelisation). Leave **Member tasks (live rollup)** as-is. Bump `updated` in frontmatter. For `sequential-branches` / release-per-checkpoint, include the `Branch`/`Checkpoint` column and the reference from `## Delivery profile`.
+
+2. **Create each member task folder** under `doc/backlog/TASK-NNN-slug/` with the same file set and frontmatter stubs as [`new-task.md`](../../../doc/templates/new-task.md) would produce for an epic member:
+   - `task.md` — frontmatter: `id`, `epic: EPIC-NNN`, `title`, `status: todo`, `priority`, `size`, dates, `tags`
+   - `requirements.md`, `design.md`, `plan.md` — stub bodies and frontmatter from the template; epic-member `plan.md` keeps `branch:` empty and includes the shared-epic-branch pre-flight line
+
+3. **Fill each `task.md`** from the approved decomposition:
+   - **Description** — one paragraph (what and why)
+   - **Master design** — anchor links from step 3
+   - **Scope boundary** — in/out one-liners from the context slice
+   - **Dependencies** — Depends on / Blocks by `TASK-NNN`
+   - **size** in frontmatter
+
+Leave `requirements.md`, `design.md`, and `plan.md` as template stubs — the per-task pipeline (`create-requirements` → …) fills them.
 
 ## Do not
 
-- Create the epic folder or task folders yourself (developer instantiates from templates)
+- Create the epic folder yourself (developer instantiates from `new-epic` template)
+- Proceed past step 2 or step 5 without explicit user approval
 - Put the decomposition map in `main.md` — it belongs in `epic.md`
 - Nest task folders under the epic folder — tasks stay flat with an `epic:` attribute
 - Produce tasks that cannot end in a green suite on their own
 - Give a task a context slice wider than it needs
-- Assign per-task branches — the epic owns one shared branch
+- Use per-task `branch:` in epic-member `plan.md` — branch mapping lives in the epic's Delivery profile
 
 ## Output
 
 When done, briefly report:
 
 1. Epic id and path to `epic.md`
-2. Task count + one-line each (id, title, size)
-3. Dependency highlights (roots, the milestone task, parallelisable sets)
-4. Shared branch name
-5. Handoff: the ordered task list; next step is **create-requirements** on the first unblocked task.
+2. Approved delivery profile (one line)
+3. Task count + one-line each (id, title, size)
+4. Paths to created task folders
+5. Dependency highlights (roots, the milestone task, parallelisable sets)
+6. Shared branch name (or branch pattern, per strategy)
+7. Next step: **create-requirements** on the first unblocked task.

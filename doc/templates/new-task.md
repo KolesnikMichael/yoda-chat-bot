@@ -258,7 +258,7 @@ tR += [
     "",
     "## Master design",
     "",
-    "<!-- Anchors this task implements, from the epic handoff: -->",
+    "<!-- Anchors this task implements, from epic decomposition (create-epic): -->",
     "- [[" + epicFolder + "/design#Section]]",
     "",
     "## Scope boundary",
