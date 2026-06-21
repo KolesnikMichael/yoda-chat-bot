@@ -1,7 +1,7 @@
 ---
 id: TASK-006
 doc: requirements
-updated: 2026-06-17
+updated: 2026-06-18
 ---
 
 # TASK-006: compression apply and size trigger — Requirements
@@ -88,10 +88,13 @@ Compression-time profile updates commit before step 8 builds fresh introductions
 The compressible chunk is replaced by one new `summary` message.
 
 **Acceptance criteria:**
-- [ ] The chunk region in `copy.messages` (after FR-3 head skipping, post-strip) is replaced by a single `Message` with `kind="summary"` and `role="system"` (exact `text` envelope is a design choice but must round-trip through stash v3).
+- [ ] The chunk region in `copy.messages` (after FR-3 head skipping, post-strip) is replaced by a single `Message` with `kind="summary"` and `role="system"`.
+- [ ] `Message.text` is JSON `InlineSummaryEnvelope`: `summary_id`, `added_at`, `content_from_ts`, `content_to_ts`, `skills`, `topics`, `text` (narrative only).
 - [ ] `summary_id` is deterministic: `sha256` hex over `(chat_id, snapshot_ts, chunk_start_message_id, chunk_end_message_id)` per [[chat_context_management#Deterministic record id]].
-- [ ] The summary message `text` carries the narrative `SummarizerResult.summary` (and any metadata encoding the design chooses for inline readers).
-- [ ] After step 6, `copy.messages` order is: `[prompt, …existing summaries…, new_summary, …live tail…]` consistent with variant C (parallel summaries, never re-summarised).
+- [ ] `content_from_ts` / `content_to_ts` are ISO-8601 from first/last **visible** messages in the summariser chunk.
+- [ ] `skills` and `topics` come from `SummarizerResult` (mechanical skills + LLM topics).
+- [ ] `Message.to_llm_dict()` for `kind="summary"` emits presentation header `[Summary · {from_date} — {to_date}]` then narrative — not raw JSON.
+- [ ] After step 6, `copy.messages` order is: `[prompt, …existing summaries…, new_summary, …live tail…]` consistent with variant C.
 
 ### FR-8: `MAX_SUMMARY_COUNT` FIFO eviction and outbox push (transformation step 7)
 
@@ -99,7 +102,7 @@ Inline summary count stays bounded; evicted blocks queue for later vectorisation
 
 **Acceptance criteria:**
 - [ ] After inserting the new summary, if the count of `kind == "summary"` messages in `copy.messages` exceeds `ChatCompressionSettings.max_summary_count`, the oldest summary block(s) at the head of the message list are removed — same count as added in this run (typically one).
-- [ ] Each evicted summary produces one `SummaryOutboxEntry` appended to `copy.pending_vectorization` with fields: `summary_id`, `document` (summary text), `created_at` (= `snapshot_ts`), `chunk_start_message_id`, `chunk_end_message_id`, `chunk_visible_count`, `participants`, `skills`, `topics`, and `added_at` (ISO-8601 UTC of when that summary was originally added inline — from the evicted block's metadata or audit data).
+- [ ] Each evicted summary produces one `SummaryOutboxEntry` via `InlineSummaryEnvelope.to_outbox_entry(compressed_at)` with fields: `summary_id`, `document` (narrative), `compressed_at`, `content_from_ts`, `content_to_ts`, `skills`, `topics`, `added_at`.
 - [ ] When no eviction is required, `copy.pending_vectorization` is unchanged by step 7.
 - [ ] `Maintenance.flush_summary_outbox` remains a no-op in this task — entries accumulate only.
 - [ ] Evicted summaries are absent from `copy.messages` but present in `copy.pending_vectorization` after a successful apply.

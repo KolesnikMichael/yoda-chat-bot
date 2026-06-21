@@ -183,10 +183,15 @@ class Maintenance:
             start_id,
             end_id,
         )
+        from_ts, to_ts = CompressionApplyCore.first_last_visible_timestamps(stripped_chunk)
         added_at = dtm.datetime.fromtimestamp(snapshot.snapshot_ts, dtm.UTC).isoformat()
         envelope = InlineSummaryEnvelope(
             summary_id=summary_id,
             added_at=added_at,
+            content_from_ts=from_ts,
+            content_to_ts=to_ts,
+            skills=summarizer_result.skills,
+            topics=summarizer_result.topics,
             text=summarizer_result.summary,
         )
 
@@ -228,7 +233,6 @@ class Maintenance:
             chunk_visible_count,
         )
 
-        from_ts, to_ts = CompressionApplyCore.first_last_visible_timestamps(stripped_chunk)
         audit_entry = CompressionApplyCore.build_compression_audit_entry(
             snapshot.snapshot_ts,
             summary_id,

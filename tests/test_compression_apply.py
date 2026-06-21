@@ -50,6 +50,20 @@ def _msg(
     )
 
 
+def _summary_envelope(**kwargs: object) -> InlineSummaryEnvelope:
+    defaults: dict[str, object] = {
+        "summary_id": "s",
+        "added_at": "2026-01-01T00:00:00+00:00",
+        "text": "body",
+        "content_from_ts": "2026-01-01T10:00:00+00:00",
+        "content_to_ts": "2026-01-02T10:00:00+00:00",
+        "skills": [],
+        "topics": [],
+    }
+    defaults.update(kwargs)
+    return InlineSummaryEnvelope(**defaults)  # type: ignore[arg-type]
+
+
 class FakeSummarizerProvider:
     def __init__(
         self,
@@ -127,15 +141,58 @@ def build_compressible_conversation(
 
 
 def test_inline_summary_envelope_round_trip():
-    envelope = InlineSummaryEnvelope(
+    envelope = _summary_envelope(
         summary_id="abc123",
         added_at="2026-06-18T12:00:00+00:00",
         text="summary body",
+        skills=["web_search"],
+        topics=["weather"],
     )
     restored = InlineSummaryEnvelope.from_message_text(envelope.to_message_text())
-    assert restored.summary_id == envelope.summary_id
-    assert restored.added_at == envelope.added_at
-    assert restored.text == envelope.text
+    assert restored == envelope
+    wire = json.loads(envelope.to_message_text())
+    assert wire["v"] == 1
+
+
+def test_inline_summary_envelope_to_llm_content_includes_presentation_header():
+    envelope = _summary_envelope(
+        content_from_ts="2026-01-10T08:00:00+00:00",
+        content_to_ts="2026-01-20T18:00:00+00:00",
+        text="narrative body",
+    )
+    assert envelope.to_llm_content() == (
+        "[Summary · 2026-01-10 — 2026-01-20]\n"
+        "narrative body"
+    )
+
+
+def test_summary_message_to_llm_dict_uses_presentation_content():
+    message = _msg(
+        "summary",
+        text=_summary_envelope(
+            content_from_ts="2026-01-10T08:00:00+00:00",
+            content_to_ts="2026-01-20T18:00:00+00:00",
+            text="narrative",
+        ).to_message_text(),
+    )
+    assert message.to_llm_dict()["content"].startswith("[Summary · 2026-01-10 — 2026-01-20]\n")
+    assert message.to_llm_dict()["content"].endswith("narrative")
+
+
+def test_inline_summary_envelope_to_outbox_entry():
+    envelope = _summary_envelope(
+        summary_id="sid",
+        skills=["search_web"],
+        topics=["topic-a"],
+    )
+    entry = envelope.to_outbox_entry(compressed_at=100.0)
+    assert entry.summary_id == "sid"
+    assert entry.document == "body"
+    assert entry.compressed_at == 100.0
+    assert entry.skills == ["search_web"]
+    assert entry.topics == ["topic-a"]
+    assert entry.content_from_ts == envelope.content_from_ts
+    assert entry.content_to_ts == envelope.content_to_ts
 
 
 def test_inline_summary_envelope_invalid_json_raises():
@@ -145,7 +202,22 @@ def test_inline_summary_envelope_invalid_json_raises():
 
 def test_inline_summary_envelope_invalid_version_raises():
     with pytest.raises(ValueError, match="Invalid inline summary envelope version"):
-        InlineSummaryEnvelope.from_message_text(json.dumps({"v": 2}))
+        InlineSummaryEnvelope.from_message_text(json.dumps({"v": 3, "summary_id": "s", "added_at": "t", "text": "x"}))
+
+
+def test_inline_summary_envelope_v1_optional_metadata_defaults():
+    raw = json.dumps({"v": 1, "summary_id": "s", "added_at": "t", "text": "body"})
+    envelope = InlineSummaryEnvelope.from_message_text(raw)
+    assert envelope.summary_id == "s"
+    assert envelope.content_from_ts == ""
+    assert envelope.skills == []
+
+
+def test_inline_summary_envelope_missing_required_field_raises():
+    with pytest.raises(ValueError, match="Invalid inline summary envelope fields"):
+        InlineSummaryEnvelope.from_message_text(
+            json.dumps({"v": 1, "summary_id": "s", "added_at": "t"}),
+        )
 
 
 # --- Stage 1: CompressionSnapshot DTOs ---
@@ -177,7 +249,7 @@ def test_compression_transform_result_fields():
 def test_slice_compressible_skips_prompt_and_head_summaries():
     messages = [
         _msg("prompt", text="p"),
-        _msg("summary", text='{"v":1,"summary_id":"s1","added_at":"t","text":"old"}'),
+        _msg("summary", text=_summary_envelope(summary_id="s1", text="old").to_message_text()),
         _msg("user", role="user", user_id=1, text="u"),
         _msg("assistant", role="assistant", text="a"),
     ]
@@ -232,11 +304,7 @@ def test_replace_chunk_with_summary_inserts_summary_message():
         _msg("assistant", role="assistant", text="a"),
         _msg("user", role="user", user_id=1, text="tail"),
     ]
-    envelope = InlineSummaryEnvelope(
-        summary_id="sid",
-        added_at="2026-06-18T12:00:00+00:00",
-        text="summary text",
-    )
+    envelope = _summary_envelope(summary_id="sid", text="summary text")
     CompressionApplyCore.replace_chunk_with_summary(copy, 1, 3, envelope)
     assert copy.messages[1].kind == "summary"
     assert copy.messages[2].kind == "user"
@@ -245,15 +313,17 @@ def test_replace_chunk_with_summary_inserts_summary_message():
 
 def test_evict_summaries_fifo_pushes_outbox_and_audit():
     copy = Conversation(chat_id=1)
-    old = InlineSummaryEnvelope(
+    old = _summary_envelope(
         summary_id="old-id",
         added_at="2026-01-01T00:00:00+00:00",
         text="old summary",
+        skills=["web_search"],
+        topics=["weather"],
     )
     copy.messages = [
         _msg("prompt", text="p"),
         _msg("summary", text=old.to_message_text()),
-        _msg("summary", text=InlineSummaryEnvelope("new-id", "2026-06-18T12:00:00+00:00", "new").to_message_text()),
+        _msg("summary", text=_summary_envelope(summary_id="new-id", text="new").to_message_text()),
     ]
     entries, evicted = CompressionApplyCore.evict_summaries_fifo(
         copy, max_summary_count=1, snapshot_ts=100.0, summaries_added=1,
@@ -261,6 +331,9 @@ def test_evict_summaries_fifo_pushes_outbox_and_audit():
     assert len(entries) == 1
     assert entries[0].summary_id == "old-id"
     assert entries[0].document == "old summary"
+    assert entries[0].skills == ["web_search"]
+    assert entries[0].topics == ["weather"]
+    assert entries[0].compressed_at == 100.0
     assert evicted == [{"summary_id": "old-id", "added_at": "2026-01-01T00:00:00+00:00"}]
     assert sum(1 for message in copy.messages if message.kind == "summary") == 1
 
@@ -269,7 +342,7 @@ def test_evict_summaries_fifo_no_op_when_under_cap():
     copy = Conversation(chat_id=1)
     copy.messages = [
         _msg("prompt"),
-        _msg("summary", text=InlineSummaryEnvelope("s", "t", "x").to_message_text()),
+        _msg("summary", text=_summary_envelope().to_message_text()),
     ]
     entries, evicted = CompressionApplyCore.evict_summaries_fifo(
         copy, max_summary_count=2, snapshot_ts=1.0, summaries_added=1,
@@ -307,7 +380,7 @@ def test_refresh_removed_users_inserts_intro_when_tail_user_exists():
     copy = Conversation(chat_id=1, introduced_users={1})
     copy.messages = [
         _msg("prompt"),
-        _msg("summary", text=InlineSummaryEnvelope("s", "t", "body").to_message_text()),
+        _msg("summary", text=_summary_envelope().to_message_text()),
         _msg("user", role="user", user_id=1, text="after summary"),
     ]
     CompressionApplyCore.refresh_removed_users_on_copy(
@@ -325,7 +398,7 @@ def test_refresh_removed_users_discards_when_no_tail_user():
     copy = Conversation(chat_id=1, introduced_users={1})
     copy.messages = [
         _msg("prompt"),
-        _msg("summary", text=InlineSummaryEnvelope("s", "t", "body").to_message_text()),
+        _msg("summary", text=_summary_envelope().to_message_text()),
     ]
     CompressionApplyCore.refresh_removed_users_on_copy(
         copy,
@@ -340,7 +413,7 @@ def test_reconcile_arrivals_case_d_inserts_intro_for_removed_user():
     live = Conversation(chat_id=1, introduced_users=set())
     live.messages = [
         _msg("prompt"),
-        _msg("summary", text=InlineSummaryEnvelope("s", "t", "body").to_message_text()),
+        _msg("summary", text=_summary_envelope().to_message_text()),
         _msg("user", role="user", user_id=7, text="arrived during llm"),
     ]
     CompressionApplyCore.reconcile_arrivals_introductions(
@@ -556,7 +629,11 @@ async def test_max_summary_count_eviction_records_history_and_outbox():
     await storage.hset("chats", "42", json.dumps({"chat_type": "private", "history": []}))
     memory = MemoryProvider(storage_api=storage)
     conversation = build_compressible_conversation(chat_id=42, pair_count=6)
-    old = InlineSummaryEnvelope("old-summary", "2026-01-01T00:00:00+00:00", "old body")
+    old = _summary_envelope(
+        summary_id="old-summary",
+        added_at="2026-01-01T00:00:00+00:00",
+        text="old body",
+    )
     conversation.messages.insert(1, _msg("summary", text=old.to_message_text()))
     settings = ChatCompressionSettings.from_dict({
         **{

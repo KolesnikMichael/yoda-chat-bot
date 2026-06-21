@@ -180,11 +180,9 @@ def test_summary_outbox_entry_roundtrip():
     entry = SummaryOutboxEntry(
         summary_id="s1",
         document="summary text",
-        created_at=1718123456.789,
-        chunk_start_message_id=1,
-        chunk_end_message_id=5,
-        chunk_visible_count=4,
-        participants=[1, 2],
+        compressed_at=1718123456.789,
+        content_from_ts="2026-01-01T00:00:00+00:00",
+        content_to_ts="2026-01-02T00:00:00+00:00",
         skills=["web_search"],
         topics=["weather"],
         added_at="2026-06-12T00:00:00+00:00",
@@ -283,11 +281,9 @@ def test_conversations_to_stash_dict_v3_roundtrip():
     entry = SummaryOutboxEntry(
         summary_id="s1",
         document="doc",
-        created_at=1.0,
-        chunk_start_message_id=1,
-        chunk_end_message_id=2,
-        chunk_visible_count=2,
-        participants=[7],
+        compressed_at=1.0,
+        content_from_ts="2026-01-01T00:00:00+00:00",
+        content_to_ts="2026-01-02T00:00:00+00:00",
         skills=[],
         topics=[],
         added_at="2026-06-12T00:00:00+00:00",
@@ -1326,7 +1322,14 @@ async def test_commit_compression_grafts_arrivals_and_merges_counters():
     working = Conversation(chat_id=1, visible_messages=2, last_compressed_at=50.0)
     working.messages = [
         Message(role="system", kind="prompt", text="sys"),
-        Message(role="system", kind="summary", text='{"v":1,"summary_id":"s","added_at":"t","text":"sum"}'),
+        Message(
+            role="system",
+            kind="summary",
+            text=(
+                '{"v":1,"summary_id":"s","added_at":"t","content_from_ts":"2026-01-01T00:00:00+00:00",'
+                '"content_to_ts":"2026-01-02T00:00:00+00:00","skills":[],"topics":[],"text":"sum"}'
+            ),
+        ),
     ]
     working.introduced_users = {1}
     result = CompressionTransformResult(

@@ -22,4 +22,9 @@ class Message:
     user_id: int | None = None
 
     def to_llm_dict(self) -> dict:
+        if self.kind == "summary":
+            from .inline_summary_envelope import InlineSummaryEnvelope
+
+            content = InlineSummaryEnvelope.from_message_text(self.text).to_llm_content()
+            return {"role": self.role, "content": content}
         return {"role": self.role, "content": self.text}

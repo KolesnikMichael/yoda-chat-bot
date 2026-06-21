@@ -126,20 +126,7 @@ class CompressionApplyCore:
                 continue
 
             envelope = InlineSummaryEnvelope.from_message_text(message.text)
-            outbox_entries.append(
-                SummaryOutboxEntry(
-                    summary_id=envelope.summary_id,
-                    document=envelope.text,
-                    created_at=snapshot_ts,
-                    chunk_start_message_id=0,
-                    chunk_end_message_id=0,
-                    chunk_visible_count=0,
-                    participants=[],
-                    skills=[],
-                    topics=[],
-                    added_at=envelope.added_at,
-                )
-            )
+            outbox_entries.append(envelope.to_outbox_entry(snapshot_ts))
             evicted_audit.append({
                 "summary_id": envelope.summary_id,
                 "added_at": envelope.added_at,

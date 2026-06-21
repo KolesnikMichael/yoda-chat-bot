@@ -1106,25 +1106,37 @@ SQLite table plus its own HNSW index). Per-collection volume is small
 
 ### Record schema
 
-Each summary block produced by compression becomes one Chroma record:
+Each summary block evicted to the vector store becomes one Chroma record.
+Fields are copied from `InlineSummaryEnvelope` / `SummaryOutboxEntry` at
+compression insert (inline) and preserved on FIFO eviction into
+`pending_vectorization`.
 
 | field | type | source | role |
 |---|---|---|---|
 | `id` | str (sha256 hex) | `sha256(chat_id, snapshot_ts, chunk_start_message_id, chunk_end_message_id)` — see [Persistence flow](#persistence-flow) | primary key; deterministic so retries overwrite rather than duplicate |
-| `document` | str | summary text | embedded; returned on retrieval |
+| `document` | str | envelope `text` (narrative only) | embedded; returned on retrieval |
 | `embedding` | float[1536] | `EmbeddingProvider` | ANN search |
-| `metadata.created_at` | float | snapshot timestamp = post-apply `last_compressed_at` | recency filters, time decay |
-| `metadata.chunk_start_message_id` | int | first `message_id` in the compressed chunk | back-reference for debugging / future "expand" tools |
-| `metadata.chunk_end_message_id` | int | last `message_id` in the compressed chunk | same |
-| `metadata.chunk_visible_count` | int | mirrors the audit line in `Chat.history` | analytics |
-| `metadata.participants` | str | comma-separated `user_id`s of `user`-kind authors in the chunk | filter for "what did Alice say about X" |
-| `metadata.skills` | str | comma-separated names of skills invoked in the chunk | retrieval of past runs of the same skill |
-| `metadata.topics` | str | comma-separated topic tags from the summarizer | semantic prefilter before ANN |
+| `metadata.compressed_at` | float | snapshot timestamp of the eviction run (or apply run that evicted) | when the block left inline; optional recency on archive time |
+| `metadata.content_from_ts` | str | first visible message timestamp in the compressed chunk (ISO-8601) | **content-range filter** — "summaries covering conversation in period X" |
+| `metadata.content_to_ts` | str | last visible message timestamp in the compressed chunk (ISO-8601) | same |
+| `metadata.skills` | str | comma-separated skill names parsed from `task_result` in the chunk | filter for past runs of the same skill |
+| `metadata.topics` | str | comma-separated topic tags from the summarizer | optional soft prefilter / agent hint (LLM variability — do not rely on as sole retrieval gate) |
 
 Lists are flattened to comma-separated strings because Chroma metadata
 does not natively support arrays; filtering uses substring/`$contains`
 predicates. This is a documented Chroma limitation, not a workaround
 for buggy code.
+
+**Not stored in Chroma metadata:** `chunk_start_message_id`,
+`chunk_end_message_id`, `chunk_visible_count`, `participants` — removed
+from the record schema (no expand tools; participant name filters conflict
+with user isolation — see [[ADR-001-users-isolation]]).
+
+**Inline LLM presentation:** everyday chat does not expose raw envelope
+JSON. `Message.to_llm_dict()` for `kind="summary"` formats a fixed header
+line from `content_from_ts` / `content_to_ts`, then the narrative, e.g.
+`[Summary · 2026-01-10 — 2026-01-20]`, always emitted (even if dates
+also appear in prose).
 
 ### Summarizer envelope
 
@@ -1321,9 +1333,9 @@ mechanism:
 - Implementation: `EmbeddingProvider.embed(query)` →
   `VectorProvider.search(chat_id, query_embedding, k, where=optional_filters)`
   → top-K summaries returned to the agent as a system message.
-- Available filters on the agent side: `participants`, `skills`,
-  `topics`, `created_at` range. The agent decides which to use based
-  on the user's prompt.
+- Available filters on the agent side: `skills`, `topics`,
+  `content_from_ts` / `content_to_ts` range, `compressed_at` range. The
+  agent decides which to use based on the user's prompt.
 
 Yoda herself does not invoke recall on every turn; her chat replies
 are formed from the inline tail and inline summaries only. Recall

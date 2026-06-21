@@ -84,11 +84,11 @@ flowchart TD
 **Choice:** B — `MemoryProvider._compression_locks: dict[int, asyncio.Lock]` (lazy per `chat_id`); `async with conversation_lock(chat_id)` context manager; `take_compression_snapshot` and `commit_compression` acquire it internally. Ingest mutations (`append_conversation_line`, new `append_message`) acquire the same lock before mutating `messages` or trigger bookkeeping fields.
 **FR:** FR-1, FR-2, FR-12
 
-### Decision 3: Inline summary `Message.text` as versioned JSON envelope
+### Decision 3: Inline summary `Message.text` as JSON envelope + LLM presentation header
 
-**Context:** [[requirements\|FR-7]]–[[requirements\|FR-8]] need `summary_id`, narrative text, and `added_at` for eviction outbox entries and stash v3 round-trip; `Message` has no extra metadata fields.
-**Options:** (A) Plain text only, derive ids from position; (B) JSON envelope in `text`; (C) new `Message` fields / stash v4.
-**Choice:** B — `InlineSummaryEnvelope` (`v`, `summary_id`, `added_at`, `text`) serialised to `Message.text`; `CompressionApplyCore.build_summary_message` / `parse_summary_message`. `role="system"`, `kind="summary"`. New summaries set `added_at` to `snapshot_ts` as ISO-8601 UTC.
+**Context:** [[requirements\|FR-7]]–[[requirements\|FR-8]] need durable metadata for eviction outbox and Chroma; `Message` has no extra metadata fields.
+**Options:** (A) Plain text only; (B) JSON envelope in `text` + format header at LLM read time; (C) new `Message` fields / stash v4.
+**Choice:** B — `InlineSummaryEnvelope` serialised to `Message.text` with `v`, `summary_id`, `added_at`, `content_from_ts`, `content_to_ts`, `skills`, `topics`, `text` (narrative). `Message.to_llm_dict()` for `kind="summary"` emits `[Summary · {from_date} — {to_date}]` then narrative — not raw JSON. `role="system"`, `kind="summary"`. `added_at` = compression insert time (ISO-8601 UTC); content range from first/last visible chunk timestamps.
 **FR:** FR-7, FR-8, FR-11
 
 ### Decision 4: Deterministic `summary_id` and `message_id` fallback
@@ -141,13 +141,21 @@ flowchart TD
 @dataclass
 class InlineSummaryEnvelope:
     summary_id: str
-    added_at: str   # ISO-8601 UTC
-    text: str       # SummarizerResult.summary narrative
+    added_at: str              # ISO-8601 UTC — when inserted inline
+    text: str                  # SummarizerResult.summary narrative only
+    content_from_ts: str       # ISO-8601 — first visible message in chunk
+    content_to_ts: str         # ISO-8601 — last visible message in chunk
+    skills: list[str]          # mechanical from chunk
+    topics: list[str]          # from SummarizerResult
 
-    def to_message_text(self) -> str: ...   # JSON {"v": 1, ...}
+    def to_message_text(self) -> str: ...
+    def to_llm_content(self) -> str: ...   # presentation header + narrative
+    def to_outbox_entry(self, compressed_at: float) -> SummaryOutboxEntry: ...
     @classmethod
     def from_message_text(cls, raw: str) -> InlineSummaryEnvelope: ...
 ```
+
+`Message.to_llm_dict()` for `kind="summary"` calls `InlineSummaryEnvelope.from_message_text(...).to_llm_content()`.
 
 ### `CompressionSnapshot` / `CompressionTransformResult` (Data)
 
@@ -207,6 +215,7 @@ class CompressionApplyCore:
         snapshot_ts: float,
         summaries_added: int,
     ) -> tuple[list[SummaryOutboxEntry], list[dict[str, str]]]: ...
+    # eviction: InlineSummaryEnvelope.from_message_text → to_outbox_entry(compressed_at)
 
     @staticmethod
     def build_compression_audit_entry(
@@ -312,8 +321,8 @@ class Maintenance:
 4. `stripped_chunk, removed_users = strip_user_introductions(chunk)`; `assert_removed_users_invariant`.
 5. Load `participant_profiles`; `result = await summarizer_provider.summarise(stripped_chunk, profiles)` — abort on failure.
 6. Apply `profile_updates` via `update_user_profile`.
-7. Build `InlineSummaryEnvelope`; `replace_chunk_with_summary`; `evict_summaries_fifo` → extend `working_copy.pending_vectorization` with returned outbox entries; pass returned audit list to `build_compression_audit_entry`.
-8. Prefetch post-delta profiles for `removed_users`; `refresh_removed_users_on_copy` (summary at `chunk_start`); `apply_derived_fields`; `build_compression_audit_entry`.
+7. Build `InlineSummaryEnvelope` (content range, skills, topics, narrative); `replace_chunk_with_summary`; `evict_summaries_fifo` → extend `working_copy.pending_vectorization` with `envelope.to_outbox_entry` per evicted block; pass returned audit list to `build_compression_audit_entry`.
+8. Prefetch post-delta profiles for `removed_users`; `refresh_removed_users_on_copy`; `apply_derived_fields`; `build_compression_audit_entry`.
 9. `await commit_compression(...)` + `append_chat_history_event` (history write may be inside `commit_compression`).
 10. `logger.debug("compression applied: chat_id=%s trigger=size", chat_id)`.
 
@@ -352,7 +361,9 @@ Matches [[chat_context_management#Chathistory schema]]:
 | Path / class | IODA | Change | FR |
 |--------------|------|--------|-----|
 | `yoda/mind/memory/compression_apply_core.py` — `CompressionApplyCore` | Core | **Create** sync transformation helpers (chunk slice, strip, summary insert, eviction, audit builder, step 8/12 reconciliation) | FR-3, FR-4, FR-7–FR-10, FR-12 |
-| `yoda/mind/memory/data/inline_summary_envelope.py` — `InlineSummaryEnvelope` | Data | **Create** summary `Message.text` JSON envelope | FR-7, FR-8 |
+| `yoda/mind/memory/data/inline_summary_envelope.py` — `InlineSummaryEnvelope` | Data | **Create** envelope + `to_outbox_entry` + `to_llm_content` | FR-7, FR-8 |
+| `yoda/mind/memory/data/summary_outbox_entry.py` — `SummaryOutboxEntry` | Data | **Edit** metadata fields (`compressed_at`, content range, skills, topics) | FR-8 |
+| `yoda/mind/memory/data/message.py` — `Message.to_llm_dict` | Data | **Edit** summary presentation header for LLM | FR-7 |
 | `yoda/mind/memory/data/compression_snapshot.py` — `CompressionSnapshot`, `CompressionTransformResult` | Data | **Create** snapshot/commit DTOs | FR-2, FR-12 |
 | `yoda/mind/memory/memory.py` — `MemoryProvider` | Provider | **Edit** per-chat lock, `take_compression_snapshot`, `commit_compression`, `append_chat_history_event`, `append_message`; lock in `append_conversation_line` | FR-1, FR-2, FR-11, FR-12 |
 | `yoda/mind/maintenance.py` — `Maintenance` | Integration | **Edit** inject `SummarizerProvider`; `_run_size_trigger_compression`; live size-trigger apply in `compress_conversations` | FR-5, FR-6, FR-14 |
@@ -371,7 +382,7 @@ No changes to `CompressionCore` window algorithms, `SummarizerProvider` internal
 | Apply orchestration owner | `Maintenance._run_size_trigger_compression` (Integration); sync helpers in `CompressionApplyCore` (Decision 1) |
 | Lock ownership | `MemoryProvider` per-`chat_id` `asyncio.Lock` (Decision 2) |
 | `Chat.history` not on `Conversation` | Audit entry built during transform; persisted via `append_chat_history_event` at commit (FR-11) |
-| Inline summary metadata | JSON envelope in `Message.text` (Decision 3) |
+| Inline summary metadata | JSON envelope + LLM presentation header (Decision 3) |
 | Missing `message_id` in chunk | Synthetic id `-index` (Decision 4) |
 | Mind direct `MemoryCore` appends | Refactor to `MemoryProvider.append_message` under same lock (Decision 8) |
 | `internal_compat: none` | No defensive machinery for partial deploy between epic tasks |
@@ -383,10 +394,10 @@ Execution matched the planned architecture with these refinements:
 
 | Area | Planned | As-built |
 |------|---------|----------|
-| `evict_summaries_fifo` | Mutates `copy.pending_vectorization` in-place | Returns `(outbox_entries, evicted_audit)`; `Maintenance` calls `working_copy.pending_vectorization.extend(outbox_entries)` |
+| `evict_summaries_fifo` | Mutates `copy.pending_vectorization` in-place | Returns `(outbox_entries, evicted_audit)`; eviction uses `envelope.to_outbox_entry(compressed_at)` |
 | Eviction cap per run | Implicit (one new summary) | `summaries_added=1` limits evictions to at most one per run even when excess > 1 |
 | Empty compressible chunk | Not explicit | Abort no-op when `chunk_start >= chunk_end` or `stripped_chunk` is empty |
-| Evicted `SummaryOutboxEntry` metadata | Full chunk fields from original compression | Placeholder zeros/empty lists for `chunk_*`, `participants`, `skills`, `topics` — only `summary_id`, `document`, `created_at`, `added_at` populated from the inline envelope (TASK-008 may enrich on flush) |
+| `SummaryOutboxEntry` / envelope | Full metadata at insert | Envelope carries content range, skills, topics; outbox populated from envelope on eviction |
 | `commit_compression` | Graft + history persist | Also calls `save_conversation(live)` for in-memory dict consistency; still no `save_conversation_stash` |
 
 ## Open questions
