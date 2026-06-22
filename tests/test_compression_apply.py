@@ -1,4 +1,5 @@
 import asyncio
+import datetime as dtm
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -23,6 +24,17 @@ from tests.test_memory_operation import FakeStorageApi
 def low_compression_settings() -> ChatCompressionSettings:
     return ChatCompressionSettings.from_dict({
         "size_trigger_threshold": 4,
+        "min_chunk_length": 2,
+        "max_summary_count": 2,
+        "gap_to_trigger_ratio": 0.5,
+        "quiet_runs_before_compression": {"private": 8, "group": 8},
+        "outbox_health_threshold": 10,
+    })
+
+
+def timeout_only_compression_settings() -> ChatCompressionSettings:
+    return ChatCompressionSettings.from_dict({
+        "size_trigger_threshold": 300,
         "min_chunk_length": 2,
         "max_summary_count": 2,
         "gap_to_trigger_ratio": 0.5,
@@ -134,6 +146,154 @@ def build_compressible_conversation(
                 timestamp=f"2026-01-{index + 1:02d}T10:00:01+00:00",
             )
         )
+    return conversation
+
+
+def _ts(hours: float) -> str:
+    base = dtm.datetime(2026, 3, 9, 12, 0, 0, tzinfo=dtm.UTC)
+    return (base + dtm.timedelta(hours=hours)).isoformat()
+
+
+def build_timeout_compressible_conversation(
+    *,
+    chat_id: int = 7,
+    user_id: int = 1,
+    pairs_before_gap: int = 2,
+    pairs_after_gap: int = 3,
+    gap_tail_start_hour: float = 8.0,
+    with_intro: bool = True,
+) -> Conversation:
+    conversation = Conversation(chat_id=chat_id)
+    conversation.messages.append(_msg("prompt", text="system prompt"))
+    if with_intro:
+        conversation.messages.append(
+            _msg("user_introduction", text="intro snapshot", user_id=user_id)
+        )
+        conversation.introduced_users.add(user_id)
+    hour = 0.0
+    visible = 0
+    for index in range(pairs_before_gap):
+        conversation.messages.append(
+            _msg(
+                "user",
+                role="user",
+                text=f"before-user-{index}",
+                user_id=user_id,
+                message_id=100 + index,
+                timestamp=_ts(hour),
+            )
+        )
+        hour += 1.0
+        conversation.messages.append(
+            _msg(
+                "assistant",
+                role="assistant",
+                text=f"before-assistant-{index}",
+                message_id=200 + index,
+                timestamp=_ts(hour),
+            )
+        )
+        hour += 1.0
+        visible += 2
+    for index in range(pairs_after_gap):
+        pair_index = pairs_before_gap + index
+        tail_hour = gap_tail_start_hour + index * 2.0
+        conversation.messages.append(
+            _msg(
+                "user",
+                role="user",
+                text=f"after-user-{pair_index}",
+                user_id=user_id,
+                message_id=100 + pair_index,
+                timestamp=_ts(tail_hour),
+            )
+        )
+        conversation.messages.append(
+            _msg(
+                "assistant",
+                role="assistant",
+                text=f"after-assistant-{pair_index}",
+                message_id=200 + pair_index,
+                timestamp=_ts(tail_hour + 1.0),
+            )
+        )
+        visible += 2
+    conversation.visible_messages = visible
+    last_visible = next(
+        message
+        for message in reversed(conversation.messages)
+        if message.kind in ("user", "assistant")
+    )
+    conversation.last_visible_at = CompressionCore.parse_message_timestamp(
+        last_visible.timestamp,
+    )
+    conversation.last_compressed_at = 0.0
+    return conversation
+
+
+def _ts_seconds(offset_seconds: float) -> str:
+    base = dtm.datetime(2026, 3, 9, 12, 0, 0, tzinfo=dtm.UTC)
+    return (base + dtm.timedelta(seconds=offset_seconds)).isoformat()
+
+
+def build_continuous_burst_conversation(
+    *,
+    chat_id: int = 7,
+    user_id: int = 1,
+    pair_count: int = 5,
+    with_intro: bool = True,
+) -> Conversation:
+    conversation = Conversation(chat_id=chat_id)
+    conversation.messages.append(_msg("prompt", text="system prompt"))
+    if with_intro:
+        conversation.messages.append(
+            _msg("user_introduction", text="intro snapshot", user_id=user_id)
+        )
+        conversation.introduced_users.add(user_id)
+    visible = 0
+    for index in range(pair_count):
+        base_seconds = float(index * 30)
+        conversation.messages.append(
+            _msg(
+                "user",
+                role="user",
+                text=f"burst-user-{index}",
+                user_id=user_id,
+                message_id=100 + index,
+                timestamp=_ts_seconds(base_seconds),
+            )
+        )
+        conversation.messages.append(
+            _msg(
+                "assistant",
+                role="assistant",
+                text=f"burst-assistant-{index}",
+                message_id=200 + index,
+                timestamp=_ts_seconds(base_seconds + 10.0),
+            )
+        )
+        visible += 2
+    conversation.visible_messages = visible
+    last_visible = conversation.messages[-1]
+    conversation.last_visible_at = CompressionCore.parse_message_timestamp(
+        last_visible.timestamp,
+    )
+    conversation.last_compressed_at = 0.0
+    return conversation
+
+
+def build_quiet_but_internal_gap_conversation(
+    *,
+    chat_id: int = 7,
+    user_id: int = 1,
+) -> Conversation:
+    conversation = build_timeout_compressible_conversation(
+        chat_id=chat_id,
+        user_id=user_id,
+    )
+    conversation.last_visible_at = CompressionCore.parse_message_timestamp(
+        _ts(10.0),
+    )
     return conversation
 
 
@@ -448,6 +608,34 @@ def test_reconcile_arrivals_case_b_does_not_duplicate_intro():
 
 
 @pytest.mark.asyncio
+async def test_run_compression_apply_size_happy_path():
+    storage = FakeStorageApi()
+    await storage.hset("chats", "42", json.dumps({"chat_type": "private"}))
+    memory = MemoryProvider(storage_api=storage)
+    conversation = build_compressible_conversation(chat_id=42, pair_count=6)
+    before_visible = conversation.visible_messages
+    memory.save_conversation(conversation)
+    summarizer = FakeSummarizerProvider()
+    maintenance = Maintenance(
+        storage_api=storage,
+        scheduler_api=AsyncMock(),
+        memory_provider=memory,
+        compression_settings=low_compression_settings(),
+        maintenance_settings=MaintenanceSettings(tick_minutes=1),
+        summarizer_provider=summarizer,
+    )
+
+    await maintenance._run_compression_apply(conversation, "size", "private")
+
+    live = memory.get_conversation(42)
+    assert live is not None
+    assert any(message.kind == "summary" for message in live.messages)
+    assert live.last_compressed_at > 0
+    assert live.visible_messages < before_visible
+    assert summarizer.calls
+
+
+@pytest.mark.asyncio
 async def test_run_size_trigger_compression_happy_path():
     storage = FakeStorageApi()
     await storage.hset("chats", "42", json.dumps({"chat_type": "private"}))
@@ -465,7 +653,7 @@ async def test_run_size_trigger_compression_happy_path():
         summarizer_provider=summarizer,
     )
 
-    await maintenance._run_size_trigger_compression(conversation)
+    await maintenance._run_compression_apply(conversation, "size", "private")
 
     live = memory.get_conversation(42)
     assert live is not None
@@ -492,7 +680,7 @@ async def test_summariser_failure_noop_leaves_state_unchanged():
         summarizer_provider=FakeSummarizerProvider(fail=True),
     )
 
-    await maintenance._run_size_trigger_compression(conversation)
+    await maintenance._run_compression_apply(conversation, "size", "private")
 
     live = memory.get_conversation(42)
     assert live is not None
@@ -517,7 +705,7 @@ async def test_window_abort_when_no_split():
         summarizer_provider=summarizer,
     )
 
-    await maintenance._run_size_trigger_compression(conversation)
+    await maintenance._run_compression_apply(conversation, "size", "private")
 
     assert summarizer.calls == []
 
@@ -552,7 +740,7 @@ async def test_profile_delta_reflected_in_refreshed_introduction():
         summarizer_provider=summarizer,
     )
 
-    await maintenance._run_size_trigger_compression(conversation)
+    await maintenance._run_compression_apply(conversation, "size", "private")
 
     live = memory.get_conversation(42)
     assert live is not None
@@ -580,7 +768,7 @@ async def test_concurrent_ingest_during_blocked_summariser():
     )
 
     compress_task = asyncio.create_task(
-        maintenance._run_size_trigger_compression(conversation)
+        maintenance._run_compression_apply(conversation, "size", "private")
     )
     await entered.wait()
     assert await memory.take_compression_snapshot(42) is not None
@@ -655,7 +843,7 @@ async def test_max_summary_count_eviction_records_history_and_outbox():
         summarizer_provider=FakeSummarizerProvider(),
     )
 
-    await maintenance._run_size_trigger_compression(conversation)
+    await maintenance._run_compression_apply(conversation, "size", "private")
 
     live = memory.get_conversation(42)
     assert live is not None

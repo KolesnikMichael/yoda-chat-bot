@@ -2,11 +2,11 @@
 id: TASK-007
 epic: EPIC-001
 title: "timeout trigger wiring"
-status: todo
+status: done
 priority: medium
 size: S
 created: 2026-06-09
-updated: 2026-06-17
+updated: 2026-06-22
 tags:
   - chat-context
 ---

@@ -3,6 +3,7 @@ import datetime as dtm
 import logging
 import time
 from collections.abc import Awaitable, Coroutine
+from typing import Literal
 
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.storage_api import StorageApi
@@ -121,15 +122,30 @@ class Maintenance:
                     triggers,
                 )
             if "size" in triggers:
-                await self._run_size_trigger_compression(conversation)
+                await self._run_compression_apply(conversation, "size", chat_type)
+            elif "timeout" in triggers:
+                await self._run_compression_apply(conversation, "timeout", chat_type)
 
-    async def _run_size_trigger_compression(self, conversation: Conversation) -> None:
+    async def _run_compression_apply(
+        self,
+        conversation: Conversation,
+        trigger: Literal["size", "timeout"],
+        chat_type: str,
+    ) -> None:
         chat_id = conversation.chat_id
         snapshot = await self._memory_provider.take_compression_snapshot(chat_id)
         if snapshot is None:
             return
 
-        split = CompressionCore.select_size_trigger_window(snapshot.copy.messages)
+        if trigger == "size":
+            split = CompressionCore.select_size_trigger_window(snapshot.copy.messages)
+        else:
+            split = CompressionCore.select_timeout_trigger_window(
+                snapshot.copy.messages,
+                self._compression_settings,
+                chat_type,
+                self._tick_seconds,
+            )
         if split is None:
             return
 
@@ -255,7 +271,7 @@ class Maintenance:
             removed_users,
             intro_text_for_user_id,
         )
-        logger.debug("compression applied: chat_id=%s trigger=size", chat_id)
+        logger.debug("compression applied: chat_id=%s trigger=%s", chat_id, trigger)
 
     async def flush_summary_outbox(self) -> None:
         return None
