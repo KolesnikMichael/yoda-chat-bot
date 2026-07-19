@@ -6,7 +6,7 @@ status: in-progress
 priority: high
 branch: feat/EPIC-001-chat-context-management
 created: 2026-06-09
-updated: 2026-06-18
+updated: 2026-07-19
 tags:
   - chat-context
 ---
@@ -66,6 +66,7 @@ schema → ingest behaviour → pure Core algorithms → Maintenance shell → s
 | [[TASK-008-summary-store-and-outbox-flush/task\|TASK-008]] | summary store and outbox flush | M | Chroma, embeddings, `flush_summary_outbox` |
 | [[TASK-009-recall-conversation-skill/task\|TASK-009]] | recall conversation skill | S | agent skill `recall_conversation` |
 | [[TASK-011-inline-summary-excess-rebalance/task\|TASK-011]] | inline summary excess rebalance | S | excess → `max` when inline summary count exceeds cap (follow-up from TASK-006) |
+| [[TASK-013-chroma-drop-on-delete-user-data/task\|TASK-013]] | chroma drop on delete user data | S | drop `chat_{user_id}` Chroma collection from `delete_user_data` (follow-up from TASK-008) |
 
 **Dependency graph:**
 
@@ -88,6 +89,7 @@ graph TD
     T6 --> T8[TASK-008]
     T6 --> T11[TASK-011]
     T8 --> T9[TASK-009]
+    T8 --> T13[TASK-013]
 ```
 
 **Milestone:** after TASK-006 long chats are compressed inline (without Chroma) — user value without cold-path recall.
