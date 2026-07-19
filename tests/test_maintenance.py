@@ -12,8 +12,10 @@ from yoda.mind.memory.data.chat_compression_settings import ChatCompressionSetti
 from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.memory.data.message import Message
 from yoda.mind.memory.data.summarizer_result import SummarizerResult
+from yoda.mind.memory.data.summary_outbox_entry import SummaryOutboxEntry
 from yoda.mind.memory.memory import MemoryProvider
 from yoda.mind.memory.summarizer import SummarizerProvider
+from tests.fakes import StubEmbeddingProvider, StubVectorProvider
 
 
 class FakeStorageApi:
@@ -60,6 +62,8 @@ def make_maintenance(
     memory_provider: MemoryProvider | None = None,
     tick_minutes: int = 1,
     summarizer_provider: SummarizerProvider | None = None,
+    embedding_provider: StubEmbeddingProvider | None = None,
+    vector_provider: StubVectorProvider | None = None,
 ) -> Maintenance:
     storage = storage_api or FakeStorageApi()
     scheduler = scheduler_api or FakeSchedulerApi()
@@ -72,6 +76,8 @@ def make_maintenance(
         compression_settings=default_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=tick_minutes),
         summarizer_provider=summarizer,
+        embedding_provider=embedding_provider or StubEmbeddingProvider(),
+        vector_provider=vector_provider or StubVectorProvider(),
     )
 
 
@@ -168,9 +174,16 @@ async def test_run_initial_pass_calls_reconcile():
         new_callable=AsyncMock,
         return_value=0,
     ) as reconcile_mock:
-        await maintenance.run_initial_pass()
+        with patch.object(
+            maintenance,
+            "reconcile_chroma_incomplete_records",
+            new_callable=AsyncMock,
+            return_value=0,
+        ) as chroma_mock:
+            await maintenance.run_initial_pass()
 
     reconcile_mock.assert_awaited_once_with(storage, scheduler)
+    chroma_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -255,9 +268,263 @@ async def test_compress_conversations_no_log_when_no_triggers(caplog):
 
 
 @pytest.mark.asyncio
-async def test_flush_summary_outbox_is_noop():
-    maintenance = make_maintenance()
+async def test_flush_summary_outbox_happy_path_clears_outbox():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    memory.save_conversation_stash = AsyncMock()  # type: ignore[method-assign]
+    entry = SummaryOutboxEntry(
+        summary_id="sum-1",
+        document="summary text",
+        compressed_at=1.0,
+        content_from_ts="from",
+        content_to_ts="to",
+        skills=[],
+        topics=[],
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    conversation = Conversation(chat_id=42, pending_vectorization=[entry])
+    memory.save_conversation(conversation)
+    vector = StubVectorProvider()
+    maintenance = make_maintenance(
+        storage_api=storage,
+        memory_provider=memory,
+        vector_provider=vector,
+    )
+
     await maintenance.flush_summary_outbox()
+
+    live = memory.get_conversation(42)
+    assert live is not None
+    assert live.pending_vectorization == []
+    stored = await vector.list_stored_records(42)
+    assert len(stored) == 1
+    assert stored[0].summary_id == "sum-1"
+    memory.save_conversation_stash.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_flush_summary_outbox_embed_failure_retains_outbox():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    entry = SummaryOutboxEntry(
+        summary_id="sum-1",
+        document="summary text",
+        compressed_at=1.0,
+        content_from_ts="from",
+        content_to_ts="to",
+        skills=[],
+        topics=[],
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    conversation = Conversation(chat_id=42, pending_vectorization=[entry])
+    memory.save_conversation(conversation)
+    maintenance = make_maintenance(
+        storage_api=storage,
+        memory_provider=memory,
+        embedding_provider=StubEmbeddingProvider(fail=True),
+    )
+
+    await maintenance.flush_summary_outbox()
+
+    live = memory.get_conversation(42)
+    assert live is not None
+    assert len(live.pending_vectorization) == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_summary_outbox_persist_failure_retains_outbox():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    entry = SummaryOutboxEntry(
+        summary_id="sum-1",
+        document="summary text",
+        compressed_at=1.0,
+        content_from_ts="from",
+        content_to_ts="to",
+        skills=[],
+        topics=[],
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    conversation = Conversation(chat_id=42, pending_vectorization=[entry])
+    memory.save_conversation(conversation)
+
+    class FailingVectorProvider(StubVectorProvider):
+        async def persist_summaries(self, chat_id: int, records: list) -> None:
+            raise RuntimeError("persist failed")
+
+    maintenance = make_maintenance(
+        storage_api=storage,
+        memory_provider=memory,
+        vector_provider=FailingVectorProvider(),
+    )
+
+    await maintenance.flush_summary_outbox()
+
+    live = memory.get_conversation(42)
+    assert live is not None
+    assert len(live.pending_vectorization) == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_idempotent_retry():
+    """Persist succeeds, then failure before outbox clear; retry upserts same id once."""
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    entry = SummaryOutboxEntry(
+        summary_id="sum-1",
+        document="summary text",
+        compressed_at=1.0,
+        content_from_ts="from",
+        content_to_ts="to",
+        skills=[],
+        topics=[],
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    conversation = Conversation(chat_id=42, pending_vectorization=[entry])
+    memory.save_conversation(conversation)
+
+    class PersistThenFailBeforeClear(StubVectorProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self._fail_after_persist = True
+
+        async def persist_summaries(self, chat_id: int, records: list) -> None:
+            await super().persist_summaries(chat_id, records)
+            if self._fail_after_persist:
+                self._fail_after_persist = False
+                raise RuntimeError("simulated crash after persist, before outbox clear")
+
+    vector = PersistThenFailBeforeClear()
+    maintenance = make_maintenance(
+        storage_api=storage,
+        memory_provider=memory,
+        vector_provider=vector,
+    )
+
+    await maintenance.flush_summary_outbox()
+    live = memory.get_conversation(42)
+    assert live is not None
+    assert len(live.pending_vectorization) == 1
+    assert len(await vector.list_stored_records(42)) == 1
+
+    await maintenance.flush_summary_outbox()
+
+    stored = await vector.list_stored_records(42)
+    assert len(stored) == 1
+    assert stored[0].summary_id == "sum-1"
+    assert live.pending_vectorization == []
+    assert len(vector.persist_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_reconcile_chroma_deletes_incomplete_without_outbox():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    vector = StubVectorProvider()
+    from yoda.mind.memory.vector import StoredSummaryRecord
+
+    vector.records[42] = {
+        "orphan": StoredSummaryRecord(summary_id="orphan", document="", embedding=[]),
+    }
+    maintenance = make_maintenance(
+        storage_api=storage,
+        memory_provider=memory,
+        vector_provider=vector,
+    )
+
+    deleted = await maintenance.reconcile_chroma_incomplete_records()
+
+    assert deleted == 1
+    assert await vector.list_stored_records(42) == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_chroma_keeps_complete_without_outbox():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    vector = StubVectorProvider()
+    from yoda.mind.memory.vector import StoredSummaryRecord
+
+    vector.records[42] = {
+        "complete": StoredSummaryRecord(
+            summary_id="complete",
+            document="text",
+            embedding=[0.0] * 1536,
+        ),
+    }
+    maintenance = make_maintenance(
+        storage_api=storage,
+        memory_provider=memory,
+        vector_provider=vector,
+    )
+
+    deleted = await maintenance.reconcile_chroma_incomplete_records()
+
+    assert deleted == 0
+    assert len(await vector.list_stored_records(42)) == 1
+
+
+@pytest.mark.asyncio
+async def test_reconcile_chroma_keeps_incomplete_with_matching_outbox():
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    entry = SummaryOutboxEntry(
+        summary_id="retry",
+        document="doc",
+        compressed_at=1.0,
+        content_from_ts="from",
+        content_to_ts="to",
+        skills=[],
+        topics=[],
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    memory.save_conversation(Conversation(chat_id=42, pending_vectorization=[entry]))
+    vector = StubVectorProvider()
+    from yoda.mind.memory.vector import StoredSummaryRecord
+
+    vector.records[42] = {
+        "retry": StoredSummaryRecord(summary_id="retry", document="", embedding=[]),
+    }
+    maintenance = make_maintenance(
+        storage_api=storage,
+        memory_provider=memory,
+        vector_provider=vector,
+    )
+
+    deleted = await maintenance.reconcile_chroma_incomplete_records()
+
+    assert deleted == 0
+    assert len(await vector.list_stored_records(42)) == 1
+
+
+@pytest.mark.asyncio
+async def test_outbox_health_warning(caplog):
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    threshold = default_compression_settings().outbox_health_threshold
+    entries = [
+        SummaryOutboxEntry(
+            summary_id=f"sum-{index}",
+            document=f"doc-{index}",
+            compressed_at=float(index),
+            content_from_ts="from",
+            content_to_ts="to",
+            skills=[],
+            topics=[],
+            added_at="2026-01-01T00:00:00+00:00",
+        )
+        for index in range(threshold + 1)
+    ]
+    memory.save_conversation(Conversation(chat_id=42, pending_vectorization=entries))
+    maintenance = make_maintenance(storage_api=storage, memory_provider=memory)
+
+    with caplog.at_level(logging.WARNING, logger="yoda.mind.maintenance"):
+        await maintenance.flush_summary_outbox()
+
+    assert "summary outbox depth exceeded: chat_id=42" in caplog.text
+    assert f"depth={threshold + 1}" in caplog.text
+    assert "doc-0" not in caplog.text
+
 
 
 @pytest.mark.asyncio
@@ -379,7 +646,7 @@ def test_maintenance_does_not_import_llm_or_embedding_apis():
             imported.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.append(node.module)
-    forbidden = ("yoda.api.llm_api", "embedding", "chroma", "vector")
+    forbidden = ("yoda.api.llm_api", "yoda.api.embeddings_api", "chromadb")
     for module in imported:
         for token in forbidden:
             assert token not in module.lower()
@@ -422,6 +689,8 @@ async def test_size_trigger_apply_invokes_compression(caplog):
         compression_settings=low_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     with caplog.at_level(logging.DEBUG, logger="yoda.mind.maintenance"):
@@ -456,6 +725,8 @@ async def test_timeout_apply_on_predicate(caplog):
         compression_settings=timeout_only_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
     quiet_seconds = 8 * 60.0
     now = conversation.last_visible_at + quiet_seconds
@@ -507,6 +778,8 @@ async def test_both_triggers_same_tick_size_only(caplog):
         compression_settings=low_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     with patch("yoda.mind.maintenance.time.time", return_value=100.0 + quiet_seconds):
@@ -541,6 +814,8 @@ async def test_timeout_continuous_burst_no_op():
         compression_settings=timeout_only_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
     quiet_seconds = 8 * 60.0
     now = conversation.last_visible_at + quiet_seconds
@@ -577,6 +852,8 @@ async def test_timeout_quiet_gate_blocks_apply(caplog):
         compression_settings=timeout_only_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
     quiet_seconds = 8 * 60.0
     now = conversation.last_visible_at + quiet_seconds - 1.0
@@ -615,6 +892,8 @@ async def test_cross_trigger_size_then_timeout_variant_c():
         compression_settings=settings,
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     tick_base = CompressionCore.parse_message_timestamp(_ts(0.0))
@@ -713,6 +992,8 @@ async def test_cross_trigger_timeout_then_timeout_variant_c():
         compression_settings=settings,
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     conversation = build_timeout_compressible_conversation(chat_id=7)

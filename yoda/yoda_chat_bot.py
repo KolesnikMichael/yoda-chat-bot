@@ -52,7 +52,11 @@ from yoda.mind.agent.skills.catalog import SkillCatalog
 from yoda.mind.data.maintenance_settings import MaintenanceSettings
 from yoda.mind.maintenance import Maintenance
 from yoda.mind.memory.data.summarizer_settings import SummarizerSettings
+from yoda.mind.memory.data.summary_store_settings import SummaryStoreSettings
 from yoda.mind.memory.summarizer import SummarizerProvider
+from yoda.api.embeddings_api import EmbeddingsApi
+from yoda.mind.memory.embedding import EmbeddingProvider
+from yoda.mind.memory.vector import VectorProvider
 
 
 logger = logging.getLogger(__name__)
@@ -107,6 +111,9 @@ def main() -> None:
         chat_compression_settings = ChatCompressionSettings.from_dict(
             memory_settings["chat_compression"]
         )
+        summary_store_settings = SummaryStoreSettings.from_dict(
+            memory_settings["summary_store"]
+        )
     except KeyError as e:
         missing_key = e.args[0]
         raise ValueError(
@@ -160,6 +167,13 @@ def main() -> None:
     summarizer_settings = SummarizerSettings.from_settings(settings_json)
     summarizer_provider = SummarizerProvider(llm_api=llm_api, settings=summarizer_settings)
 
+    embeddings_api = EmbeddingsApi(api_key=summary_store_settings.embeddings.openrouter_api_key)
+    embedding_provider = EmbeddingProvider(
+        embeddings_api=embeddings_api,
+        settings=summary_store_settings.embeddings,
+    )
+    vector_provider = VectorProvider(settings=summary_store_settings)
+
     maintenance = Maintenance(
         storage_api=storage_api,
         scheduler_api=scheduler_api,
@@ -167,6 +181,8 @@ def main() -> None:
         compression_settings=chat_compression_settings,
         maintenance_settings=maintenance_settings,
         summarizer_provider=summarizer_provider,
+        embedding_provider=embedding_provider,
+        vector_provider=vector_provider,
     )
 
     tavily_api = TavilyApi(api_key=tavily_api_key)

@@ -1,6 +1,8 @@
 .vscode/
 .venv/
 .file_cache/
+data/chroma/
+.certs/
 __pycache__/
 settings.json
 .obsidian/

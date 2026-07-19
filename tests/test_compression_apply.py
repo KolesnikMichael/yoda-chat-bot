@@ -18,6 +18,7 @@ from yoda.mind.memory.data.summarizer_result import SummarizerResult
 from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.memory.memory import MemoryCore, MemoryProvider
 from yoda.mind.data.maintenance_settings import MaintenanceSettings
+from tests.fakes import StubEmbeddingProvider, StubVectorProvider
 from tests.test_memory_operation import FakeStorageApi
 
 
@@ -623,6 +624,8 @@ async def test_run_compression_apply_size_happy_path():
         compression_settings=low_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     await maintenance._run_compression_apply(conversation, "size", "private")
@@ -651,6 +654,8 @@ async def test_run_size_trigger_compression_happy_path():
         compression_settings=low_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     await maintenance._run_compression_apply(conversation, "size", "private")
@@ -678,6 +683,8 @@ async def test_summariser_failure_noop_leaves_state_unchanged():
         compression_settings=low_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=FakeSummarizerProvider(fail=True),
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     await maintenance._run_compression_apply(conversation, "size", "private")
@@ -703,6 +710,8 @@ async def test_window_abort_when_no_split():
         compression_settings=low_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     await maintenance._run_compression_apply(conversation, "size", "private")
@@ -738,6 +747,8 @@ async def test_profile_delta_reflected_in_refreshed_introduction():
         compression_settings=low_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     await maintenance._run_compression_apply(conversation, "size", "private")
@@ -765,6 +776,8 @@ async def test_concurrent_ingest_during_blocked_summariser():
         compression_settings=low_compression_settings(),
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=summarizer,
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     compress_task = asyncio.create_task(
@@ -841,6 +854,8 @@ async def test_max_summary_count_eviction_records_history_and_outbox():
         compression_settings=settings,
         maintenance_settings=MaintenanceSettings(tick_minutes=1),
         summarizer_provider=FakeSummarizerProvider(),
+        embedding_provider=StubEmbeddingProvider(),
+        vector_provider=StubVectorProvider(),
     )
 
     await maintenance._run_compression_apply(conversation, "size", "private")
