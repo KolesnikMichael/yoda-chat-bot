@@ -18,6 +18,7 @@ doc/                      ← vault root, read from here
 │     ├── requirements.md ← what needs to be done and acceptance criteria
 │     ├── design.md       ← how it works, solutions, diagrams
 │     ├── plan.md         ← step-by-step implementation plan
+│     ├── review.md       ← review findings + verdict
 │     └── implementation-notes.md ← (optional) incidents, workarounds, ADR candidates from execution
 ├── design/               ← project-level architectural documents
 │  └── decisions/         ← architecture decision records
@@ -43,6 +44,7 @@ assigns (`## Scope boundary`). Then read only what you need:
 | What needs to be done?                   | `requirements.md`    |
 | How does it work?                        | `design.md`          |
 | What exactly is to be done?              | `plan.md`            |
+| Did review pass? What must be fixed?     | `review.md`          |
 | How does this task fit the bigger effort?| `EPIC-NNN/epic.md`   |
 | Cross-cutting architecture of the epic?  | `EPIC-NNN/design.md` |
 | How is the system structured as a whole? | `design/`            |
@@ -96,6 +98,7 @@ grep -rl "epic: EPIC-001" doc/backlog/*/task.md
 
 - Design decisions are recorded in `design.md`, not in code comments
 - Acceptance criteria are in `requirements.md` (sections FR-N)
+- Plan-compliance gate result lives in `review.md` (`verdict`); close only after `pass` / `pass-with-follow-ups` / `waived`
 - When a task is completed: `status` → `done`
 - Epic decomposition (task list, dependency graph) lives in `epic.md`, not in `main.md`
 - An epic's cross-cutting design lives in the epic's master design (linked from `epic.md`; `design.md` by template); member tasks reference it instead of restating decisions

@@ -223,14 +223,60 @@ const plan = [
   "- [ ] All acceptance criteria from requirements.md pass",
   "- [ ] Full suite green: `.venv/bin/python -m pytest`",
   "- [ ] IODA + coding guidelines (AGENTS.md) respected",
+  "- [ ] `review.md`: verdict `pass` or `pass-with-follow-ups`",
   "- [ ] `task.md`: `status: done`, `updated: <today>`",
   "- [ ] `design.md` / ADR updated if execution diverged from the plan",
   ""
 ].join("\n");
 
+const review = [
+  "---",
+  "id: " + id,
+  "doc: review",
+  "updated: " + today,
+  "verdict: ",
+  "pytest: ",
+  "---",
+  "",
+  "# " + id + ": " + title + " — Review",
+  "",
+  "← [[" + folder + "/task|Back to task]] | [[" + folder + "/plan|Plan]]",
+  "",
+  "Filled by **review-task**. Handoff to **implement-task** (`verdict: fix`) or **close-task** (`pass` / `pass-with-follow-ups` / `waived`).",
+  "",
+  "## Scope",
+  "",
+  "<!-- Diff summary: N files; key paths -->",
+  "",
+  "## FR matrix",
+  "",
+  "| FR | Code | Test | Status |",
+  "|----|------|------|--------|",
+  "| FR-1 | | | pass / weak / gap |",
+  "",
+  "## Findings",
+  "",
+  "<!-- One bullet per finding. Status: open | fixed. -->",
+  "",
+  "- [ ] **High/Medium/Low/Info** — `path` / symbol — why (FR-N / plan step) — `open`",
+  "",
+  "## Follow-ups",
+  "",
+  "<!-- For pass-with-follow-ups / Low-Info carry-overs for close-task -->",
+  "",
+  "- ",
+  "",
+  "## History",
+  "",
+  "| Date | Verdict | Note |",
+  "|------|---------|------|",
+  "| | | |"
+].join("\n");
+
 await tp.file.create_new(requirements, "requirements", false, folder);
 await tp.file.create_new(design,       "design",       false, folder);
 await tp.file.create_new(plan,         "plan",         false, folder);
+await tp.file.create_new(review,       "review",       false, folder);
 
 tR += [
   "---",
@@ -275,6 +321,7 @@ tR += [
   "- [[" + folder + "/requirements|requirements]] — requirements and acceptance criteria",
   "- [[" + folder + "/design|design]] — architectural solution",
   "- [[" + folder + "/plan|plan]] — implementation plan",
+  "- [[" + folder + "/review|review]] — plan-compliance gate (verdict + findings)",
   ...(inEpic ? ["- [[" + epicFolder + "/epic|" + epic + "]] — epic decomposition and master design"] : []),
   "",
   "## Dependencies",

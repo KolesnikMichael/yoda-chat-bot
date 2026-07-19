@@ -43,6 +43,7 @@ contract in `memory.py` rather than special-casing `user_introduction` alone.
 - [[requirements]] — requirements and acceptance criteria
 - [[design]] — architectural solution
 - [[plan]] — implementation plan
+- [[review]] — plan-compliance gate (verdict + findings)
 
 ## Dependencies
 

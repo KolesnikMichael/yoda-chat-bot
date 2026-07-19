@@ -50,6 +50,7 @@ Part of the Chat Context Management chain — see [[EPIC-001-chat-context-manage
 - [[requirements]] — requirements and acceptance criteria
 - [[design]] — architectural solution
 - [[plan]] — implementation plan
+- [[review]] — plan-compliance gate (verdict + findings)
 - [[EPIC-001-chat-context-management/epic|EPIC-001]] — epic decomposition and master design
 - [[TASK-008-summary-store-and-outbox-flush/task|TASK-008]] — originating deferral
 

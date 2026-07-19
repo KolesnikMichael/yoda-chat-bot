@@ -1,11 +1,11 @@
 ---
 name: create-plan
-description: Drafts and fills doc/backlog task plan.md from task.md, requirements.md, and design.md as the final step before implementation. Use when the user asks to create or complete a plan, implementation steps, DoD, or pre-flight checklist for a backlog task; provides a plan template path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → close. It is designed to provide the agent with the plan that can be executed safely and accurately.
+description: Drafts and fills doc/backlog task plan.md from task.md, requirements.md, and design.md as the final step before implementation. Use when the user asks to create or complete a plan, implementation steps, DoD, or pre-flight checklist for a backlog task; provides a plan template path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → review → close. It is designed to provide the agent with the plan that can be executed safely and accurately.
 ---
 
 # Create Plan
 
-Produce a complete `plan.md` for a backlog task after `task.md`, `requirements.md`, and `design.md` are filled. This skill continues the agent pipeline: create `requirements.md` → create `design.md` → **create `plan.md`** → implement plan → close task.
+Produce a complete `plan.md` for a backlog task after `task.md`, `requirements.md`, and `design.md` are filled. This skill continues the agent pipeline: create `requirements.md` → create `design.md` → **create `plan.md`** → implement plan → create `review.md` → close task.
 
 The plan is the **implementation contract for an agent harness**, not a roadmap. It must give a future agent enough to:
 
@@ -235,3 +235,4 @@ When done, briefly report:
 3. FR coverage summary (`N/N` FRs covered)
 4. Pre-flight assumptions about environment (keys up, branch name, …)
 5. Open items deferred to execution time, if any (label as assumptions, not blockers)
+6. Advise next skill for the user: **implement-task**

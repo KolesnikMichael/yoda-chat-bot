@@ -1,11 +1,11 @@
 ---
 name: implement-task
-description: Executes a backlog task's plan.md step by step with pre-flight gate, TDD verify loop, resumable last_step tracking, checkpoints, and Definition-of-Done close-out. Use when the user asks to implement, execute, continue, or resume a backlog task; provides a plan path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → close. It is designed to guide the agent through the entire implementation process to achieve the best possible outcome.
+description: Executes a backlog task's plan.md step by step with pre-flight gate, TDD verify loop, resumable last_step tracking, checkpoints, and Definition-of-Done close-out. Use when the user asks to implement, execute, continue, or resume a backlog task; provides a plan path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → review → close. It is designed to guide the agent through the entire implementation process to achieve the best possible outcome.
 ---
 
 # Implement Task
 
-Execute `plan.md` for a backlog task. This skill continues the agent pipeline: create `requirements.md` → create `design.md` → create `plan.md` → **implement plan** → close task.
+Execute `plan.md` for a backlog task. This skill continues the agent pipeline: create `requirements.md` → create `design.md` → create `plan.md` → **implement plan** → create `review.md` → close task.
 
 The plan holds **what** to do (steps, verify, files). This skill holds **how the agent must behave** (pre-flight gate, resume, checkpoints, DoD).
 
@@ -93,8 +93,24 @@ Read in order:
 
 1. `plan.md` — **Overview**, **Files & artifacts**, **Stages**, **Definition of Done**
 2. `last_step` in frontmatter — resume point (empty = start at first step)
-3. **Context to load** in plan — load listed files only; do not re-read the entire vault
-4. `requirements.md` / `design.md` — only sections needed for the current step
+3. **`review.md`** (if filled and `verdict: fix`) — **open** findings are the
+   fix scope for this resume; do not expand into unrelated plan steps unless the
+   user asks.
+4. **Context to load** in plan — load listed files only; do not re-read the entire vault
+5. `requirements.md` / `design.md` — only sections needed for the current step
+
+### Resume after `review-task` (`verdict: fix`)
+
+When the user asks to implement / fix review findings:
+
+1. Read `review.md` frontmatter (`verdict` must be `fix`, or user overrides).
+2. Work only **Findings** with status `open` and severity High/Medium (Low/Info
+   only if the user asks).
+3. Do not re-open finished plan stages except as needed to satisfy those findings.
+4. When the suite is green and open blockers are addressed, report done and
+   advise the user to run **review-task** again.
+5. Append a short note to `implementation-notes.md` only if the fix revealed a
+   design/plan lesson or ADR candidate.
 
 ## Phase 2 — Execute plan steps
 
@@ -148,7 +164,7 @@ To rollback to the last Checkpoint:
 
 If `last_step: 3.2`, next step is the following unchecked `N.M` after 3.2. Re-run pre-flight git checks if unsure about branch/state.
 
-## Phase 3 — Close (plan Definition of Done)
+## Phase 3 — Implement close-out (hand off to review)
 
 When all plan steps are checked:
 
@@ -157,18 +173,19 @@ When all plan steps are checked:
    ```bash
    .venv/bin/python -m pytest
    ```
-
-   Do not mark the task done while the suite is red or an FR lacks a covering test.
-2. Run the remaining plan **Definition of Done** items (IODA/coding-guideline review, manual AC, docs).
+   Do not claim implement done while the suite is red or an FR lacks a covering test.
+2. **Self-check**: skim IODA placement on files you touched, unchecked manual AC steps in the plan, 
+   and that Non-goals were not implemented.
 3. Mark FR acceptance criteria mentally or in the report — do not edit requirements checkboxes unless the user asks.
-4. `plan.md`: `updated: <today>` — if plan DoD requires it.
+4. `plan.md`: `updated: <today>`
 5. If any of the following occurred, create `implementation-notes.md` in the task folder and record the incident:
     - a step failed or had to be reworked — note what the plan got wrong and how it should have been written.
     - a workaround was used — note what was done, why, and when it should be revisited (`tech-debt: <condition>`).
     - something discovered during implementation affects `design.md` or architecture — note the signal and which document needs updating.
     - a decision made during implementation has cross-task or architectural reach — flag it as an **ADR candidate**.
 
-   These notes are the input for **close-task** (design reconciliation, ADR creation, follow-up tasks, epic close-out).
+   These notes feed **review-task** (known divergences) and **close-task**
+   (design reconciliation, ADR creation, follow-up tasks, epic close-out).
 
 Report briefly:
 
@@ -177,7 +194,7 @@ Report briefly:
 - Verify results (full `pytest` run, manual AC)
 - Open items / deferred follow-ups
 - Items from `implementation-notes.md` (incl. ADR candidates)
-- Next step: invoke **close-task** to verify DoD, harvest the notes, and run the epic close-out check.
+- Advise next skill for the user: run **review-task**.
 
 ## Do not
 

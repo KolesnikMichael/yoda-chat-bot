@@ -1,12 +1,12 @@
 ---
 name: create-epic
-description: Decomposes a large body of work into a connected set of backlog tasks and fills the epic.md decomposition map + epic-level master design outline. Use when the user asks to plan, decompose, or break down an epic (EPIC-NNN); provides an epic folder, epic id, or "decompose epic N". Runs BEFORE the per-task flow; each resulting task then goes through requirements → design → plan → implementation → close. It is designed to give the agent harness a connected, context-scoped task set.
+description: Decomposes a large body of work into a connected set of backlog tasks and fills the epic.md decomposition map + epic-level master design outline. Use when the user asks to plan, decompose, or break down an epic (EPIC-NNN); provides an epic folder, epic id, or "decompose epic N". Runs BEFORE the per-task flow; each resulting task then goes through requirements → design → plan → implementation → review → close. It is designed to give the agent harness a connected, context-scoped task set.
 ---
 
 # Create Epic
 
 Turn one large, connected effort into a set of backlog tasks that can each run through
-`requirements → design → plan → implement → close`. This skill is the pipeline head for multi-task work.
+`requirements → design → plan → implement → review → close`. This skill is the pipeline head for multi-task work.
 
 An epic is a first-class entity, analogous to a task but at a higher level:
 
