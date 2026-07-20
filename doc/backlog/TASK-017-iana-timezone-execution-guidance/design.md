@@ -1,7 +1,7 @@
 ---
 id: TASK-017
 doc: design
-updated: 2026-07-20
+updated: 2026-07-21
 ---
 
 # TASK-017: IANA timezone execution guidance — Design
@@ -23,7 +23,9 @@ identity to UTC; only relative-delay jobs may proceed without identity and use a
 valid timezone or UTC solely for display/metadata. Existing `ZoneInfo`,
 `CronTrigger`, profile fields, and job payloads remain unchanged, with
 deterministic workflow, tool-boundary, and DST-transition tests protecting the
-contract. This is the task-local implementation of
+contract. Scheduling adapters trim surrounding whitespace before validation,
+then pass and persist that normalized IANA name. This is the task-local
+implementation of
 [[backlog/EPIC-002-agent-routing-reliability/design#Decision 5: Use IANA timezone identity]].
 
 ## Architecture
@@ -119,8 +121,9 @@ DST transitions.
 **Choice:** C. Absolute tests assert UTC instants on either side of a transition.
 Recurring tests enumerate a fixed daytime cron through spring and autumn and
 assert unchanged local wall time with the regional offset changing. Tool tests
-also assert the exact IANA name reaches `SchedulerApi` and persisted metadata
-unchanged. Transition-hour policy remains out of scope (FR-4). No ADR candidate.
+also assert the normalized IANA name reaches `SchedulerApi` and persisted
+metadata consistently. Transition-hour policy remains out of scope (FR-4). No
+ADR candidate.
 
 ## Interfaces
 
@@ -161,6 +164,8 @@ class ScheduleTaskParams(BaseModel):
   `timezone` are required.
 - recurring local time: `cron` plus an explicit valid `timezone` are required.
 - exactly one timing mode remains mandatory.
+- surrounding whitespace in `timezone` is normalized at the tool boundary; the
+  trimmed IANA name is validated, passed to the scheduler, and persisted.
 
 Core exposes separate local-time validation and relative-display resolution so
 the latter cannot authorize a local schedule:
@@ -177,8 +182,10 @@ class ScheduleCore:
     ) -> str: ...
 ```
 
-`validate_timezone_name` returns `None` only when the exact supplied name is
-accepted by `ZoneInfo`; otherwise it returns a safe tool-boundary error.
+`validate_timezone_name` strips surrounding whitespace and returns `None` only
+when the resulting non-empty name is accepted by `ZoneInfo`; otherwise it
+returns a safe tool-boundary error. The scheduling adapters use that same
+normalized name for scheduler calls and persisted metadata.
 `relative_timezone_name` returns the first valid supplied candidate and defaults
 to `UTC`. It is never used for absolute or recurring scheduling.
 
@@ -224,14 +231,14 @@ and `UserProfile.timezone` remain strings. Existing job payloads retain their
 | `yoda/mind/agent/skills/specs/schedule_message.md` — active workflow | Code-owned execution contract | Replace unconditional missing-timezone clarification with ordered explicit/profile/location resolution, IANA-only identity, explicit scheduling arguments, inferred profile persistence, and relative-delay bypass | FR-1, FR-2, FR-3 |
 | `yoda/mind/agent/skills/specs/search_web.md` — deferred/recurring workflow | Code-owned execution contract | Apply the same timezone rules to `schedule_task` while preserving dynamic-task and request-constraint behavior | FR-1, FR-2, FR-3 |
 | `yoda/mind/agent/core/schedule_core.py` — `ScheduleCore` | Core | Separate strict IANA validation for local-time schedules from best-effort relative-delay display timezone; retain `ZoneInfo` conversion and `CronTrigger` construction | FR-1, FR-2, FR-4 |
-| `yoda/mind/agent/tools/schedule_message_tool.py` — `ScheduleMessageTool` | Provider (existing tool-adapter naming) | Require and validate an explicit timezone for absolute/cron modes before scheduler or storage side effects; use profile/UTC fallback only for relative display/metadata; pass and persist valid IANA names unchanged | FR-1, FR-2, FR-3, FR-4 |
-| `yoda/mind/agent/tools/schedule_task_tool.py` — `ScheduleTaskTool` | Provider (existing tool-adapter naming) | Mirror the strict local-time boundary and relative-only fallback for deferred/recurring skill jobs | FR-1, FR-2, FR-3, FR-4 |
+| `yoda/mind/agent/tools/schedule_message_tool.py` — `ScheduleMessageTool` | Provider (existing tool-adapter naming) | Require and validate an explicit timezone for absolute/cron modes before scheduler or storage side effects; use profile/UTC fallback only for relative display/metadata; trim, pass, and persist valid IANA names consistently | FR-1, FR-2, FR-3, FR-4 |
+| `yoda/mind/agent/tools/schedule_task_tool.py` — `ScheduleTaskTool` | Provider (existing tool-adapter naming) | Mirror the strict local-time boundary, normalized IANA propagation, and relative-only fallback for deferred/recurring skill jobs | FR-1, FR-2, FR-3, FR-4 |
 | `yoda/mind/agent/AGENTS.md` — module execution contract | Documentation | Document IANA resolution precedence, explicit local-time tool arguments, inferred profile update batching, and relative-delay exception | FR-1, FR-2, FR-3, FR-4 |
 | `tests/test_skill_catalog.py` — production workflow contract tests | Test (code-owned config) | Assert both full workflows contain ordered reuse/infer/persist/clarify rules, offset prohibition, explicit scheduling, and relative bypass while compact selection summaries remain unchanged | FR-1, FR-2, FR-3 |
 | `tests/test_agent.py` — production-skill execution scenarios | Test (Integration) | Add parameterized static/dynamic fixed-decision cases for valid profile and explicit timezones, unambiguous inference plus profile update, ambiguous/missing/offset clarification and resume, relative delays, no unresolved dispatch, and subsequent profile reuse | FR-1, FR-2, FR-3 |
 | `tests/test_schedule_core.py` — timezone and trigger tests | Test (Core) | Cover valid/invalid/offset identity, relative fallback, exact absolute UTC conversion around DST, and fixed local cron behavior through spring/autumn transitions | FR-1, FR-2, FR-4 |
-| `tests/test_agent_tools.py` — `ScheduleMessageTool` boundary tests | Test (Provider/API boundary) | Assert missing/invalid/offset local timezone rejection before side effects, unchanged IANA propagation/persistence, and timezone-free relative scheduling | FR-1, FR-2, FR-4 |
-| `tests/test_schedule_task_tool.py` — `ScheduleTaskTool` boundary tests | Test (Provider/API boundary) | Mirror static-message local timezone rejection and unchanged propagation/persistence for dynamic jobs, retaining request constraints | FR-1, FR-2, FR-3, FR-4 |
+| `tests/test_agent_tools.py` — `ScheduleMessageTool` boundary tests | Test (Provider/API boundary) | Assert missing/invalid/offset local timezone rejection before side effects, normalized IANA propagation/persistence, and timezone-free relative scheduling | FR-1, FR-2, FR-4 |
+| `tests/test_schedule_task_tool.py` — `ScheduleTaskTool` boundary tests | Test (Provider/API boundary) | Mirror static-message local timezone rejection and normalized propagation/persistence for dynamic jobs, retaining request constraints | FR-1, FR-2, FR-3, FR-4 |
 
 `Agent`, `ReactLoop`, `UserProfile`, `MemoryProvider`, `UpdateProfileTool`,
 `SchedulerApi`, and persisted payload schemas do not change. Existing
@@ -262,6 +269,7 @@ and task text remain DEBUG-only under the project logging policy.
 | Inferred persistence ordering | Send the inferred timezone/location to `update_profile` and the same timezone explicitly to scheduling; batching is allowed only because neither call depends on the other |
 | Relative delays | Require no identity or clarification; invalid/missing display timezone falls back to UTC without changing local-time rules |
 | Offset strings | Reject `+03:00`, `UTC+03:00`, and other values not accepted by `ZoneInfo`; explicitly supplied `UTC` remains valid |
+| Timezone whitespace | Normalize surrounding whitespace before `ZoneInfo` validation and use the trimmed IANA name consistently for scheduling and metadata |
 | DST transition-hour behavior | Test unambiguous daytime wall times around transitions; define no fold/gap policy |
 | IODA boundary | Workflow policy stays in code-owned skill specs, pure validation/conversion stays in `ScheduleCore`, `Agent` only coordinates, and existing adapters retain side effects |
 | Cross-task compatibility | Reuse TASK-015 execution resume and TASK-016 constraints; add no intermediate-state machinery because `internal_compat: none` |

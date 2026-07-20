@@ -1,8 +1,8 @@
 ---
 id: TASK-017
 doc: plan
-updated: 2026-07-20
-last_step: 
+updated: 2026-07-21
+last_step: 6.2
 branch: 
 ---
 
@@ -75,19 +75,19 @@ No changes to `Agent`, `ReactLoop`, `UserProfile`, `MemoryProvider`, `UpdateProf
 
 **Goal:** Strict IANA validation for local-time schedules is separated from relative-delay display fallback; DST conversion/cron semantics have deterministic unit coverage.
 
-- [ ] **1.1** Add `validate_timezone_name` and replace `effective_timezone_name` with `relative_timezone_name`
+- [x] **1.1** Add `validate_timezone_name` and replace `effective_timezone_name` with `relative_timezone_name`
   - Files: `yoda/mind/agent/core/schedule_core.py`, `tests/test_schedule_core.py`
   - Action: **Core** — per [[design#Interfaces]] / Decision 2: implement `validate_timezone_name(timezone) -> str | None` (None = accepted by `ZoneInfo`; else safe error string — mirror `validate_distilled_task`). Rename/replace `effective_timezone_name` with `relative_timezone_name(explicit_tz, profile_timezone) -> str` that returns the first `ZoneInfo`-accepted candidate else `"UTC"`. **Do not** use relative fallback for absolute/cron paths. Reject offset-only strings (`+03:00`, `UTC+03:00`) via `ZoneInfo` failure. Keep `resolve_absolute` / `parse_cron` ZoneInfo behavior. Update any in-module callers. **TDD first:** valid IANA → None; `None`/empty/invalid/offset → error; relative picks explicit, else valid profile, else UTC; invalid profile does not poison a valid explicit.
   - Verify: `.venv/bin/python -m pytest tests/test_schedule_core.py -k "validate_timezone or relative_timezone or effective_timezone" -q`
   - Commit: `feat(TASK-017): 1.1 separate strict and relative timezone helpers`
 
-- [ ] **1.2** Absolute DST-transition conversion coverage
+- [x] **1.2** Absolute DST-transition conversion coverage
   - Files: `tests/test_schedule_core.py`
   - Action: **Test (Core)** — per Decision 4 / FR-4: pick a well-known regional zone with DST (e.g. `Europe/Berlin` or `America/New_York`). Assert `resolve_absolute` UTC instants and offsets for unambiguous local wall times on both sides of spring and autumn transitions. Avoid nonexistent/duplicated transition-hour wall times.
   - Verify: `.venv/bin/python -m pytest tests/test_schedule_core.py -k "dst or transition or resolve_absolute" -q`
   - Commit: `test(TASK-017): 1.2 cover absolute DST wall-time conversion`
 
-- [ ] **1.3** Recurring local cron DST coverage
+- [x] **1.3** Recurring local cron DST coverage
   - Files: `tests/test_schedule_core.py`
   - Action: **Test (Core)** — parse a fixed daytime cron (e.g. `0 9 * * *`) with a DST zone; enumerate occurrences through spring and autumn and assert local wall-clock hour/minute stay at the requested time while UTC offset changes. Use real `CronTrigger` / `ZoneInfo` (no mocked conversion).
   - Verify: `.venv/bin/python -m pytest tests/test_schedule_core.py -k "cron and (dst or transition or wall)" -q`
@@ -101,13 +101,13 @@ No changes to `Agent`, `ReactLoop`, `UserProfile`, `MemoryProvider`, `UpdateProf
 
 **Goal:** Absolute and cron modes require an explicit `ZoneInfo`-valid timezone before any scheduler or storage side effect; relative delays alone may use profile/UTC for display/metadata.
 
-- [ ] **2.1** Harden `ScheduleMessageTool` local-time identity
+- [x] **2.1** Harden `ScheduleMessageTool` local-time identity
   - Files: `yoda/mind/agent/tools/schedule_message_tool.py`, `tests/test_agent_tools.py`
   - Action: **Provider (tool adapter)** — detect absolute mode from the five date/time fields (not from timezone presence). For absolute and cron: require `params.timezone`, run `validate_timezone_name`, and on failure return `success=False` **before** `SchedulerApi` / `_save_job_metadata`. Pass the validated IANA name unchanged to scheduler and metadata. For relative: use `relative_timezone_name(params.timezone, profile_timezone)` for display/metadata only; no clarification path in the tool. Preserve exactly-one timing mode. **TDD first:** missing/invalid/offset timezone on absolute and cron → no scheduler call, no metadata write; valid IANA propagates unchanged; relative without timezone still schedules with UTC (or valid profile) metadata; existing happy-path cron/absolute/relative stay green.
   - Verify: `.venv/bin/python -m pytest tests/test_agent_tools.py -k "schedule_message or scheduler_tool or timezone" -q`
   - Commit: `feat(TASK-017): 2.1 require explicit IANA on schedule_message local times`
 
-- [ ] **2.2** Mirror strict boundary on `ScheduleTaskTool`
+- [x] **2.2** Mirror strict boundary on `ScheduleTaskTool`
   - Files: `yoda/mind/agent/tools/schedule_task_tool.py`, `tests/test_schedule_task_tool.py`
   - Action: **Provider (tool adapter)** — same absolute/cron validation and relative-only fallback as 2.1. Keep `request_constraints` persistence and distilled-task behavior from TASK-016 byte-stable. **TDD first:** mirror rejection/propagation cases for dynamic jobs; constraints sidecar unchanged.
   - Verify: `.venv/bin/python -m pytest tests/test_schedule_task_tool.py -q`
@@ -121,13 +121,13 @@ No changes to `Agent`, `ReactLoop`, `UserProfile`, `MemoryProvider`, `UpdateProf
 
 **Goal:** Both full execution workflows encode ordered IANA resolution, offset prohibition, explicit scheduling args, inferred profile persistence, and relative-delay bypass; compact selection summaries stay unchanged.
 
-- [ ] **3.1** Rewrite `schedule_message` execution workflow timezone policy
+- [x] **3.1** Rewrite `schedule_message` execution workflow timezone policy
   - Files: `yoda/mind/agent/skills/specs/schedule_message.md`, `tests/test_skill_catalog.py`
   - Action: **Code-owned execution contract** — replace unconditional “ask if timezone missing” with Decision 1 precedence for absolute/recurring: (1) explicit valid IANA in the request, (2) valid profile timezone, (3) infer from unambiguous named location + `update_profile` with both `timezone` and `location` + explicit scheduling timezone, (4) one `ask_user` for city/region or IANA. Prohibit clock questions and offset-only identity. State that scheduling args must be self-contained; batch `update_profile` + `schedule_message` only when scheduling does not depend on the write. Relative delay: no timezone clarification. Update examples (ambiguous ask, inference batch, offset rejection). Do **not** change frontmatter selection fields/`when_to_use` beyond what FR-1 allows (rules stay out of compact selection contract). Align wording with suggested prompts but keep **explicit-before-profile** from design. **TDD:** catalog assertions that instructions contain ordered reuse/infer/persist/clarify, offset prohibition, explicit timezone on schedule, relative bypass; selection description/summary unchanged in compactness checks already present.
   - Verify: `.venv/bin/python -m pytest tests/test_skill_catalog.py -k "schedule_message or timezone or workflow" -q`
   - Commit: `feat(TASK-017): 3.1 encode IANA resolution in schedule_message workflow`
 
-- [ ] **3.2** Apply the same timezone rules to deferred/recurring `search_web`
+- [x] **3.2** Apply the same timezone rules to deferred/recurring `search_web`
   - Files: `yoda/mind/agent/skills/specs/search_web.md`, `tests/test_skill_catalog.py`
   - Action: **Code-owned execution contract** — in the deferred/recurring section, apply the same ordered IANA policy for `schedule_task` (explicit timezone required; infer+persist; clarify; no clock/offset). Preserve TASK-016 precedence/source/`request_constraints` / distilled_task rules and “do not run `web_search` in the same run”. Immediate search path unchanged regarding timezone. **TDD:** assert search_web instructions cover the same timezone contract markers without regressing preference/constraint assertions from TASK-016.
   - Verify: `.venv/bin/python -m pytest tests/test_skill_catalog.py -k "search_web or timezone or workflow or precedence" -q`
@@ -141,13 +141,13 @@ No changes to `Agent`, `ReactLoop`, `UserProfile`, `MemoryProvider`, `UpdateProf
 
 **Goal:** Deterministic Integration tests prove reuse, explicit IANA, inference+persist, clarification/resume, relative bypass, no unresolved dispatch, and subsequent profile reuse for both static and dynamic scheduling paths.
 
-- [ ] **4.1** Parameterized static `schedule_message` timezone scenarios
+- [x] **4.1** Parameterized static `schedule_message` timezone scenarios
   - Files: `tests/test_agent.py` (helpers/fakes as needed in `tests/fakes.py` only if already the pattern)
   - Action: **Test (Integration)** — using production `schedule_message` skill + fixed LLM decisions (no live model): cover (a) valid profile timezone → schedule with that explicit tz, no ask; (b) explicit valid IANA in decision args → schedule, no ask; (c) unambiguous location (e.g. Saint Petersburg → `Europe/Moscow`) → batched `update_profile`(`timezone`+`location`) + `schedule_message` with explicit tz; (d) relative `delay_minutes` → schedule without ask; (e) ambiguous location (Springfield) / missing data → single `ask_user`, no schedule dispatch; (f) offset-only answer after clarify → still no schedule (or corrective path) until valid IANA; (g) resume after valid clarify → schedule with explicit tz; (h) subsequent run with updated profile reuses persisted tz without ask. Assert tool call names/args and that scheduler fakes are untouched while unresolved.
   - Verify: `.venv/bin/python -m pytest tests/test_agent.py -k "schedule_message and (timezone or iana or dst or profile or ask_user or relative)" -q`
   - Commit: `test(TASK-017): 4.1 cover schedule_message IANA execution paths`
 
-- [ ] **4.2** Parameterized deferred `search_web` / `schedule_task` timezone scenarios
+- [x] **4.2** Parameterized deferred `search_web` / `schedule_task` timezone scenarios
   - Files: `tests/test_agent.py`
   - Action: **Test (Integration)** — mirror 4.1 for `search_web` deferred/recurring fixed decisions ending in `schedule_task` (with `skill_name=search_web`): profile reuse, explicit IANA, unambiguous infer+`update_profile`+explicit tz, relative delay, ambiguous/missing/offset clarification without dispatch, resume, subsequent reuse. Keep `request_constraints` defaults empty unless needed for skill activation. Do not require live Tavily.
   - Verify: `.venv/bin/python -m pytest tests/test_agent.py -k "search_web and (timezone or schedule_task or iana or ask_user)" -q`
@@ -161,7 +161,7 @@ No changes to `Agent`, `ReactLoop`, `UserProfile`, `MemoryProvider`, `UpdateProf
 
 **Goal:** Agent module contract documents IANA precedence, explicit local-time tool arguments, inferred profile batching, and relative-delay exception.
 
-- [ ] **5.1** Document timezone execution contract in `AGENTS.md`
+- [x] **5.1** Document timezone execution contract in `AGENTS.md`
   - Files: `yoda/mind/agent/AGENTS.md`
   - Action: **Documentation** — add a short invariant block covering Decision 1–2: ordered resolution after skill selection; absolute/cron require explicit valid IANA on the tool call; inferred values go to both `update_profile` and scheduling args; relative delays skip clarification; offset-only rejected; `ScheduleCore` owns ZoneInfo validation. Do not invent new architecture beyond design.
   - Verify: file contains IANA/precedence/`update_profile` batching notes; `.venv/bin/python -m pytest tests/test_skill_catalog.py -q` still green
@@ -175,13 +175,13 @@ No changes to `Agent`, `ReactLoop`, `UserProfile`, `MemoryProvider`, `UpdateProf
 
 **Goal:** Full suite green; every FR acceptance criterion has an automated or explicit manual check.
 
-- [ ] **6.1** FR gap fill and full suite
+- [x] **6.1** FR gap fill and full suite
   - Files: `tests/test_*.py` touched above as needed
   - Action: Walk FR-1…FR-4 acceptance criteria; add any missing assertions (especially: invalid profile timezone not reused for local schedules; compact selection summaries unchanged; IANA name retained in persisted job metadata; no UTC coercion for invalid local identity). Run full suite.
   - Verify: `.venv/bin/python -m pytest`
   - Commit: `test(TASK-017): 6.1 close FR coverage gaps`
 
-- [ ] **6.2** Manual AC smoke (optional if Redis/scheduler available)
+- [x] **6.2** Manual AC smoke (optional if Redis/scheduler available)
   - FR-1: With profile `timezone=Europe/Moscow`, schedule “tomorrow 15:00” → job metadata stores `Europe/Moscow`, no clarify.
   - FR-2: Absolute schedule with no tz/location → one city/IANA question; answering `+03:00` does not create a job.
   - FR-3: “daily 9:00 vitamins, I am in Saint Petersburg” → profile gains timezone+location and cron job uses `Europe/Moscow`.
@@ -226,12 +226,12 @@ graph LR
 
 ## Definition of Done
 
-- [ ] All plan steps checked
-- [ ] All FR-1…FR-4 acceptance criteria from requirements.md pass
-- [ ] Full suite green: `.venv/bin/python -m pytest`
-- [ ] IODA + coding guidelines (`AGENTS.md`) respected — policy in skill specs, validation in `ScheduleCore`, side effects in existing tools, no new Provider/resolver
-- [ ] No profile schema or job-payload migration introduced
-- [ ] `yoda/mind/agent/AGENTS.md` documents IANA execution contract
+- [x] All plan steps checked
+- [x] All FR-1…FR-4 acceptance criteria from requirements.md pass
+- [x] Full suite green: `.venv/bin/python -m pytest`
+- [x] IODA + coding guidelines (`AGENTS.md`) respected — policy in skill specs, validation in `ScheduleCore`, side effects in existing tools, no new Provider/resolver
+- [x] No profile schema or job-payload migration introduced
+- [x] `yoda/mind/agent/AGENTS.md` documents IANA execution contract
 - [ ] `review.md`: verdict `pass` or `pass-with-follow-ups`
 - [ ] `task.md`: `status: done`, `updated: <today>`
-- [ ] `design.md` / ADR updated only if execution diverged from design (no new ADR expected)
+- [x] `design.md` / ADR updated only if execution diverged from design (no new ADR expected)

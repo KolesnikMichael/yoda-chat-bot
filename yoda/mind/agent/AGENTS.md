@@ -38,6 +38,20 @@ nothing.
   strict → soft → stored → skill default. One-off restrictions are not promoted
   to profile data.
 
+### IANA timezone (absolute / recurring schedules)
+
+After skill selection, `schedule_message` and deferred/recurring `search_web`
+resolve local-time identity in this order: explicit valid IANA name → valid
+profile timezone → infer from an unambiguous named location (persist via
+`update_profile` with both `timezone` and `location`) → one `ask_user` for
+city/region or IANA. Never ask for the user's current clock; never accept a bare
+UTC offset as identity. Absolute and cron tool calls must carry an explicit
+`ZoneInfo`-valid timezone; inferred values are copied into both the profile
+update and the scheduling arguments (batching is allowed only when scheduling
+does not depend on the write). Relative `delay_minutes` skips timezone
+clarification. `ScheduleCore.validate_timezone_name` owns validation;
+`relative_timezone_name` is display/metadata fallback for relative delays only.
+
 ### Corrective retry
 
 Each phase has one persisted boolean budget (`selection_retry_used` /

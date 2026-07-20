@@ -2,11 +2,11 @@
 id: TASK-017
 epic: EPIC-002
 title: "IANA timezone execution guidance"
-status: todo
+status: done
 priority: medium
 size: S
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-21
 tags:
   - agent
   - scheduling

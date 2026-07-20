@@ -25,18 +25,31 @@ class ScheduleCore:
     MIN_CRON_INTERVAL_MINUTES = MIN_CRON_INTERVAL_MINUTES
 
     @staticmethod
-    def effective_timezone_name(
+    def validate_timezone_name(timezone: str | None) -> str | None:
+        if timezone is None or not str(timezone).strip():
+            return "timezone is required and must be a valid IANA name"
+        raw = str(timezone).strip()
+        try:
+            ZoneInfo(raw)
+        except (KeyError, ValueError):
+            return f"Unknown timezone: {raw}"
+        return None
+
+    @staticmethod
+    def relative_timezone_name(
         explicit_tz: str | None,
         profile_timezone: str | None,
     ) -> str:
-        raw = (explicit_tz or (profile_timezone or "").strip() or None)
-        if raw is None:
-            return "UTC"
-        try:
-            ZoneInfo(raw)
-            return raw
-        except (KeyError, ValueError):
-            return "UTC"
+        for candidate in (explicit_tz, profile_timezone):
+            if candidate is None or not str(candidate).strip():
+                continue
+            raw = str(candidate).strip()
+            try:
+                ZoneInfo(raw)
+                return raw
+            except (KeyError, ValueError):
+                continue
+        return "UTC"
 
     @staticmethod
     def count_timing_modes(

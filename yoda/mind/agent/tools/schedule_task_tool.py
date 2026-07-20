@@ -80,14 +80,24 @@ class ScheduleTaskTool(Tool):
                 success=False,
             )
 
-        tz_for_meta = ScheduleCore.effective_timezone_name(
-            params.timezone,
-            call.metadata.get("profile_timezone"),
+        absolute_fields = (
+            params.year,
+            params.month,
+            params.day,
+            params.hour,
+            params.minute,
         )
-
-        has_absolute = (
-            params.year is not None and params.timezone is not None
-        )
+        has_any_absolute = any(value is not None for value in absolute_fields)
+        has_absolute = all(value is not None for value in absolute_fields)
+        if has_any_absolute and not has_absolute:
+            return ToolResult(
+                tool_name=self.name,
+                output=(
+                    "Absolute time requires all of: "
+                    "year/month/day/hour/minute + timezone"
+                ),
+                success=False,
+            )
         mode_count = ScheduleCore.count_timing_modes(
             cron=params.cron,
             delay_minutes=params.delay_minutes,
@@ -103,9 +113,25 @@ class ScheduleTaskTool(Tool):
                 success=False,
             )
 
+        is_cron = params.cron is not None and str(params.cron).strip()
+        if is_cron or has_absolute:
+            tz_err = ScheduleCore.validate_timezone_name(params.timezone)
+            if tz_err:
+                return ToolResult(
+                    tool_name=self.name,
+                    output=tz_err,
+                    success=False,
+                )
+            tz_for_meta = str(params.timezone).strip()
+        else:
+            tz_for_meta = ScheduleCore.relative_timezone_name(
+                params.timezone,
+                call.metadata.get("profile_timezone"),
+            )
+
         job_id = f"task_{chat_id}_{uuid.uuid4().hex[:8]}"
 
-        if params.cron is not None and str(params.cron).strip():
+        if is_cron:
             cron_expr = params.cron.strip()
             if ScheduleCore.cron_interval_too_frequent(cron_expr, tz_for_meta):
                 return ToolResult(
@@ -156,7 +182,7 @@ class ScheduleTaskTool(Tool):
                     day=params.day,
                     hour=params.hour,
                     minute=params.minute,
-                    timezone=params.timezone,
+                    timezone=tz_for_meta,
                 )
                 if isinstance(result, str):
                     return ToolResult(
@@ -165,7 +191,6 @@ class ScheduleTaskTool(Tool):
                         success=False,
                     )
                 resolved = result
-                tz_for_meta = resolved.timezone
 
             if ScheduleCore.is_in_past(resolved.utc_dt):
                 return ToolResult(

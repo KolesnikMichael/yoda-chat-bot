@@ -340,6 +340,162 @@ async def test_schedule_message_cron():
     assert stored["type"] == "cron"
     assert stored["kind"] == "message"
     assert stored["cron"] == "0 9 * * 1"
+    assert stored["timezone"] == "Europe/Moscow"
+    assert scheduler_api.cron_scheduled[0]["timezone"] == "Europe/Moscow"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "timezone",
+    [None, "Invalid/Zone", "+03:00", "UTC+03:00"],
+)
+async def test_schedule_message_absolute_rejects_bad_timezone_before_side_effects(
+    timezone: str | None,
+):
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    args = {
+        "reminder_text": "call mom",
+        "year": 2030,
+        "month": 6,
+        "day": 15,
+        "hour": 14,
+        "minute": 30,
+    }
+    if timezone is not None:
+        args["timezone"] = timezone
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments=args,
+            metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        )
+    )
+    assert result.success is False
+    assert "timezone" in result.output.lower()
+    assert scheduler_api.scheduled == []
+    assert scheduler_api.cron_scheduled == []
+    assert storage_api.data == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "timezone",
+    [None, "Invalid/Zone", "+03:00"],
+)
+async def test_schedule_message_cron_rejects_bad_timezone_before_side_effects(
+    timezone: str | None,
+):
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    args = {"reminder_text": "vitamins", "cron": "0 9 * * *"}
+    if timezone is not None:
+        args["timezone"] = timezone
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments=args,
+            metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        )
+    )
+    assert result.success is False
+    assert "timezone" in result.output.lower()
+    assert scheduler_api.cron_scheduled == []
+    assert storage_api.data == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "other_mode",
+    [{"delay_minutes": 10}, {"cron": "0 9 * * *"}],
+    ids=["relative", "cron"],
+)
+async def test_schedule_message_rejects_partial_absolute_fields_with_other_mode(
+    other_mode: dict,
+) -> None:
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments={
+                "reminder_text": "call mom",
+                "year": 2030,
+                "timezone": "Europe/Berlin",
+                **other_mode,
+            },
+            metadata={"chat_id": 42},
+        )
+    )
+    assert result.success is False
+    assert scheduler_api.scheduled == []
+    assert scheduler_api.cron_scheduled == []
+    assert storage_api.data == {}
+
+
+@pytest.mark.asyncio
+async def test_schedule_message_absolute_propagates_valid_iana_unchanged():
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments={
+                "reminder_text": "call mom",
+                "year": 2030,
+                "month": 6,
+                "day": 15,
+                "hour": 14,
+                "minute": 30,
+                "timezone": "America/New_York",
+            },
+            metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        )
+    )
+    assert result.success is True
+    assert scheduler_api.scheduled[0]["run_date"].tzinfo is not None
+    stored = json.loads(list(storage_api.data["active_jobs:42"].values())[0])
+    assert stored["timezone"] == "America/New_York"
+
+
+@pytest.mark.asyncio
+async def test_schedule_message_rejects_invalid_timezone_even_with_profile_fallback():
+    """Invalid/offset identity must fail before side effects; profile is not a substitute."""
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments={
+                "reminder_text": "call mom",
+                "year": 2030,
+                "month": 6,
+                "day": 15,
+                "hour": 14,
+                "minute": 30,
+                "timezone": "Not/AZone",
+            },
+            metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        )
+    )
+    assert result.success is False
+    assert scheduler_api.scheduled == []
+    assert storage_api.data == {}
 
 
 @pytest.mark.asyncio

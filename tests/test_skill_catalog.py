@@ -286,6 +286,57 @@ def test_search_web_workflow_declares_precedence_and_durable_write_boundary():
     assert "never `web_search`" in instructions
 
 
+def _assert_iana_timezone_workflow(instructions: str) -> None:
+    lower = instructions.lower()
+    assert "iana" in lower
+    assert "explicit" in lower
+    assert "profile" in lower
+    assert "unambiguous" in lower
+    assert "update_profile" in instructions
+    assert "ask_user" in instructions
+    assert "current clock" in lower or "current local clock" in lower
+    assert "+03:00" in instructions or "utc+03:00" in lower
+    assert "delay_minutes" in instructions
+    assert "no timezone" in lower or "no timezone clarification" in lower
+
+
+def test_schedule_message_workflow_declares_iana_timezone_resolution():
+    schedule = SkillCatalog.load_skill(PRODUCTION_SKILLS_DIR, "schedule_message")
+    _assert_iana_timezone_workflow(schedule.instructions)
+    assert "schedule_message" in schedule.instructions
+    # Compact selection contract stays free of the ordered resolution policy.
+    summary = next(
+        s for s in SkillCatalog.load_catalog(PRODUCTION_SKILLS_DIR)
+        if s.name == "schedule_message"
+    )
+    selection_blob = "\n".join(
+        [summary.purpose]
+        + summary.when_to_use
+        + summary.do_not_use_when
+        + summary.selection_examples
+    )
+    assert "IANA" not in selection_blob
+    assert "unambiguous named location" not in selection_blob
+
+
+def test_search_web_workflow_declares_iana_timezone_for_deferred_schedule():
+    search = SkillCatalog.load_skill(PRODUCTION_SKILLS_DIR, "search_web")
+    _assert_iana_timezone_workflow(search.instructions)
+    assert "schedule_task" in search.instructions
+    assert "skill_name=search_web" in search.instructions
+    summary = next(
+        s for s in SkillCatalog.load_catalog(PRODUCTION_SKILLS_DIR)
+        if s.name == "search_web"
+    )
+    selection_blob = "\n".join(
+        [summary.purpose]
+        + summary.when_to_use
+        + summary.do_not_use_when
+        + summary.selection_examples
+    )
+    assert "IANA" not in selection_blob
+
+
 def test_production_public_summaries_excludes_manage_user_data():
     catalog = SkillCatalog.load_catalog(PRODUCTION_SKILLS_DIR)
     names = {s.name for s in catalog}

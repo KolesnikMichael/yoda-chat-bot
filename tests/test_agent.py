@@ -1201,3 +1201,623 @@ async def test_update_profile_fields_are_canonicalized():
     stored = json.loads(storage.data["user_profiles"]["123@42"])
     assert stored["skill_preferences"]["search_web"] == ["prefer BBC"]
     assert "web_search" not in stored["skill_preferences"]
+
+
+# --- TASK-017: IANA timezone execution scenarios (production skills) ---
+
+_ABS_ARGS = {
+    "year": 2030,
+    "month": 6,
+    "day": 15,
+    "hour": 15,
+    "minute": 0,
+}
+
+
+def _build_iana_schedule_message_agent(
+    decisions: list,
+    *,
+    storage=None,
+    scheduler=None,
+):
+    from tests.test_agent_tools import FakeSchedulerApi, FakeStorageApi as ToolsStorage
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage = storage or ToolsStorage()
+    scheduler = scheduler or FakeSchedulerApi()
+    llm = FakeLanguageProvider(decisions)
+    agent = Agent(
+        language_provider=llm,
+        tools=[
+            AskUserTool(),
+            ScheduleMessageTool(scheduler_api=scheduler, storage_api=storage),
+            UpdateProfileTool(memory_provider=MemoryProvider(storage_api=storage)),
+        ],
+        skills_dir=PRODUCTION_SKILLS_DIR,
+        session_provider=AgentSessionProvider(storage_api=storage),
+    )
+    return agent, scheduler, storage
+
+
+def _build_iana_schedule_task_agent(
+    decisions: list,
+    *,
+    storage=None,
+    scheduler=None,
+):
+    from tests.test_agent_tools import FakeSchedulerApi, FakeStorageApi as ToolsStorage
+    from yoda.mind.agent.tools.schedule_task_tool import ScheduleTaskTool
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage = storage or ToolsStorage()
+    scheduler = scheduler or FakeSchedulerApi()
+    llm = FakeLanguageProvider(decisions)
+    agent = Agent(
+        language_provider=llm,
+        tools=[
+            AskUserTool(),
+            FakeTool(),
+            ScheduleTaskTool(
+                scheduler_api=scheduler,
+                storage_api=storage,
+                skills_dir=PRODUCTION_SKILLS_DIR,
+            ),
+            UpdateProfileTool(memory_provider=MemoryProvider(storage_api=storage)),
+        ],
+        skills_dir=PRODUCTION_SKILLS_DIR,
+        session_provider=AgentSessionProvider(storage_api=storage),
+    )
+    return agent, scheduler, storage
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "schedule_args", "task"),
+    [
+        (
+            UserProfile(timezone="Europe/Moscow"),
+            {**_ABS_ARGS, "reminder_text": "call mom", "timezone": "Europe/Moscow"},
+            "Tomorrow at 15:00 remind me to call mom",
+        ),
+        (
+            UserProfile(),
+            {
+                **_ABS_ARGS,
+                "reminder_text": "call mom",
+                "timezone": "America/New_York",
+            },
+            "Tomorrow at 15:00 America/New_York remind me to call mom",
+        ),
+    ],
+    ids=["profile_reuse", "explicit_iana"],
+)
+async def test_schedule_message_timezone_schedules_without_ask_user(
+    profile: UserProfile,
+    schedule_args: dict,
+    task: str,
+) -> None:
+    decisions = [
+        _select("schedule_message", task),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_message", arguments=schedule_args,
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_message_agent(decisions)
+    result = await agent.run(task=task, profile=profile, chat_id=501, user_id=1)
+    assert result.clarification is None
+    assert result.answer is not None
+    assert scheduler.scheduled
+    assert "ask_user" not in result.tools_used
+    stored = json.loads(list(storage.data["active_jobs:501"].values())[0])
+    assert stored["timezone"] == schedule_args["timezone"]
+
+
+@pytest.mark.asyncio
+async def test_schedule_message_infers_location_persists_and_schedules() -> None:
+    decisions = [
+        _select(
+            "schedule_message",
+            "Daily 9:00 vitamins; user is in Saint Petersburg.",
+        ),
+        _call_tools(
+            ToolCallRequest(
+                tool_name="update_profile",
+                arguments={
+                    "fields": {
+                        "timezone": "Europe/Moscow",
+                        "location": "Saint Petersburg",
+                    },
+                },
+            ),
+            ToolCallRequest(
+                tool_name="schedule_message",
+                arguments={
+                    "reminder_text": "take vitamins",
+                    "cron": "0 9 * * *",
+                    "timezone": "Europe/Moscow",
+                },
+            ),
+        ),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_message_agent(decisions)
+    result = await agent.run(
+        task="daily 9:00 vitamins, I am in Saint Petersburg",
+        profile=UserProfile(),
+        chat_id=502,
+        user_id=9,
+    )
+    assert result.clarification is None
+    assert scheduler.cron_scheduled
+    assert scheduler.cron_scheduled[0]["timezone"] == "Europe/Moscow"
+    assert "ask_user" not in result.tools_used
+    profile_stored = json.loads(storage.data["user_profiles"]["9@502"])
+    assert profile_stored["timezone"] == "Europe/Moscow"
+    assert profile_stored["location"] == "Saint Petersburg"
+    job = json.loads(list(storage.data["active_jobs:502"].values())[0])
+    assert job["timezone"] == "Europe/Moscow"
+
+
+@pytest.mark.asyncio
+async def test_schedule_message_relative_delay_no_timezone_ask() -> None:
+    decisions = [
+        _select("schedule_message", "Remind in 30 minutes."),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_message",
+            arguments={"reminder_text": "check oven", "delay_minutes": 30},
+        )),
+    ]
+    agent, scheduler, _ = _build_iana_schedule_message_agent(decisions)
+    result = await agent.run(
+        task="remind me in 30 minutes to check oven",
+        profile=UserProfile(),
+        chat_id=503,
+        user_id=1,
+    )
+    assert result.clarification is None
+    assert scheduler.scheduled
+    assert "ask_user" not in result.tools_used
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question", "profile"),
+    [
+        (
+            "Which city or IANA timezone? Springfield is ambiguous.",
+            UserProfile(),
+        ),
+        (
+            "Which city or IANA timezone should I use?",
+            UserProfile(),
+        ),
+        (
+            "The stored timezone is invalid; which city or IANA timezone?",
+            UserProfile(timezone="Invalid/Zone"),
+        ),
+    ],
+    ids=["ambiguous_springfield", "missing_timezone", "invalid_profile_timezone"],
+)
+async def test_schedule_message_unresolved_asks_without_dispatch(
+    question: str,
+    profile: UserProfile,
+) -> None:
+    decisions = [
+        _select("schedule_message", "Absolute reminder; timezone unresolved."),
+        _call_tools(ToolCallRequest(
+            tool_name="ask_user", arguments={"question": question},
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_message_agent(decisions)
+    result = await agent.run(
+        task="remind me tomorrow at 15:00",
+        profile=profile,
+        chat_id=504,
+        user_id=1,
+    )
+    assert result.clarification == question
+    assert result.answer is None
+    assert scheduler.scheduled == []
+    assert scheduler.cron_scheduled == []
+    assert "active_jobs:504" not in storage.data
+
+
+@pytest.mark.asyncio
+async def test_schedule_message_offset_after_clarify_does_not_dispatch() -> None:
+    decisions = [
+        _select("schedule_message", "Need timezone."),
+        _call_tools(ToolCallRequest(
+            tool_name="ask_user",
+            arguments={"question": "Which city or IANA timezone?"},
+        )),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_message",
+            arguments={
+                **_ABS_ARGS,
+                "reminder_text": "call mom",
+                "timezone": "+03:00",
+            },
+        )),
+        _call_tools(ToolCallRequest(
+            tool_name="ask_user",
+            arguments={
+                "question": "A UTC offset is not enough; which city or IANA timezone?",
+            },
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_message_agent(decisions)
+    first = await agent.run(
+        task="remind me tomorrow at 15:00",
+        profile=UserProfile(),
+        chat_id=505,
+        user_id=1,
+    )
+    assert first.clarification is not None
+    second = await agent.resume(505, "+03:00")
+    assert second.clarification is not None
+    assert second.answer is None
+    assert scheduler.scheduled == []
+    assert "active_jobs:505" not in storage.data
+
+
+@pytest.mark.asyncio
+async def test_schedule_message_resume_valid_iana_then_profile_reuse() -> None:
+    from tests.test_agent_tools import FakeSchedulerApi, FakeStorageApi as ToolsStorage
+
+    storage = ToolsStorage()
+    scheduler = FakeSchedulerApi()
+    decisions = [
+        _select("schedule_message", "Need timezone."),
+        _call_tools(ToolCallRequest(
+            tool_name="ask_user",
+            arguments={"question": "Which city or IANA timezone?"},
+        )),
+        _call_tools(
+            ToolCallRequest(
+                tool_name="update_profile",
+                arguments={"fields": {"timezone": "Europe/Berlin"}},
+            ),
+            ToolCallRequest(
+                tool_name="schedule_message",
+                arguments={
+                    **_ABS_ARGS,
+                    "reminder_text": "call mom",
+                    "timezone": "Europe/Berlin",
+                },
+            ),
+        ),
+        # Subsequent run reuses persisted timezone without ask_user.
+        _select("schedule_message", "Another reminder with known timezone."),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_message",
+            arguments={
+                **_ABS_ARGS,
+                "day": 16,
+                "reminder_text": "buy milk",
+                "timezone": "Europe/Berlin",
+            },
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_message_agent(
+        decisions, storage=storage, scheduler=scheduler,
+    )
+    first = await agent.run(
+        task="remind me tomorrow at 15:00",
+        profile=UserProfile(),
+        chat_id=506,
+        user_id=3,
+    )
+    assert first.clarification is not None
+    resumed = await agent.resume(506, "Europe/Berlin")
+    assert resumed.answer is not None
+    assert scheduler.scheduled
+    assert scheduler.scheduled[0]
+    job1 = json.loads(list(storage.data["active_jobs:506"].values())[0])
+    assert job1["timezone"] == "Europe/Berlin"
+
+    second = await agent.run(
+        task="remind me the day after at 15:00",
+        profile=UserProfile(timezone="Europe/Berlin"),
+        chat_id=507,
+        user_id=3,
+    )
+    assert second.clarification is None
+    assert "ask_user" not in second.tools_used
+    assert len(scheduler.scheduled) == 2
+    job2 = json.loads(list(storage.data["active_jobs:507"].values())[0])
+    assert job2["timezone"] == "Europe/Berlin"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "schedule_args"),
+    [
+        (
+            UserProfile(timezone="Europe/Moscow"),
+            {
+                "skill_name": "search_web",
+                "distilled_task": "Find tomorrow's weather in Russian.",
+                "description": "Weather",
+                **_ABS_ARGS,
+                "timezone": "Europe/Moscow",
+            },
+        ),
+        (
+            UserProfile(),
+            {
+                "skill_name": "search_web",
+                "distilled_task": "Find tomorrow's weather in Russian.",
+                "description": "Weather",
+                **_ABS_ARGS,
+                "timezone": "UTC",
+            },
+        ),
+    ],
+    ids=["profile_reuse", "explicit_iana"],
+)
+async def test_search_web_schedule_task_timezone_without_ask(
+    profile: UserProfile,
+    schedule_args: dict,
+) -> None:
+    decisions = [
+        _select("search_web", "Schedule a deferred weather search."),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_task", arguments=schedule_args,
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_task_agent(decisions)
+    result = await agent.run(
+        task="Tomorrow at 15:00 search the weather",
+        profile=profile,
+        chat_id=601,
+        user_id=1,
+    )
+    assert result.clarification is None
+    assert scheduler.scheduled
+    assert "ask_user" not in result.tools_used
+    assert "web_search" not in result.tools_used
+    stored = json.loads(list(storage.data["active_jobs:601"].values())[0])
+    assert stored["timezone"] == schedule_args["timezone"]
+    assert stored["request_constraints"] == {
+        "strict_source_domains": [],
+        "soft_source_domains": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_web_infers_location_persists_and_schedules_task() -> None:
+    decisions = [
+        _select("search_web", "Daily weather; user in Saint Petersburg."),
+        _call_tools(
+            ToolCallRequest(
+                tool_name="update_profile",
+                arguments={
+                    "fields": {
+                        "timezone": "Europe/Moscow",
+                        "location": "Saint Petersburg",
+                    },
+                },
+            ),
+            ToolCallRequest(
+                tool_name="schedule_task",
+                arguments={
+                    "skill_name": "search_web",
+                    "distilled_task": "Find today's Saint Petersburg forecast.",
+                    "description": "Daily forecast",
+                    "cron": "0 9 * * *",
+                    "timezone": "Europe/Moscow",
+                },
+            ),
+        ),
+        _select("search_web", "Reuse persisted timezone for another search."),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_task",
+            arguments={
+                "skill_name": "search_web",
+                "distilled_task": "Find tomorrow's Saint Petersburg forecast.",
+                "description": "Tomorrow's forecast",
+                **_ABS_ARGS,
+                "day": 16,
+                "timezone": "Europe/Moscow",
+            },
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_task_agent(decisions)
+    result = await agent.run(
+        task="every morning weather, I am in Saint Petersburg",
+        profile=UserProfile(),
+        chat_id=602,
+        user_id=9,
+    )
+    assert result.clarification is None
+    assert scheduler.cron_scheduled[0]["timezone"] == "Europe/Moscow"
+    assert "web_search" not in result.tools_used
+    profile_stored = json.loads(storage.data["user_profiles"]["9@602"])
+    assert profile_stored["timezone"] == "Europe/Moscow"
+    assert profile_stored["location"] == "Saint Petersburg"
+    persisted_profile = UserProfile(**profile_stored)
+    reused = await agent.run(
+        task="tomorrow at 15:00 search the weather again",
+        profile=persisted_profile,
+        chat_id=607,
+        user_id=9,
+    )
+    assert reused.clarification is None
+    assert "ask_user" not in reused.tools_used
+    reused_job = json.loads(list(storage.data["active_jobs:607"].values())[0])
+    assert reused_job["timezone"] == "Europe/Moscow"
+
+
+@pytest.mark.asyncio
+async def test_search_web_relative_delay_schedule_task_no_ask() -> None:
+    decisions = [
+        _select("search_web", "Search weather in 60 minutes."),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_task",
+            arguments={
+                "skill_name": "search_web",
+                "distilled_task": "Find the weather now.",
+                "description": "Weather soon",
+                "delay_minutes": 60,
+            },
+        )),
+    ]
+    agent, scheduler, _ = _build_iana_schedule_task_agent(decisions)
+    result = await agent.run(
+        task="in an hour search the weather",
+        profile=UserProfile(),
+        chat_id=603,
+        user_id=1,
+    )
+    assert result.clarification is None
+    assert scheduler.scheduled
+    assert "ask_user" not in result.tools_used
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question", "task", "profile"),
+    [
+        (
+            "Which city or IANA timezone? Springfield is ambiguous.",
+            "every morning weather for Springfield",
+            UserProfile(),
+        ),
+        (
+            "Which city or IANA timezone should I use?",
+            "every morning search the weather",
+            UserProfile(),
+        ),
+        (
+            "The stored timezone is invalid; which city or IANA timezone?",
+            "every morning search the weather",
+            UserProfile(timezone="Invalid/Zone"),
+        ),
+    ],
+    ids=["ambiguous_springfield", "missing_timezone", "invalid_profile_timezone"],
+)
+async def test_search_web_unresolved_asks_without_schedule_task_dispatch(
+    question: str,
+    task: str,
+    profile: UserProfile,
+) -> None:
+    decisions = [
+        _select("search_web", "Deferred search; timezone ambiguous."),
+        _call_tools(ToolCallRequest(
+            tool_name="ask_user",
+            arguments={"question": question},
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_task_agent(decisions)
+    result = await agent.run(
+        task=task,
+        profile=profile,
+        chat_id=604,
+        user_id=1,
+    )
+    assert result.clarification == question
+    assert scheduler.scheduled == []
+    assert scheduler.cron_scheduled == []
+    assert "active_jobs:604" not in storage.data
+
+
+@pytest.mark.asyncio
+async def test_search_web_offset_after_clarify_does_not_dispatch() -> None:
+    decisions = [
+        _select("search_web", "Need timezone for deferred search."),
+        _call_tools(ToolCallRequest(
+            tool_name="ask_user",
+            arguments={"question": "Which city or IANA timezone?"},
+        )),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_task",
+            arguments={
+                "skill_name": "search_web",
+                "distilled_task": "Find the weather.",
+                "description": "Weather",
+                **_ABS_ARGS,
+                "timezone": "+03:00",
+            },
+        )),
+        _call_tools(ToolCallRequest(
+            tool_name="ask_user",
+            arguments={
+                "question": "A UTC offset is not enough; which city or IANA timezone?",
+            },
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_task_agent(decisions)
+    first = await agent.run(
+        task="tomorrow at 15:00 search the weather",
+        profile=UserProfile(),
+        chat_id=608,
+        user_id=1,
+    )
+    assert first.clarification is not None
+    resumed = await agent.resume(608, "+03:00")
+    assert resumed.clarification is not None
+    assert resumed.answer is None
+    assert scheduler.scheduled == []
+    assert scheduler.cron_scheduled == []
+    assert "active_jobs:608" not in storage.data
+
+
+@pytest.mark.asyncio
+async def test_search_web_resume_valid_iana_schedules_and_reuses() -> None:
+    from tests.test_agent_tools import FakeSchedulerApi, FakeStorageApi as ToolsStorage
+
+    storage = ToolsStorage()
+    scheduler = FakeSchedulerApi()
+    decisions = [
+        _select("search_web", "Need timezone for deferred search."),
+        _call_tools(ToolCallRequest(
+            tool_name="ask_user",
+            arguments={"question": "Which city or IANA timezone?"},
+        )),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_task",
+            arguments={
+                "skill_name": "search_web",
+                "distilled_task": "Find the weather.",
+                "description": "Weather",
+                **_ABS_ARGS,
+                "timezone": "Europe/Berlin",
+            },
+        )),
+        _select("search_web", "Reuse timezone."),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_task",
+            arguments={
+                "skill_name": "search_web",
+                "distilled_task": "Find the weather again.",
+                "description": "Weather again",
+                "cron": "0 9 * * *",
+                "timezone": "Europe/Berlin",
+            },
+        )),
+    ]
+    agent, scheduler, storage = _build_iana_schedule_task_agent(
+        decisions, storage=storage, scheduler=scheduler,
+    )
+    first = await agent.run(
+        task="tomorrow at 15:00 search weather",
+        profile=UserProfile(),
+        chat_id=605,
+        user_id=3,
+    )
+    assert first.clarification is not None
+    resumed = await agent.resume(605, "Europe/Berlin")
+    assert resumed.answer is not None
+    assert scheduler.scheduled
+    second = await agent.run(
+        task="every morning search weather",
+        profile=UserProfile(timezone="Europe/Berlin"),
+        chat_id=606,
+        user_id=3,
+    )
+    assert second.clarification is None
+    assert "ask_user" not in second.tools_used
+    assert scheduler.cron_scheduled
+    assert scheduler.cron_scheduled[0]["timezone"] == "Europe/Berlin"
