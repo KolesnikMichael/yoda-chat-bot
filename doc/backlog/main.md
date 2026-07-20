@@ -5,14 +5,11 @@
 - Stop calculating chat_type each time - it doesn't change
 - Add modify_job tool for manage_jobs skill, otherwise job just gets cancelled
 - Job's description repeats message_text, but at least skill name should be present in description, so that list_jobs is aware of task nature. Ideally it should contain distilled_task
-- Double check: distilled_task is missing on Phase 2
-- Request like "wake me up with a weather forecast" triggers schedule_message skill instead of recurrent search_web - probably because skill selection prompt doesn't include 'when to use' frontmatter section. Overall, choose skill prompt looks suboptimal, not to say terribly structured, excessive, confusing and misleaing, 
-  - Missing ask_user format and example
-  - Skills are ordered in a strange way
-  - Skill descriptions are incoherent
-  - Aforementioned absence of 'when to use' hints
-  - Weirdly put intent messages
-- Search_web preference not taken into account, should be put into description (probably because of wrong skill applied - verify)
+- Agent routing, skill-selection contracts, phase protocol, preference propagation,
+  truthful completion, deterministic commands, and evaluation:
+  [[EPIC-002-agent-routing-reliability/epic|EPIC-002 — agent routing reliability]].
+  Related context-noise fix:
+  [[TASK-010-only-visible-kinds-for-intent-context/task|TASK-010]].
 - Agent: no test for batched ask_user + failing companion tool (e.g. update_profile) — suspend path works but untested
 - Agent: Mind._handle_agent_task / resume have no try/except — LLM, Redis session, or other failures during agent run can crash message handling
 
@@ -20,9 +17,10 @@
 
 - Design invariants to the root (?) AGENTS.md: chat isolation, chats nonpersistence, low hardware requirements, low budget, logging, exception handling, etc.
 - Retry after 429 where needed
-- Scheduling jobs: Daylight saving is unlikely taken into account (and there are countries that do not use it)
+- Scheduling jobs: add timezone/DST transition tests; scheduling already uses
+  IANA `ZoneInfo` + timezone-aware `CronTrigger`, so verify behavior rather than
+  adding offset-based DST logic
 - Admin notifications
-- `_classify_intent` returns "chat" but it's never handled. It should be handled explicitly, and last elif in Mind.process_message_batch should log WARNING or something
 - Record skill usages in Chat.history:
   - create_picture: iterations
   - manage_jobs: task
@@ -50,7 +48,6 @@
 
 ## Try
 
-- Skill flavours/hierarchy: search web could have a number of options (sub-specs with specific workflow/sources/hints), depending on the topic. - Actuall, should this be stored in catalog, or in user preferences - like agent updating user_profile with object skill_preferences > web_search > weather > accuweather.com?
 - Trafilatura as another extraction option
 - _classify_intent could return 'pass' to replace CognitionCore.should_reply. And _classify_intent could have a better name, e.g. "decide_next_action"
 - Regulate Еmotional state with system messages, instead of the system prompt (should those be acually saved?). 

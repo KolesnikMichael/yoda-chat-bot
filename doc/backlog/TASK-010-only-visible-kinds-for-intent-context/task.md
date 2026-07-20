@@ -1,12 +1,12 @@
 ---
 id: TASK-010
-epic: 
+epic: EPIC-002
 title: "only visible kinds for intent context"
 status: todo
 priority: medium
 size: XS
 created: 2026-06-14
-updated: 2026-06-14
+updated: 2026-07-20
 tags:
   - cognition
   - routing
@@ -26,6 +26,21 @@ that can skew routing and wastes tokens.
 Filter `RoutingContext.recent_messages` to `VISIBLE_KINDS` (`user`, `assistant`) only. The same
 path currently also includes other non-visible kinds (e.g. `task_result`); align with the visibility
 contract in `memory.py` rather than special-casing `user_introduction` alone.
+
+## Epic
+
+Part of [[backlog/EPIC-002-agent-routing-reliability/epic|EPIC-002]] — read the epic
+(decomposition, shared branch) and its master design first for cross-task context.
+
+## Master design
+
+- [[backlog/EPIC-002-agent-routing-reliability/design#Context hygiene]]
+- [[backlog/EPIC-002-agent-routing-reliability/design#Proposed delivery sequence]]
+
+## Suggested prompts
+
+- [[backlog/EPIC-002-agent-routing-reliability/suggested_prompts#Intent classifier|Intent classifier]]
+- [[backlog/EPIC-002-agent-routing-reliability/suggested_prompts#Message-role contract|Message-role contract]]
 
 ## Scope boundary
 
@@ -48,9 +63,8 @@ contract in `memory.py` rather than special-casing `user_introduction` alone.
 ## Dependencies
 
 - Depends on: [[TASK-002-user-introduction-on-ingest/task|TASK-002]] (introduces `user_introduction` on first ingest)
-- Blocks:
+- Blocks: [[TASK-014-discriminative-skill-selection-contracts/task|TASK-014]]
 
 ## Notes
 
-Standalone cognition/routing fix — not part of [[EPIC-001-chat-context-management/epic|EPIC-001]].
 Discovered during TASK-002 close-out.
