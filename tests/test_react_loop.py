@@ -1,4 +1,8 @@
-from yoda.mind.agent.core.react_loop import INFRA_TOOLS, ReactLoop
+from yoda.mind.agent.core.react_loop import (
+    INFRA_TOOLS,
+    SELECTION_INSTRUCTION,
+    ReactLoop,
+)
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
     Decision,
@@ -10,8 +14,22 @@ from yoda.mind.agent.data.agent_data import (
 from yoda.mind.memory.data.user_profile import UserProfile
 
 CATALOG = [
-    SkillSummary(name="schedule_message", description="Schedule a reminder"),
-    SkillSummary(name="web_search", description="Search the web"),
+    SkillSummary(
+        name="schedule_message",
+        description="Schedule a reminder",
+        purpose="Deliver static reminder text later.",
+        when_to_use=["Payload is known now."],
+        do_not_use_when=["Needs fresh data at trigger time."],
+        selection_examples=['"remind vitamins" -> use'],
+    ),
+    SkillSummary(
+        name="web_search",
+        description="Search the web",
+        purpose="Fetch current external information.",
+        when_to_use=["Needs current facts."],
+        do_not_use_when=["Only static text later."],
+        selection_examples=['"weather now" -> use'],
+    ),
 ]
 
 TOOL_SCHEMAS = [
@@ -105,22 +123,185 @@ def test_filter_tool_schemas_excludes_tools_not_in_skill():
     assert "other_tool" not in names
 
 
-# --- build_selection_message ---
+# --- selection control / input ---
 
-def test_build_selection_message_contains_task_and_catalog():
-    msg = ReactLoop.build_selection_message("find weather", CATALOG)
+def test_build_selection_control_message_role_and_markers():
+    msg = ReactLoop.build_selection_control_message(CATALOG)
+
+    assert msg["role"] == "system"
+    content = msg["content"]
+    assert "<skill_selection_control>" in content
+    assert "</skill_selection_control>" in content
+    assert "Catalog order has no semantic priority" in content
+    assert "purpose:" in content
+    assert "when_to_use:" in content
+    assert "do_not_use_when:" in content
+    assert "selection_examples:" in content
+    assert "schedule_message" in content
+    assert "web_search" in content
+    assert "Schedule a reminder" not in content
+    assert "Search the web" not in content
+
+
+def test_build_selection_control_message_name_sort_stable():
+    reversed_catalog = list(reversed(CATALOG))
+    forward = ReactLoop.build_selection_control_message(CATALOG)
+    backward = ReactLoop.build_selection_control_message(reversed_catalog)
+    assert forward["content"] == backward["content"]
+    assert forward["content"].index("schedule_message") < forward["content"].index(
+        "web_search"
+    )
+
+
+def test_build_selection_control_message_includes_private_skills():
+    catalog = CATALOG + [
+        SkillSummary(
+            name="manage_user_data",
+            description="Private",
+            public=False,
+            purpose="Manage stored data.",
+            when_to_use=["Export or delete all data."],
+            do_not_use_when=["Cancel a reminder."],
+            selection_examples=['"forget me" -> use'],
+        ),
+    ]
+    msg = ReactLoop.build_selection_control_message(catalog)
+    assert "manage_user_data" in msg["content"]
+
+
+def test_build_selection_control_message_empty_catalog():
+    msg = ReactLoop.build_selection_control_message([])
+    assert msg["role"] == "system"
+    assert "No skills available." in msg["content"]
+
+
+def test_build_selection_input_message_role_and_markers():
+    msg = ReactLoop.build_selection_input_message("find weather")
 
     assert msg["role"] == "user"
-    assert "find weather" in msg["content"]
-    assert "schedule_message" in msg["content"]
-    assert "web_search" in msg["content"]
-    assert "Select the best skill" in msg["content"]
+    content = msg["content"]
+    assert "<selection_input>" in content
+    assert "<task>" in content
+    assert "find weather" in content
+    assert "<skill_selection_control>" not in content
+    assert "Available skills" not in content
+    assert "Select the best skill" not in content
 
 
-def test_build_selection_message_empty_catalog():
-    msg = ReactLoop.build_selection_message("test", [])
+def test_build_selection_input_message_includes_recent_conversation():
+    recent = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ]
+    msg = ReactLoop.build_selection_input_message("find weather", recent)
+    assert "<recent_conversation>" in msg["content"]
+    assert "hi" in msg["content"]
 
-    assert "No skills available" in msg["content"]
+
+def test_refresh_selection_messages_new_format_replaces_control():
+    control = ReactLoop.build_selection_control_message(CATALOG)
+    selection_input = ReactLoop.build_selection_input_message("old task")
+    ctx = _make_context(messages=[
+        {"role": "system", "content": "base"},
+        control,
+        selection_input,
+        {"role": "assistant", "content": '{"reasoning":"clarify"}'},
+        {"role": "user", "content": "User answered: Moscow"},
+    ])
+    refreshed_catalog = [
+        SkillSummary(
+            name="schedule_message",
+            description="Schedule a reminder",
+            purpose="UPDATED PURPOSE",
+            when_to_use=["Updated trigger."],
+            do_not_use_when=["Updated boundary."],
+            selection_examples=['"updated" -> use'],
+        ),
+    ]
+    new_ctx = ReactLoop.refresh_selection_messages(ctx, refreshed_catalog)
+    assert "UPDATED PURPOSE" in new_ctx.messages[1]["content"]
+    assert new_ctx.messages[2] == selection_input
+    assert new_ctx.messages[3]["role"] == "assistant"
+    assert new_ctx.messages[4]["content"] == "User answered: Moscow"
+    assert new_ctx.catalog_summaries == refreshed_catalog
+
+
+def test_refresh_selection_messages_new_format_ignores_markers_in_user_data():
+    selection_input = ReactLoop.build_selection_input_message(
+        "Explain <skill_selection_control> and <selection_input> literally."
+    )
+    ctx = _make_context(messages=[
+        {"role": "system", "content": "base"},
+        ReactLoop.build_selection_control_message(CATALOG),
+        selection_input,
+    ])
+
+    new_ctx = ReactLoop.refresh_selection_messages(ctx, CATALOG)
+
+    assert new_ctx.messages[2] == selection_input
+
+
+def test_refresh_selection_messages_legacy_preserves_prefix_and_tail():
+    legacy_user = {
+        "role": "user",
+        "content": (
+            "Recent conversation:\nuser: earlier\n\n"
+            "Task: remind vitamins\n\n"
+            "Available skills:\n"
+            "- schedule_message: Schedule a reminder\n"
+            "- web_search: Search the web\n\n"
+            f"{SELECTION_INSTRUCTION}"
+        ),
+    }
+    ctx = _make_context(messages=[
+        {"role": "system", "content": "base"},
+        legacy_user,
+        {"role": "assistant", "content": '{"tool_calls":[]}'},
+        {"role": "user", "content": "User answered: Europe/Moscow"},
+    ])
+    new_ctx = ReactLoop.refresh_selection_messages(ctx, CATALOG)
+    assert new_ctx.messages[1]["role"] == "system"
+    assert "<skill_selection_control>" in new_ctx.messages[1]["content"]
+    assert new_ctx.messages[2]["role"] == "user"
+    assert "<selection_input>" in new_ctx.messages[2]["content"]
+    assert "remind vitamins" in new_ctx.messages[2]["content"]
+    assert "Available skills:" not in new_ctx.messages[2]["content"]
+    assert new_ctx.messages[3]["role"] == "assistant"
+    assert new_ctx.messages[4]["content"] == "User answered: Europe/Moscow"
+
+
+def test_refresh_selection_messages_legacy_preserves_delimiters_in_user_data():
+    user_prefix = (
+        "Task: Explain Available skills: and No skills available. literally, "
+        "including <skill_selection_control> and <selection_input>."
+    )
+    legacy_user = {
+        "role": "user",
+        "content": (
+            f"{user_prefix}\n\n"
+            "Available skills:\n"
+            "- schedule_message: Schedule a reminder\n"
+            "- web_search: Search the web\n\n"
+            f"{SELECTION_INSTRUCTION}"
+        ),
+    }
+    ctx = _make_context(messages=[
+        {"role": "system", "content": "base"},
+        legacy_user,
+    ])
+
+    new_ctx = ReactLoop.refresh_selection_messages(ctx, CATALOG)
+
+    assert user_prefix in new_ctx.messages[2]["content"]
+
+
+def test_refresh_selection_messages_unrecognized_raises():
+    ctx = _make_context(messages=[{"role": "system", "content": "base only"}])
+    try:
+        ReactLoop.refresh_selection_messages(ctx, CATALOG)
+        assert False, "Expected ValueError"
+    except ValueError as e:
+        assert "Unrecognized" in str(e)
 
 
 # --- build_activation_message ---
@@ -131,19 +312,19 @@ def test_build_compact_execution_messages_order_and_content():
     msgs = ReactLoop.build_compact_execution_messages(
         profile, "Distilled brief.", SKILL_SPEC, activation)
 
-    assert len(msgs) == 4
+    assert len(msgs) == 3
     assert msgs[0]["role"] == "system"
     assert msgs[1]["role"] == "user"
     assert msgs[1]["content"] == "Task:\nDistilled brief."
-    assert msgs[2]["role"] == "assistant"
-    assert "schedule_message" in msgs[2]["content"]
-    assert msgs[3] == activation
+    assert msgs[2] == activation
+    assert msgs[2]["role"] == "system"
+    assert not any(m["role"] == "assistant" for m in msgs)
 
 
 def test_build_activation_message_contains_skill_spec_and_tools():
     msg = ReactLoop.build_activation_message(SKILL_SPEC, TOOL_SCHEMAS)
 
-    assert msg["role"] == "user"
+    assert msg["role"] == "system"
     assert "schedule_message" in msg["content"]
     assert "Schedule a reminder" in msg["content"]
     assert "reminder_text" in msg["content"]

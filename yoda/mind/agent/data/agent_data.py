@@ -14,6 +14,10 @@ class SkillSummary:
     name: str
     description: str
     public: bool = True
+    purpose: str = ""
+    when_to_use: list[str] = field(default_factory=list)
+    do_not_use_when: list[str] = field(default_factory=list)
+    selection_examples: list[str] = field(default_factory=list)
 
 
 @dataclass

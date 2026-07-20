@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from yoda.mind.agent.data.agent_data import (
@@ -108,3 +110,63 @@ async def test_delete_removes_session():
 
     await provider.delete(42)
     assert await provider.has_session(42) is False
+
+
+@pytest.mark.asyncio
+async def test_load_legacy_catalog_summaries_defaults_selection_fields():
+    storage = FakeStorageApi()
+    provider = AgentSessionProvider(storage_api=storage)
+    legacy = {
+        "task": "legacy task",
+        "profile": {},
+        "chat_id": 7,
+        "user_id": 0,
+        "catalog_summaries": [
+            {"name": "schedule_message", "description": "Schedule", "public": True},
+        ],
+        "active_skill": None,
+        "messages": [{"role": "user", "content": "Task: legacy"}],
+        "iteration": 0,
+        "tools_used": [],
+    }
+    await storage.hset("agent_sessions", "7", json.dumps(legacy))
+
+    loaded = await provider.load(7)
+    assert loaded is not None
+    summary = loaded.catalog_summaries[0]
+    assert summary.name == "schedule_message"
+    assert summary.purpose == ""
+    assert summary.when_to_use == []
+    assert summary.do_not_use_when == []
+    assert summary.selection_examples == []
+
+
+@pytest.mark.asyncio
+async def test_save_load_preserves_selection_contract_fields():
+    storage = FakeStorageApi()
+    provider = AgentSessionProvider(storage_api=storage)
+    context = AgentContext(
+        task="full contract",
+        profile=UserProfile(),
+        chat_id=8,
+        catalog_summaries=[
+            SkillSummary(
+                name="schedule_message",
+                description="Schedule",
+                public=True,
+                purpose="Deliver static text later.",
+                when_to_use=["Known payload."],
+                do_not_use_when=["Needs fresh data."],
+                selection_examples=['"vitamins" -> use'],
+            ),
+        ],
+        messages=[{"role": "system", "content": "base"}],
+    )
+    await provider.save(context)
+    loaded = await provider.load(8)
+    assert loaded is not None
+    summary = loaded.catalog_summaries[0]
+    assert summary.purpose == "Deliver static text later."
+    assert summary.when_to_use == ["Known payload."]
+    assert summary.do_not_use_when == ["Needs fresh data."]
+    assert summary.selection_examples == ['"vitamins" -> use']

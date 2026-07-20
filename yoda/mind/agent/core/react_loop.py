@@ -65,26 +65,138 @@ class ReactLoop:
         return list(context.messages) + [time_msg]
 
     @staticmethod
-    def build_selection_message(
-        task: str,
+    def build_selection_control_message(
         catalog_summaries: list[SkillSummary],
+    ) -> dict:
+        lines = [
+            "<skill_selection_control>",
+            "Select by requested outcome. Catalog order has no semantic priority.",
+            SELECTION_INSTRUCTION,
+        ]
+        if catalog_summaries:
+            for summary in sorted(catalog_summaries, key=lambda s: s.name):
+                lines.append(f'<skill name="{summary.name}">')
+                lines.append(f"purpose: {summary.purpose}")
+                lines.append("when_to_use:")
+                lines.extend(f"- {item}" for item in summary.when_to_use)
+                lines.append("do_not_use_when:")
+                lines.extend(f"- {item}" for item in summary.do_not_use_when)
+                lines.append("selection_examples:")
+                lines.extend(f"- {item}" for item in summary.selection_examples)
+                lines.append("</skill>")
+        else:
+            lines.append("No skills available.")
+        lines.append("</skill_selection_control>")
+        return {"role": "system", "content": "\n".join(lines)}
+
+    @staticmethod
+    def build_selection_input_message(
+        task: str,
         recent_messages: list[dict] | None = None,
     ) -> dict:
-        parts: list[str] = []
+        parts = ["<selection_input>"]
         if recent_messages:
             block = format_recent_messages_block(recent_messages)
             if block:
+                parts.append("<recent_conversation>")
                 parts.append(block)
-        parts.append(f"Task: {task}")
-        if catalog_summaries:
-            lines = ["Available skills:"]
-            for s in catalog_summaries:
-                lines.append(f"- {s.name}: {s.description}")
-            parts.append("\n".join(lines))
+                parts.append("</recent_conversation>")
+        parts.append("<task>")
+        parts.append(task)
+        parts.append("</task>")
+        parts.append("</selection_input>")
+        return {"role": "user", "content": "\n".join(parts)}
+
+    @staticmethod
+    def refresh_selection_messages(
+        context: AgentContext,
+        catalog_summaries: list[SkillSummary],
+    ) -> AgentContext:
+        messages = list(context.messages)
+        control_msg = ReactLoop.build_selection_control_message(catalog_summaries)
+
+        seed_pairs: list[int] = []
+        for i in range(len(messages) - 1):
+            control = messages[i]
+            selection_input = messages[i + 1]
+            control_content = str(control.get("content", ""))
+            input_content = str(selection_input.get("content", ""))
+            if (
+                control.get("role") == "system"
+                and control_content.startswith("<skill_selection_control>\n")
+                and control_content.endswith("\n</skill_selection_control>")
+                and selection_input.get("role") == "user"
+                and input_content.startswith("<selection_input>\n")
+                and input_content.endswith("\n</selection_input>")
+            ):
+                seed_pairs.append(i)
+
+        if seed_pairs:
+            if len(seed_pairs) != 1:
+                raise ValueError(
+                    "Unrecognized selection transcript: multiple selection seeds"
+                )
+            messages[seed_pairs[0]] = control_msg
+            return AgentContext(
+                task=context.task,
+                profile=context.profile,
+                chat_id=context.chat_id,
+                user_id=context.user_id,
+                catalog_summaries=catalog_summaries,
+                active_skill=context.active_skill,
+                messages=messages,
+                iteration=context.iteration,
+                tools_used=list(context.tools_used),
+            )
+
+        if context.catalog_summaries:
+            legacy_catalog_lines = ["Available skills:"]
+            legacy_catalog_lines.extend(
+                f"- {summary.name}: {summary.description}"
+                for summary in context.catalog_summaries
+            )
+            legacy_catalog = "\n".join(legacy_catalog_lines)
         else:
-            parts.append("No skills available.")
-        parts.append(SELECTION_INSTRUCTION)
-        return {"role": "user", "content": "\n\n".join(parts)}
+            legacy_catalog = "No skills available."
+        legacy_suffix = f"\n\n{legacy_catalog}\n\n{SELECTION_INSTRUCTION}"
+        legacy_idxs = [
+            i for i, message in enumerate(messages)
+            if message.get("role") == "user"
+            and str(message.get("content", "")).endswith(legacy_suffix)
+        ]
+        if len(legacy_idxs) != 1:
+            raise ValueError(
+                "Unrecognized selection transcript: no selection seed found"
+            )
+
+        legacy_idx = legacy_idxs[0]
+        legacy_content = str(messages[legacy_idx]["content"])
+        prefix = legacy_content[:-len(legacy_suffix)]
+
+        input_msg = {
+            "role": "user",
+            "content": "\n".join([
+                "<selection_input>",
+                prefix,
+                "</selection_input>",
+            ]),
+        }
+        new_messages = (
+            messages[:legacy_idx]
+            + [control_msg, input_msg]
+            + messages[legacy_idx + 1:]
+        )
+        return AgentContext(
+            task=context.task,
+            profile=context.profile,
+            chat_id=context.chat_id,
+            user_id=context.user_id,
+            catalog_summaries=catalog_summaries,
+            active_skill=context.active_skill,
+            messages=new_messages,
+            iteration=context.iteration,
+            tools_used=list(context.tools_used),
+        )
 
     @staticmethod
     def filter_tool_schemas(
@@ -107,11 +219,7 @@ class ReactLoop:
         """Fresh message list for Phase 2: no selection noise or raw Phase-1 JSON."""
         system = ReactLoop.build_system_message(profile)
         task_msg = {"role": "user", "content": f"Task:\n{task}"}
-        ack = {
-            "role": "assistant",
-            "content": f"Skill '{skill.name}' selected. Executing the workflow.",
-        }
-        return [system, task_msg, ack, activation_msg]
+        return [system, task_msg, activation_msg]
 
     @staticmethod
     def build_activation_message(
@@ -129,7 +237,7 @@ class ReactLoop:
         parts.append(_format_tool_schemas(tool_schemas))
         parts.append(f"Workflow:\n{skill.instructions}")
         parts.append(EXECUTION_INSTRUCTION)
-        return {"role": "user", "content": "\n\n".join(parts)}
+        return {"role": "system", "content": "\n\n".join(parts)}
 
     @staticmethod
     def append_assistant(

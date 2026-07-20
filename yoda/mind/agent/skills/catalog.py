@@ -7,6 +7,8 @@ from yoda.mind.agent.data.agent_data import SkillSpec, SkillSummary
 
 logger = logging.getLogger(__name__)
 
+_SELECTION_LIST_FIELDS = ("when_to_use", "do_not_use_when", "selection_examples")
+
 
 class SkillCatalog:
     @staticmethod
@@ -19,16 +21,50 @@ class SkillCatalog:
 
         for md_file in sorted(specs_dir.glob("*.md")):
             frontmatter = SkillCatalog._parse_frontmatter(md_file)
-            if frontmatter and "name" in frontmatter:
-                summaries.append(SkillSummary(
-                    name=frontmatter["name"],
-                    description=frontmatter.get("description", ""),
-                    public=frontmatter.get("public", True),
-                ))
-            else:
-                logger.warning(f"Skipping skill spec without name: {md_file}")
+            if frontmatter is None:
+                raise ValueError(
+                    f"Skill spec '{md_file.stem}' has no valid YAML frontmatter"
+                )
+            if "name" not in frontmatter or not str(frontmatter.get("name", "")).strip():
+                raise ValueError(
+                    f"Skill spec '{md_file.stem}' is missing required field 'name'"
+                )
+            SkillCatalog._validate_selection_metadata(md_file.stem, frontmatter)
+            summaries.append(SkillSummary(
+                name=frontmatter["name"],
+                description=frontmatter.get("description", ""),
+                public=frontmatter.get("public", True),
+                purpose=str(frontmatter["purpose"]).strip(),
+                when_to_use=list(frontmatter["when_to_use"]),
+                do_not_use_when=list(frontmatter["do_not_use_when"]),
+                selection_examples=list(frontmatter["selection_examples"]),
+            ))
 
         return summaries
+
+    @staticmethod
+    def _validate_selection_metadata(stem: str, frontmatter: dict) -> None:
+        skill_id = str(frontmatter.get("name") or stem).strip() or stem
+
+        purpose = frontmatter.get("purpose")
+        if not isinstance(purpose, str) or not purpose.strip():
+            raise ValueError(
+                f"Skill '{skill_id}' has invalid selection metadata field 'purpose'"
+            )
+
+        for field_name in _SELECTION_LIST_FIELDS:
+            value = frontmatter.get(field_name)
+            if not isinstance(value, list) or not value:
+                raise ValueError(
+                    f"Skill '{skill_id}' has invalid selection metadata "
+                    f"field '{field_name}'"
+                )
+            for item in value:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError(
+                        f"Skill '{skill_id}' has invalid selection metadata "
+                        f"field '{field_name}'"
+                    )
 
     @staticmethod
     def public_summaries(catalog: list[SkillSummary]) -> list[SkillSummary]:

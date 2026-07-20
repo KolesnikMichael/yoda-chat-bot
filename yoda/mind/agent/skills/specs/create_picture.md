@@ -2,6 +2,15 @@
 name: create_picture
 description: Generate an image from the user's description using AI, send it to the chat, then the main assistant comments in character.
 public: true
+purpose: Generate and send a new image from a textual visual request.
+when_to_use:
+  - The user explicitly asks to draw, generate, create, or send a new image.
+do_not_use_when:
+  - The user only discusses an imagined scene without asking for an image.
+  - The user asks to analyse an existing uploaded image.
+selection_examples:
+  - '"Нарисуй зелёного кота" -> use'
+  - '"Как выглядел бы зелёный кот?" -> do not use unless image creation is requested'
 required_inputs:
   subject: "What to depict (style, scene, mood)"
 tools:

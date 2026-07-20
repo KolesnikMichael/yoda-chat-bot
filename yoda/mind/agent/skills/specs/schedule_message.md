@@ -1,6 +1,14 @@
 ---
 name: schedule_message
 description: Schedule a reminder message (one-time or recurring) to be delivered at a specific time, after a delay, or on a cron schedule.
+purpose: Deliver static user-specified reminder text at a later time.
+when_to_use:
+  - The payload is known now and should be delivered later once or repeatedly.
+do_not_use_when:
+  - The payload requires fresh data, web search, computation, or monitoring at trigger time.
+selection_examples:
+  - '"Каждый день в 9 напоминай принять витамины" -> use'
+  - '"Каждый день в 9 присылай актуальную погоду" -> do not use; search_web'
 required_inputs:
   reminder_text: "What to remind the user about"
   time: "When to deliver — either a relative delay or an absolute time"

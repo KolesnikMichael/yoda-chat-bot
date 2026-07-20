@@ -1,8 +1,33 @@
 from pathlib import Path
 
+from yoda.mind.agent.data.agent_data import SkillSummary
 from yoda.mind.agent.skills.catalog import SkillCatalog
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "skills"
+
+
+def test_skill_summary_selection_contract_fields():
+    summary = SkillSummary(
+        name="example",
+        description="Public description.",
+        public=True,
+        purpose="Do the example thing.",
+        when_to_use=["Positive trigger."],
+        do_not_use_when=["Negative boundary."],
+        selection_examples=['"Do it" -> use'],
+    )
+    assert summary.purpose == "Do the example thing."
+    assert summary.when_to_use == ["Positive trigger."]
+    assert summary.do_not_use_when == ["Negative boundary."]
+    assert summary.selection_examples == ['"Do it" -> use']
+
+
+def test_skill_summary_defaults_for_legacy_decode():
+    summary = SkillSummary(name="legacy", description="Old summary.")
+    assert summary.purpose == ""
+    assert summary.when_to_use == []
+    assert summary.do_not_use_when == []
+    assert summary.selection_examples == []
 
 
 def test_load_catalog_finds_all_specs():
@@ -82,3 +107,174 @@ def test_public_summaries_filters_private():
 
 def test_public_summaries_empty_catalog():
     assert SkillCatalog.public_summaries([]) == []
+
+
+def test_load_catalog_loads_selection_metadata():
+    catalog = SkillCatalog.load_catalog(FIXTURES_DIR)
+    test_skill = next(s for s in catalog if s.name == "test_skill")
+    assert test_skill.purpose
+    assert test_skill.when_to_use
+    assert test_skill.do_not_use_when
+    assert test_skill.selection_examples
+
+
+def _write_spec(specs_dir: Path, stem: str, frontmatter: str) -> None:
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    (specs_dir / f"{stem}.md").write_text(
+        f"---\n{frontmatter}\n---\n# Body\n",
+        encoding="utf-8",
+    )
+
+
+_VALID_SELECTION = """
+purpose: Valid purpose.
+when_to_use:
+  - A positive trigger.
+do_not_use_when:
+  - A negative boundary.
+selection_examples:
+  - '"example" -> use'
+""".strip()
+
+
+def test_validate_selection_metadata_missing_purpose(tmp_path: Path):
+    skills_dir = tmp_path / "skills"
+    _write_spec(
+        skills_dir / "specs",
+        "broken",
+        f"name: broken\ndescription: x\n"
+        f"when_to_use:\n  - a\ndo_not_use_when:\n  - b\n"
+        f"selection_examples:\n  - c\n",
+    )
+    try:
+        SkillCatalog.load_catalog(skills_dir)
+        assert False, "Expected ValueError"
+    except ValueError as e:
+        assert "broken" in str(e)
+        assert "purpose" in str(e)
+
+
+def test_validate_selection_metadata_empty_list(tmp_path: Path):
+    skills_dir = tmp_path / "skills"
+    _write_spec(
+        skills_dir / "specs",
+        "broken",
+        "name: broken\ndescription: x\npurpose: Valid purpose.\n"
+        "when_to_use: []\n"
+        "do_not_use_when:\n  - A negative boundary.\n"
+        "selection_examples:\n  - '\"example\" -> use'\n",
+    )
+    try:
+        SkillCatalog.load_catalog(skills_dir)
+        assert False, "Expected ValueError"
+    except ValueError as e:
+        assert "broken" in str(e)
+        assert "when_to_use" in str(e)
+
+
+def test_validate_selection_metadata_blank_list_member(tmp_path: Path):
+    skills_dir = tmp_path / "skills"
+    _write_spec(
+        skills_dir / "specs",
+        "broken",
+        "name: broken\ndescription: x\npurpose: Valid purpose.\n"
+        "when_to_use:\n  - ' '\n"
+        "do_not_use_when:\n  - A negative boundary.\n"
+        "selection_examples:\n  - '\"example\" -> use'\n",
+    )
+    try:
+        SkillCatalog.load_catalog(skills_dir)
+        assert False, "Expected ValueError"
+    except ValueError as e:
+        assert "broken" in str(e)
+        assert "when_to_use" in str(e)
+
+
+def test_validate_selection_metadata_wrong_container_type(tmp_path: Path):
+    skills_dir = tmp_path / "skills"
+    _write_spec(
+        skills_dir / "specs",
+        "broken",
+        "name: broken\ndescription: x\npurpose: Valid purpose.\n"
+        "when_to_use: not-a-list\n"
+        "do_not_use_when:\n  - A negative boundary.\n"
+        "selection_examples:\n  - '\"example\" -> use'\n",
+    )
+    try:
+        SkillCatalog.load_catalog(skills_dir)
+        assert False, "Expected ValueError"
+    except ValueError as e:
+        assert "broken" in str(e)
+        assert "when_to_use" in str(e)
+
+
+def test_load_catalog_missing_name_raises(tmp_path: Path):
+    skills_dir = tmp_path / "skills"
+    _write_spec(
+        skills_dir / "specs",
+        "no_name",
+        f"description: x\n{_VALID_SELECTION}\n",
+    )
+    try:
+        SkillCatalog.load_catalog(skills_dir)
+        assert False, "Expected ValueError"
+    except ValueError as e:
+        assert "no_name" in str(e)
+        assert "name" in str(e)
+
+
+PRODUCTION_SKILLS_DIR = (
+    Path(__file__).resolve().parents[1] / "yoda" / "mind" / "agent" / "skills"
+)
+
+
+def test_production_catalog_static_dynamic_contrasts():
+    catalog = SkillCatalog.load_catalog(PRODUCTION_SKILLS_DIR)
+    by_name = {s.name: s for s in catalog}
+
+    schedule = by_name["schedule_message"]
+    search = by_name["search_web"]
+
+    schedule_blob = "\n".join(
+        [schedule.purpose]
+        + schedule.when_to_use
+        + schedule.do_not_use_when
+        + schedule.selection_examples
+    )
+    search_blob = "\n".join(
+        [search.purpose]
+        + search.when_to_use
+        + search.do_not_use_when
+        + search.selection_examples
+    )
+
+    assert "витамины" in schedule_blob
+    assert "актуальную погоду" in schedule_blob
+    assert "search_web" in schedule_blob
+
+    assert "AccuWeather" in search_blob or "актуальн" in search_blob.lower()
+    assert "проверить погоду" in search_blob
+    assert "schedule_message" in search_blob
+
+    # Order-neutral: reversing summaries must not change contract content.
+    forward = [(s.name, s.purpose, tuple(s.when_to_use),
+                tuple(s.do_not_use_when), tuple(s.selection_examples))
+               for s in sorted(catalog, key=lambda x: x.name)]
+    reversed_sorted = [
+        (s.name, s.purpose, tuple(s.when_to_use),
+         tuple(s.do_not_use_when), tuple(s.selection_examples))
+        for s in sorted(list(reversed(catalog)), key=lambda x: x.name)
+    ]
+    assert forward == reversed_sorted
+
+
+def test_production_public_summaries_excludes_manage_user_data():
+    catalog = SkillCatalog.load_catalog(PRODUCTION_SKILLS_DIR)
+    names = {s.name for s in catalog}
+    assert "manage_user_data" in names
+
+    public = SkillCatalog.public_summaries(catalog)
+    public_names = {s.name for s in public}
+    assert "manage_user_data" not in public_names
+    assert "schedule_message" in public_names
+    assert "search_web" in public_names

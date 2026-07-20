@@ -65,12 +65,14 @@ class AgentProvider:
         )
 
         system_msg = ReactLoop.build_system_message(profile)
-        selection_msg = ReactLoop.build_selection_message(
-            task,
+        control_msg = ReactLoop.build_selection_control_message(
             self._catalog_summaries,
+        )
+        input_msg = ReactLoop.build_selection_input_message(
+            task,
             recent_messages=recent_messages,
         )
-        context = context.with_messages([system_msg, selection_msg])
+        context = context.with_messages([system_msg, control_msg, input_msg])
 
         context, decision, early = await self._run_until_skill_or_answer(context)
         if early is not None:
@@ -114,6 +116,9 @@ class AgentProvider:
         context = context.with_messages(context.messages + [answer_msg])
 
         if context.active_skill is None:
+            context = ReactLoop.refresh_selection_messages(
+                context, self._catalog_summaries,
+            )
             context, decision, early = await self._run_until_skill_or_answer(context)
             if early is not None:
                 if early.answer is not None:
@@ -147,7 +152,7 @@ class AgentProvider:
                 if not nudge_used:
                     logger.warning("LLM returned no tool_calls and no final_answer, nudging")
                     nudge_msg = {
-                        "role": "user",
+                        "role": "system",
                         "content": (
                             "You must call a tool via tool_calls or set final_answer. "
                             "Do not just describe your plan — act now."
