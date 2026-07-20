@@ -1,11 +1,19 @@
+from pydantic import ValidationError
+
 from yoda.mind.agent.core.react_loop import (
     INFRA_TOOLS,
     SELECTION_INSTRUCTION,
+    _LEGACY_SELECTION_INSTRUCTION,
     ReactLoop,
 )
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
-    Decision,
+    AgentFailure,
+    AgentPhase,
+    ExecutionDecision,
+    ProtocolIssue,
+    ProtocolIssueCategory,
+    SelectionDecision,
     SkillSpec,
     SkillSummary,
     ToolCallRequest,
@@ -46,6 +54,19 @@ SKILL_SPEC = SkillSpec(
     max_iterations=3,
 )
 
+AVAILABLE_SKILLS = {s.name for s in CATALOG}
+AVAILABLE_TOOLS = {"schedule_message", "ask_user", "update_profile"}
+LEGACY_COMBINED_SYSTEM_CONTENT = (
+    "You are an executor agent. Your job is to complete tasks using "
+    "available tools. Be precise, follow the skill workflow, and produce "
+    "structured decisions.\n\n"
+    "You MUST respond with a JSON object matching this schema:\n"
+    '{"selected_skill":"skill_name or null",'
+    '"distilled_task":"execution brief or null",'
+    '"tool_calls":[],"final_answer":"answer text or null"}\n'
+    "Phase 1 may call ask_user or update_profile before choosing a skill."
+)
+
 
 def _make_context(**overrides) -> AgentContext:
     defaults = dict(
@@ -57,7 +78,88 @@ def _make_context(**overrides) -> AgentContext:
     return AgentContext(**(defaults | overrides))
 
 
-# --- build_system_message ---
+# --- SelectionDecision / ExecutionDecision extra_forbid ---
+
+def test_SelectionDecision_rejects_extra_forbid_fields():
+    try:
+        SelectionDecision(
+            mode="select_skill",
+            selected_skill="schedule_message",
+            distilled_task="remind vitamins",
+            final_answer="nope",
+        )
+        assert False, "Expected ValidationError"
+    except ValidationError:
+        pass
+
+
+def test_ExecutionDecision_rejects_extra_forbid_fields():
+    try:
+        ExecutionDecision(
+            mode="finish",
+            final_answer="done",
+            selected_skill="schedule_message",
+        )
+        assert False, "Expected ValidationError"
+    except ValidationError:
+        pass
+
+
+def test_SelectionDecision_constructs_valid_select_skill():
+    d = SelectionDecision(
+        mode="select_skill",
+        selected_skill="schedule_message",
+        distilled_task="remind vitamins",
+    )
+    assert d.mode == "select_skill"
+    assert d.reason is None
+
+
+def test_ExecutionDecision_constructs_valid_call_tools():
+    d = ExecutionDecision(
+        mode="call_tools",
+        tool_calls=[ToolCallRequest(tool_name="ask_user", arguments={"question": "?"})],
+    )
+    assert d.mode == "call_tools"
+    assert d.final_answer is None
+
+
+# --- AgentContext / AgentFailure / protocol ---
+
+def test_agent_context_defaults_phase_protocol_retry():
+    ctx = _make_context()
+    assert ctx.phase == AgentPhase.SELECTION
+    assert ctx.selection_retry_used is False
+    assert ctx.execution_retry_used is False
+    assert ctx.protocol_version == 2
+
+
+def test_agent_context_with_messages_preserves_protocol_fields():
+    ctx = _make_context(
+        phase=AgentPhase.EXECUTION,
+        selection_retry_used=True,
+        execution_retry_used=True,
+        protocol_version=2,
+    )
+    new_ctx = ctx.with_messages([{"role": "user", "content": "x"}])
+    assert new_ctx.phase == AgentPhase.EXECUTION
+    assert new_ctx.selection_retry_used is True
+    assert new_ctx.execution_retry_used is True
+    assert new_ctx.protocol_version == 2
+    assert new_ctx.messages == [{"role": "user", "content": "x"}]
+
+
+def test_AgentFailure_protocol_exhausted():
+    failure = AgentFailure(
+        stage=AgentPhase.SELECTION,
+        category="protocol_exhausted",
+        issue=ProtocolIssueCategory.MALFORMED_OUTPUT,
+    )
+    assert failure.stage == AgentPhase.SELECTION
+    assert failure.category == "protocol_exhausted"
+
+
+# --- build_system_message (execution-oriented) ---
 
 def test_build_system_message_has_role_schema_and_profile():
     profile = UserProfile(timezone="Europe/Moscow")
@@ -66,9 +168,9 @@ def test_build_system_message_has_role_schema_and_profile():
     assert msg["role"] == "system"
     content = msg["content"]
     assert "executor agent" in content
-    assert "selected_skill" in content
+    assert "call_tools" in content or "final_answer" in content
     assert "Europe/Moscow" in content
-    assert "schedule_message" not in content
+    assert "selected_skill" not in content
     assert "UTC" not in content
 
 
@@ -78,10 +180,29 @@ def test_build_system_message_notes_missing_timezone():
     assert "no timezone or location on file" in msg["content"]
 
 
+def test_build_selection_system_message_has_no_tools_or_ask_user():
+    msg = ReactLoop.build_selection_system_message(UserProfile())
+    content = msg["content"]
+    assert "select_skill" in content
+    assert "no_skill" in content
+    assert "ask_user" not in content
+    assert "tool_calls" not in content
+    assert "final_answer" not in content
+
+
+def test_build_execution_system_message_has_no_selection_fields():
+    msg = ReactLoop.build_execution_system_message(UserProfile())
+    content = msg["content"]
+    assert "call_tools" in content
+    assert "final_answer" in content
+    assert "selected_skill" not in content
+    assert "distilled_task" not in content
+
+
 # --- build_context ---
 
 def test_build_context_appends_time_after_messages():
-    system = ReactLoop.build_system_message(UserProfile(timezone="Europe/Moscow"))
+    system = ReactLoop.build_execution_system_message(UserProfile(timezone="Europe/Moscow"))
     ctx = _make_context(messages=[
         system,
         {"role": "user", "content": "Task: test"},
@@ -141,6 +262,7 @@ def test_build_selection_control_message_role_and_markers():
     assert "web_search" in content
     assert "Schedule a reminder" not in content
     assert "Search the web" not in content
+    assert "ask_user" not in content
 
 
 def test_build_selection_control_message_name_sort_stable():
@@ -250,7 +372,7 @@ def test_refresh_selection_messages_legacy_preserves_prefix_and_tail():
             "Available skills:\n"
             "- schedule_message: Schedule a reminder\n"
             "- web_search: Search the web\n\n"
-            f"{SELECTION_INSTRUCTION}"
+            f"{_LEGACY_SELECTION_INSTRUCTION}"
         ),
     }
     ctx = _make_context(messages=[
@@ -282,7 +404,7 @@ def test_refresh_selection_messages_legacy_preserves_delimiters_in_user_data():
             "Available skills:\n"
             "- schedule_message: Schedule a reminder\n"
             "- web_search: Search the web\n\n"
-            f"{SELECTION_INSTRUCTION}"
+            f"{_LEGACY_SELECTION_INSTRUCTION}"
         ),
     }
     ctx = _make_context(messages=[
@@ -319,6 +441,7 @@ def test_build_compact_execution_messages_order_and_content():
     assert msgs[2] == activation
     assert msgs[2]["role"] == "system"
     assert not any(m["role"] == "assistant" for m in msgs)
+    assert "selected_skill" not in msgs[0]["content"]
 
 
 def test_build_activation_message_contains_skill_spec_and_tools():
@@ -340,8 +463,10 @@ def test_append_assistant_adds_message():
     ctx = _make_context(messages=[
         {"role": "user", "content": "Task: test"},
     ])
-    decision = Decision(
+    decision = SelectionDecision(
+        mode="select_skill",
         selected_skill="schedule_message",
+        distilled_task="remind mom",
         reasoning="selecting skill",
     )
 
@@ -356,7 +481,7 @@ def test_append_assistant_does_not_mutate_original():
     ctx = _make_context(messages=[
         {"role": "user", "content": "Task: test"},
     ])
-    decision = Decision(reasoning="test")
+    decision = ExecutionDecision(mode="finish", final_answer="done", reasoning="test")
 
     new_ctx = ReactLoop.append_assistant(ctx, decision)
 
@@ -382,6 +507,23 @@ def test_append_tool_results_adds_messages_and_increments():
     assert new_ctx.messages[1]["role"] == "system"
     assert "[schedule_message] (OK)" in new_ctx.messages[1]["content"]
     assert "schedule_message" in new_ctx.tools_used
+
+
+def test_append_tool_results_preserves_retry_flags():
+    ctx = _make_context(
+        active_skill=SKILL_SPEC,
+        selection_retry_used=True,
+        execution_retry_used=True,
+        phase=AgentPhase.EXECUTION,
+    )
+    results = [ToolResult(tool_name="schedule_message", output="OK", success=True)]
+
+    new_ctx = ReactLoop.append_tool_results(ctx, results)
+
+    assert new_ctx.selection_retry_used is True
+    assert new_ctx.execution_retry_used is True
+    assert new_ctx.phase == AgentPhase.EXECUTION
+    assert new_ctx.protocol_version == 2
 
 
 def test_append_tool_results_does_not_mutate_original():
@@ -413,99 +555,214 @@ def test_append_tool_results_failed_tool():
     assert "(FAILED)" in new_ctx.messages[0]["content"]
 
 
-# --- validate_decision ---
+# --- validate_selection / validate_execution ---
 
-def test_validate_decision_rejects_unknown_skill():
-    ctx = _make_context(active_skill=None)
-    decision = Decision(selected_skill="nonexistent_skill")
-
-    validated = ReactLoop.validate_decision(
-        decision, ctx, {"schedule_message", "ask_user"})
-
-    assert validated.final_answer is not None
-    assert "Unknown skill" in validated.final_answer
-
-
-def test_validate_decision_phase1_rejects_skill_and_final_together():
-    ctx = _make_context(active_skill=None)
-    decision = Decision(selected_skill="schedule_message", final_answer="no")
-
-    validated = ReactLoop.validate_decision(
-        decision, ctx, {"schedule_message", "ask_user"})
-
-    assert validated.final_answer is not None
-    assert "exactly one" in validated.final_answer
-
-
-def test_validate_decision_phase1_rejects_non_infra_tool():
-    ctx = _make_context(active_skill=None)
-    decision = Decision(tool_calls=[
-        ToolCallRequest(tool_name="web_search", arguments={"query": "q"}),
-    ])
-
-    validated = ReactLoop.validate_decision(
-        decision, ctx, {"ask_user", "web_search"})
-
-    assert validated.final_answer is not None
-    assert "Phase 1 only allows" in validated.final_answer
-
-
-def test_validate_decision_phase1_allows_ask_user_only():
-    ctx = _make_context(active_skill=None)
-    decision = Decision(tool_calls=[
-        ToolCallRequest(tool_name="ask_user", arguments={"question": "?"}),
-    ])
-
-    validated = ReactLoop.validate_decision(
-        decision, ctx, {"ask_user", "web_search"})
-
-    assert validated.tool_calls
-    assert validated.final_answer is None
-
-
-def test_validate_decision_passes_valid_skill():
-    ctx = _make_context(active_skill=None)
-    decision = Decision(selected_skill="schedule_message")
-
-    validated = ReactLoop.validate_decision(
-        decision, ctx, {"schedule_message", "ask_user"})
-
-    assert validated.selected_skill == "schedule_message"
-    assert validated.final_answer is None
-
-
-def test_validate_decision_execution_strips_stray_phase1_fields():
-    ctx = _make_context(active_skill=SKILL_SPEC)
-    decision = Decision(
-        distilled_task="should be stripped",
+def test_validate_selection_accepts_select_skill():
+    decision = SelectionDecision(
+        mode="select_skill",
         selected_skill="schedule_message",
-        tool_calls=[
-            ToolCallRequest(
-                tool_name="schedule_message",
-                arguments={"reminder_text": "x"},
-            ),
+        distilled_task="remind vitamins",
+    )
+    assert ReactLoop.validate_selection_decision(decision, AVAILABLE_SKILLS) is None
+
+
+def test_validate_selection_accepts_no_skill():
+    decision = SelectionDecision(mode="no_skill", reason="unsupported")
+    assert ReactLoop.validate_selection_decision(decision, AVAILABLE_SKILLS) is None
+
+
+def test_validate_selection_rejects_unknown_skill():
+    decision = SelectionDecision(
+        mode="select_skill",
+        selected_skill="nonexistent_skill",
+        distilled_task="x",
+    )
+    issue = ReactLoop.validate_selection_decision(decision, AVAILABLE_SKILLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.UNKNOWN_SKILL
+    assert issue.stage == AgentPhase.SELECTION
+
+
+def test_validate_selection_rejects_blank_distilled_task():
+    decision = SelectionDecision(
+        mode="select_skill",
+        selected_skill="schedule_message",
+        distilled_task="   ",
+    )
+    issue = ReactLoop.validate_selection_decision(decision, AVAILABLE_SKILLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.INVALID_MODE
+
+
+def test_validate_selection_rejects_reason_on_select_skill():
+    decision = SelectionDecision(
+        mode="select_skill",
+        selected_skill="schedule_message",
+        distilled_task="ok",
+        reason="unsupported",
+    )
+    issue = ReactLoop.validate_selection_decision(decision, AVAILABLE_SKILLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.INVALID_MODE
+
+
+def test_validate_selection_rejects_skill_on_no_skill():
+    decision = SelectionDecision(
+        mode="no_skill",
+        reason="unsupported",
+        selected_skill="schedule_message",
+    )
+    issue = ReactLoop.validate_selection_decision(decision, AVAILABLE_SKILLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.INVALID_MODE
+
+
+def test_validate_execution_accepts_call_tools():
+    decision = ExecutionDecision(
+        mode="call_tools",
+        tool_calls=[ToolCallRequest(tool_name="ask_user", arguments={"question": "?"})],
+    )
+    assert ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS) is None
+
+
+def test_validate_execution_accepts_finish():
+    decision = ExecutionDecision(mode="finish", final_answer="Done.")
+    assert ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS) is None
+
+
+def test_validate_execution_rejects_unknown_tool():
+    decision = ExecutionDecision(
+        mode="call_tools",
+        tool_calls=[ToolCallRequest(tool_name="nonexistent_tool", arguments={})],
+    )
+    issue = ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.UNKNOWN_TOOL
+
+
+def test_validate_execution_rejects_tools_with_final_answer():
+    decision = ExecutionDecision(
+        mode="call_tools",
+        tool_calls=[ToolCallRequest(tool_name="ask_user", arguments={"question": "?"})],
+        final_answer="also answer",
+    )
+    issue = ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.INVALID_MODE
+
+
+def test_validate_execution_rejects_finish_with_tools():
+    decision = ExecutionDecision(
+        mode="finish",
+        final_answer="done",
+        tool_calls=[ToolCallRequest(tool_name="ask_user", arguments={"question": "?"})],
+    )
+    issue = ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.INVALID_MODE
+
+
+def test_validate_execution_rejects_blank_final_answer():
+    decision = ExecutionDecision(mode="finish", final_answer="  ")
+    issue = ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.INVALID_MODE
+
+
+# --- append_correction ---
+
+def test_append_correction_selection_sets_retry_and_system_message():
+    ctx = _make_context(messages=[{"role": "user", "content": "secret user task XYZ"}])
+    issue = ProtocolIssue(
+        stage=AgentPhase.SELECTION,
+        category=ProtocolIssueCategory.MALFORMED_OUTPUT,
+    )
+    new_ctx = ReactLoop.append_correction(ctx, issue)
+
+    assert new_ctx.selection_retry_used is True
+    assert new_ctx.execution_retry_used is False
+    assert new_ctx.messages[-1]["role"] == "system"
+    content = new_ctx.messages[-1]["content"]
+    assert "SelectionDecision" in content
+    assert "secret user task XYZ" not in content
+
+
+def test_append_correction_second_call_does_not_add_budget():
+    ctx = _make_context(selection_retry_used=True, messages=[])
+    issue = ProtocolIssue(
+        stage=AgentPhase.SELECTION,
+        category=ProtocolIssueCategory.INVALID_MODE,
+    )
+    new_ctx = ReactLoop.append_correction(ctx, issue)
+    assert new_ctx.selection_retry_used is True
+    assert new_ctx.messages == []
+
+
+def test_append_correction_execution_template():
+    ctx = _make_context(phase=AgentPhase.EXECUTION, task="do not leak THIS_TASK")
+    issue = ProtocolIssue(
+        stage=AgentPhase.EXECUTION,
+        category=ProtocolIssueCategory.UNKNOWN_TOOL,
+    )
+    new_ctx = ReactLoop.append_correction(ctx, issue)
+    assert new_ctx.execution_retry_used is True
+    content = new_ctx.messages[-1]["content"]
+    assert "ExecutionDecision" in content
+    assert "THIS_TASK" not in content
+
+
+# --- upgrade_legacy_protocol ---
+
+def test_upgrade_legacy_pre_selection_refreshes_seed():
+    control = ReactLoop.build_selection_control_message(CATALOG)
+    selection_input = ReactLoop.build_selection_input_message("task")
+    legacy_system = {
+        "role": "system",
+        "content": LEGACY_COMBINED_SYSTEM_CONTENT,
+    }
+    ctx = _make_context(
+        protocol_version=1,
+        phase=AgentPhase.SELECTION,
+        active_skill=None,
+        messages=[
+            legacy_system,
+            control,
+            selection_input,
+            {"role": "assistant", "content": '{"selected_skill":"schedule_message"}'},
         ],
     )
+    upgraded = ReactLoop.upgrade_legacy_protocol(ctx, CATALOG)
+    assert upgraded.protocol_version == 2
+    assert upgraded.phase == AgentPhase.SELECTION
+    assert "skill-selection agent" in upgraded.messages[0]["content"]
+    assert "tool_calls" not in upgraded.messages[0]["content"]
+    assert "ask_user" not in upgraded.messages[0]["content"]
+    assert "<skill_selection_control>" in upgraded.messages[1]["content"]
+    assert upgraded.messages[3]["content"] == '{"selected_skill":"schedule_message"}'
 
-    validated = ReactLoop.validate_decision(
-        decision, ctx, {"schedule_message", "ask_user"})
 
-    assert validated.distilled_task is None
-    assert validated.selected_skill is None
-    assert validated.tool_calls
-
-
-def test_validate_decision_rejects_unknown_tool():
-    ctx = _make_context(active_skill=SKILL_SPEC)
-    decision = Decision(tool_calls=[
-        ToolCallRequest(tool_name="nonexistent_tool", arguments={}),
-    ])
-
-    validated = ReactLoop.validate_decision(
-        decision, ctx, {"schedule_message", "ask_user"})
-
-    assert validated.final_answer is not None
-    assert "Unknown tool" in validated.final_answer
+def test_upgrade_legacy_active_execution_replaces_system():
+    old_system = {
+        "role": "system",
+        "content": LEGACY_COMBINED_SYSTEM_CONTENT,
+    }
+    ctx = _make_context(
+        protocol_version=1,
+        active_skill=SKILL_SPEC,
+        phase=AgentPhase.EXECUTION,
+        messages=[
+            old_system,
+            {"role": "user", "content": "Task:\nbrief"},
+            {"role": "assistant", "content": '{"tool_calls":[]}'},
+        ],
+    )
+    upgraded = ReactLoop.upgrade_legacy_protocol(ctx, CATALOG)
+    assert upgraded.protocol_version == 2
+    assert upgraded.phase == AgentPhase.EXECUTION
+    assert "selected_skill" not in upgraded.messages[0]["content"]
+    assert "call_tools" in upgraded.messages[0]["content"]
+    assert upgraded.messages[2]["content"] == '{"tool_calls":[]}'
+    assert upgraded.active_skill == SKILL_SPEC
 
 
 # --- is_done ---
@@ -518,3 +775,7 @@ def test_is_done_respects_max_iterations():
 def test_is_done_false_within_limit():
     ctx = _make_context(active_skill=SKILL_SPEC, iteration=2)
     assert ReactLoop.is_done(ctx) is False
+
+
+# silence unused import warning for SELECTION_INSTRUCTION in some linters
+assert SELECTION_INSTRUCTION

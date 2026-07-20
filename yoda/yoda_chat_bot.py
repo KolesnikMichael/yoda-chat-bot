@@ -23,7 +23,7 @@ from yoda.mind.memory.memory import MemoryProvider
 from yoda.mind.memory.data.chat_compression_settings import ChatCompressionSettings
 from yoda.mind.memory.data.emotional_state import EmotionalState
 from yoda.mind.affect import AffectProvider
-from yoda.mind.agent.agent_provider import AgentProvider
+from yoda.mind.agent.agent import Agent
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.tools.ask_user_tool import AskUserTool
 from yoda.mind.agent.tools.job_keys import active_jobs_key
@@ -256,7 +256,7 @@ def main() -> None:
             SkillCatalog.load_catalog(skills_dir))
     ]
 
-    agent_provider = AgentProvider(
+    agent = Agent(
         language_provider=agent_language_provider,
         tools=tools,
         skills_dir=skills_dir,
@@ -275,7 +275,7 @@ def main() -> None:
         memory_provider=memory_provider,
         affect_provider=affect_provider,
         cognition_provider=cognition_provider,
-        agent_provider=agent_provider,
+        agent=agent,
         public_skill_descriptions=public_skill_descriptions,
     )
 

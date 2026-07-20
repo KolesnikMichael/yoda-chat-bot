@@ -144,10 +144,13 @@ values on load, and upgrade control messages lazily on resume.
 `AgentSessionProvider.load` treats a missing phase as `execution` when
 `active_skill` exists and `selection` otherwise; missing retry flags are
 `False`, and a missing protocol version is legacy version 1. On legacy
-pre-selection resume, the existing structurally safe catalog refresh is applied
-after the clarification answer, then the current selector runs. On legacy
-active-execution resume, `ReactLoop` replaces only the recognized generated
-base protocol message with the execution-specific control contract and
+pre-selection resume, `ReactLoop` replaces the recognized generated combined
+base protocol message with the selection-specific contract and refreshes the
+catalog seed after the clarification answer, then the current selector runs.
+The seed rewrite matches both the exact legacy selection-instruction suffix and
+the current suffix so suspended TASK-014 transcripts remain upgradeable. On
+legacy active-execution resume, `ReactLoop` replaces the recognized generated
+combined base protocol message with the execution-specific control contract and
 preserves the active skill, task, tool/iteration state, transcript, and answer.
 Historical combined-decision assistant JSON remains opaque transcript content
 and is never parsed into either new response model. The upgraded context is
@@ -212,11 +215,13 @@ await language_provider.parse_structured(messages, SelectionDecision)
 await language_provider.parse_structured(messages, ExecutionDecision)
 ```
 
-`LanguageProvider.parse_structured` raises a stable
-`StructuredOutputError` for JSON/Pydantic response-shape failures without
-including raw response or validation text. Other provider exceptions are not
-misrepresented as accepted model decisions. `LLMApi` may log raw model output
-only at DEBUG; `Agent` emits WARNING diagnostics with only
+`LLMApi.parse_chat_async` uses Pydantic `model_validate`, so valid JSON with a
+non-object top level is represented by the same `ValidationError` contract as
+other malformed response shapes. `LanguageProvider.parse_structured` converts
+JSON/Pydantic response-shape failures to a stable `StructuredOutputError`
+without including raw response or validation text. Other provider exceptions
+are not misrepresented as accepted model decisions. `LLMApi` may log raw model
+output only at DEBUG; `Agent` emits WARNING diagnostics with only
 `stage=<selection|execution>` and a closed failure category.
 
 Core policy has concrete, synchronous entry points:
@@ -339,7 +344,7 @@ separate `user` message before execution resumes.
 | `yoda/mind/agent/core/react_loop.py` — `ReactLoop` | Core | Replace combined prompt/schema and `validate_decision` with phase-specific builders and pure validators; generate sanitized correction messages; preserve retry fields in copies; upgrade recognized legacy control messages | FR-1, FR-2, FR-3, FR-4, FR-5, FR-6 |
 | `yoda/mind/agent/session_provider.py` — `AgentSessionProvider` | Provider | Persist new phase/protocol/retry fields; infer additive defaults for legacy pre-selection and active-execution payloads | FR-3, FR-5, FR-6 |
 | `yoda/mind/perception/language.py` — `LanguageProvider`, `StructuredOutputError` | Provider | Normalize JSON/Pydantic structured-response failures to a stable data-free exception contract | FR-3, FR-6 |
-| `yoda/api/llm_api.py` — `LLMApi.parse_chat_async` | API | Stop logging raw invalid model output above DEBUG while preserving parse/schema exception behavior for the Provider adapter | FR-3, FR-6 |
+| `yoda/api/llm_api.py` — `LLMApi.parse_chat_async` | API | Validate decoded JSON with Pydantic `model_validate` so non-object top levels follow the normal validation path; stop logging raw invalid model output above DEBUG | FR-3, FR-6 |
 | `yoda/mind/mind.py` — `Mind` | Integration | Inject/call `Agent` for direct, resume, pending-session, and scheduled paths; map typed failures to one safe unsuccessful delivery instruction without exposing stage/category | FR-4, FR-6 |
 | `yoda/yoda_chat_bot.py` — startup wiring | Integration/wiring | Construct `Agent`, update imports and `Mind` injection, retain the same catalog/session/tool instances | FR-4 |
 | `tests/test_agent.py` — `Agent` orchestration tests | Test (Integration) | Replace/rename Provider tests; cover direct selection-to-execution, no-skill, post-selection clarification/resume, scheduled forced skill, both-phase correction/recovery/exhaustion, no rejected tool dispatch, retry persistence, safe failures, and parallel independent calls | FR-1, FR-2, FR-3, FR-4, FR-5, FR-6 |
@@ -364,6 +369,11 @@ designed for mixed TASK-014/TASK-015 code on the shared branch. Its
 Decision 5, and no bulk migration, Redis key change, profile/job/history
 migration, or ChromaDB change is required.
 
+Legacy pre-selection catalog seeds are recognized by either the exact
+pre-TASK-015 selection-instruction suffix or the current suffix. This
+dual-suffix match is intentionally retained so changing the current
+tool-free-selection wording does not strand suspended Redis transcripts.
+
 Rollback is a code/test revert. Sessions saved with protocol version 2 contain
 new top-level keys that the pre-task loader ignores because it reads named
 fields, but their phase-specific assistant JSON and control prompts are not
@@ -384,7 +394,7 @@ content remain DEBUG-only, consistent with ADR-000.
 | Structured-boundary exceptions | Normalize JSON/Pydantic failures in `LanguageProvider`; correction and diagnostics use closed data-free categories |
 | Orchestration extraction | Move directly from `AgentProvider` to `Agent`; no internal compatibility facade |
 | Legacy phase inference | Missing phase means execution when `active_skill` exists, otherwise selection |
-| Legacy transcript handling | Replace only recognized generated control content; retain historical assistant/tool/user messages as opaque transcript |
+| Legacy transcript handling | Replace recognized generated combined base control content in both phases, match legacy/current pre-selection seed suffixes, and retain historical assistant/tool/user messages as opaque transcript |
 | Terminal exhaustion | No fallback `"Task completed."`; corrective or iteration exhaustion returns typed unsuccessful state |
 | IODA boundary | `Agent` coordinates Operations; `ReactLoop` owns all semantic validation/transition policy; Providers do not call Operations |
 

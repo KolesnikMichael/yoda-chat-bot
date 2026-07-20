@@ -5,6 +5,7 @@ from dataclasses import asdict
 from yoda.api.storage_api import StorageApi
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
+    AgentPhase,
     SkillSpec,
     SkillSummary,
 )
@@ -31,6 +32,10 @@ class AgentSessionProvider:
             "messages": context.messages,
             "iteration": context.iteration,
             "tools_used": context.tools_used,
+            "phase": context.phase.value,
+            "selection_retry_used": context.selection_retry_used,
+            "execution_retry_used": context.execution_retry_used,
+            "protocol_version": context.protocol_version,
         }
         await self._storage_api.hset(
             AGENT_SESSION_KEY, str(context.chat_id), json.dumps(data))
@@ -49,6 +54,16 @@ class AgentSessionProvider:
         catalog_summaries = [SkillSummary(**s) for s in data["catalog_summaries"]]
         active_skill = SkillSpec(**data["active_skill"]) if data["active_skill"] else None
 
+        protocol_version = data.get("protocol_version", 1)
+        selection_retry_used = bool(data.get("selection_retry_used", False))
+        execution_retry_used = bool(data.get("execution_retry_used", False))
+        if "phase" in data:
+            phase = AgentPhase(data["phase"])
+        elif active_skill is not None:
+            phase = AgentPhase.EXECUTION
+        else:
+            phase = AgentPhase.SELECTION
+
         return AgentContext(
             task=data["task"],
             profile=profile,
@@ -59,6 +74,10 @@ class AgentSessionProvider:
             messages=data.get("messages", []),
             iteration=data["iteration"],
             tools_used=data["tools_used"],
+            phase=phase,
+            selection_retry_used=selection_retry_used,
+            execution_retry_used=execution_retry_used,
+            protocol_version=protocol_version,
         )
 
     async def has_session(self, chat_id: int) -> bool:

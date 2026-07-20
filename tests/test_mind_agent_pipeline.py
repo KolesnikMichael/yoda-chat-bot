@@ -3,7 +3,12 @@ import pytest
 from yoda.mind.affect import AffectProvider
 from yoda.mind.mind import Mind
 from yoda.mind.memory.data.pending_message import PendingMessage
-from yoda.mind.agent.data.agent_data import AgentResult
+from yoda.mind.agent.data.agent_data import (
+    AgentFailure,
+    AgentPhase,
+    AgentResult,
+    ProtocolIssueCategory,
+)
 from yoda.mind.perception.perception import Perception
 
 from tests.fakes import (
@@ -16,7 +21,7 @@ from tests.fakes import (
 )
 
 
-class FakeAgentProvider:
+class FakeAgent:
     def __init__(self, result=None, has_session=False):
         self._result = result or AgentResult(answer="Done!")
         self._has_session = has_session
@@ -68,7 +73,7 @@ def _default_perception() -> Perception:
 def _build_mind(intent="chat", agent_result=None, has_session=False):
     lang = FakeLanguageProvider()
     cognition = FakeCognitionProvider(intent=intent)
-    agent = FakeAgentProvider(result=agent_result, has_session=has_session)
+    agent = FakeAgent(result=agent_result, has_session=has_session)
     memory = FakeMemoryProvider()
     sender = FakeSender()
     mind = Mind(
@@ -77,7 +82,7 @@ def _build_mind(intent="chat", agent_result=None, has_session=False):
         memory_provider=memory,
         affect_provider=AffectProvider(),
         cognition_provider=cognition,
-        agent_provider=agent,
+        agent=agent,
     )
     mind.bind_message_sender(sender)
     return mind, lang, agent, memory, sender
@@ -232,7 +237,7 @@ async def test_agent_clarification_prompts_user():
 
 
 @pytest.mark.asyncio
-async def test_no_agent_provider_defaults_to_chat():
+async def test_no_agent_defaults_to_chat():
     lang = FakeLanguageProvider()
     memory = FakeMemoryProvider()
     sender = FakeSender()
@@ -315,3 +320,30 @@ async def test_execute_scheduled_task_delegates_to_agent():
     assert agent.run_with_skill_calls[0][0] == "search_web"
     assert agent.run_with_skill_calls[0][1] == "Find today's USD/RUB rate"
     assert len(sender.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_failure_maps_to_generic_instruction():
+    agent_result = AgentResult(
+        failure=AgentFailure(
+            stage=AgentPhase.SELECTION,
+            category="protocol_exhausted",
+            issue=ProtocolIssueCategory.MALFORMED_OUTPUT,
+        ),
+    )
+    mind, lang, agent, memory, sender = _build_mind(
+        intent="agent_task", agent_result=agent_result,
+    )
+
+    await mind.process_message_batch(1, [_make_pending("do it", user_id=1)])
+
+    conversation = memory.get_conversation(1)
+    system_lines = [
+        m.text for m in conversation.messages if m.role == "system"
+    ]
+    joined = "\n".join(system_lines)
+    assert any("could not complete" in line for line in system_lines)
+    assert "protocol_exhausted" not in joined
+    assert "malformed_output" not in joined
+    assert "AgentPhase" not in joined
+    assert "Unknown tool" not in joined

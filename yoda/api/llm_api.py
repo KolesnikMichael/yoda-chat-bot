@@ -119,6 +119,6 @@ class LLMApi:
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
-            logger.error(f"LLM returned invalid JSON: {content[:500]}")
+            logger.debug(f"LLM returned invalid JSON: {content[:500]}")
             raise
-        return response_format(**data)
+        return response_format.model_validate(data)

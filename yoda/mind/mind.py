@@ -16,7 +16,7 @@ from .perception.language import LanguageProvider
 from .perception.perception import Perception
 
 if TYPE_CHECKING:
-    from yoda.mind.agent.agent_provider import AgentProvider
+    from yoda.mind.agent.agent import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class Mind:
         memory_provider: MemoryProvider,
         affect_provider: AffectProvider,
         cognition_provider: CognitionProvider | None = None,
-        agent_provider: AgentProvider | None = None,
+        agent: Agent | None = None,
         public_skill_descriptions: list[str] | None = None,
     ):
         self.language_provider = language_provider
@@ -37,11 +37,10 @@ class Mind:
         self.memory_provider = memory_provider
         self.affect_provider = affect_provider
         self.cognition_provider = cognition_provider
-        self.agent_provider = agent_provider
+        self.agent = agent
         self._message_sender = None
         self._capabilities_block = self._build_capabilities_block(
             public_skill_descriptions or [])
-
     @staticmethod
     def _build_capabilities_block(descriptions: list[str]) -> str:
         if not descriptions:
@@ -104,11 +103,11 @@ class Mind:
         routing = CognitionCore.build_routing_context(perceived, conversation)
         intent = await self._classify_intent(chat_id, routing)
 
-        if intent == "agent_resume" and self.agent_provider:
+        if intent == "agent_resume" and self.agent:
             await self._handle_agent_resume(
                 chat_id, routing.current_user_text, system_prompt, conversation)
 
-        elif intent == "agent_task" and self.agent_provider:
+        elif intent == "agent_task" and self.agent:
             user_id = batch[0].user_id
             await self._handle_agent_task(
                 chat_id, user_id, routing, system_prompt, conversation)
@@ -129,12 +128,12 @@ class Mind:
         skill_name: str,
         distilled_task: str,
     ) -> None:
-        if not self.agent_provider:
-            logger.error("execute_scheduled_task called without agent_provider")
+        if not self.agent:
+            logger.error("execute_scheduled_task called without agent")
             return
 
         profile = await self.memory_provider.get_user_profile(user_id, chat_id)
-        result = await self.agent_provider.run_with_skill(
+        result = await self.agent.run_with_skill(
             skill_name=skill_name,
             task=distilled_task,
             profile=profile,
@@ -218,10 +217,10 @@ class Mind:
         chat_id: int,
         routing: RoutingContext,
     ) -> str:
-        if not self.agent_provider:
+        if not self.agent:
             return "chat"
 
-        if await self.agent_provider.has_pending_session(chat_id):
+        if await self.agent.has_pending_session(chat_id):
             return "agent_resume"
 
         if not routing.current_user_text or self.cognition_provider is None:
@@ -243,7 +242,7 @@ class Mind:
         conversation,
     ) -> None:
         profile = await self.memory_provider.get_user_profile(user_id, chat_id)
-        result = await self.agent_provider.run(
+        result = await self.agent.run(
             task=routing.current_user_text,
             profile=profile,
             chat_id=chat_id,
@@ -260,14 +259,20 @@ class Mind:
         system_prompt: str,
         conversation,
     ) -> None:
-        result = await self.agent_provider.resume(chat_id, user_text)
+        result = await self.agent.resume(chat_id, user_text)
         await self._handle_agent_result(
             chat_id, result, system_prompt, conversation)
 
     async def _handle_agent_result(
         self, chat_id: int, result, system_prompt: str, conversation,
     ) -> None:
-        if result.clarification:
+        if result.failure is not None:
+            line = (
+                "The agent could not complete the request. "
+                "Tell the user briefly and naturally that it did not work, "
+                "without technical detail"
+            )
+        elif result.clarification:
             line = f"Ask the user (rephrase naturally in your voice): {result.clarification}"
         elif result.answer:
             tools = ", ".join(result.tools_used) if result.tools_used else "none"
