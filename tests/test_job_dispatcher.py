@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from yoda.mind.job_dispatcher import JobDispatcher
+from yoda.mind.agent.data.agent_data import RequestConstraints
 from tests.test_agent_tools import FakeSchedulerApi, FakeStorageApi
 
 
@@ -56,7 +57,36 @@ async def test_dispatcher_routes_task_job():
         user_id=5,
         skill_name="search_web",
         distilled_task="Find news",
+        request_constraints=RequestConstraints(),
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_routes_task_job_with_constraints():
+    storage = FakeStorageApi()
+    scheduler = FakeSchedulerApi()
+    mind = MagicMock()
+    mind.execute_scheduled_task = AsyncMock()
+
+    payload = json.dumps({
+        "kind": "task",
+        "user_id": 5,
+        "skill_name": "search_web",
+        "distilled_task": "Find news from Reuters only",
+        "request_constraints": {
+            "strict_source_domains": ["reuters.com"],
+            "soft_source_domains": [],
+        },
+    })
+    await storage.hset("active_jobs:42", "job_3", payload)
+
+    dispatcher = JobDispatcher(storage, scheduler, mind)
+    await dispatcher.fire(42, "job_3")
+
+    kwargs = mind.execute_scheduled_task.await_args.kwargs
+    assert kwargs["distilled_task"] == "Find news from Reuters only"
+    assert kwargs["request_constraints"].strict_source_domains == ["reuters.com"]
+    assert kwargs["request_constraints"].soft_source_domains == []
 
 
 @pytest.mark.asyncio

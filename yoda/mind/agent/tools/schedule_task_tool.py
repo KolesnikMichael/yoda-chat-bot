@@ -3,12 +3,12 @@ import logging
 import uuid
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.storage_api import StorageApi
 from yoda.mind.agent.core.schedule_core import ScheduleCore
-from yoda.mind.agent.data.agent_data import ToolCall, ToolResult
+from yoda.mind.agent.data.agent_data import RequestConstraints, ToolCall, ToolResult
 from yoda.mind.agent.tools.job_keys import active_jobs_key
 from yoda.mind.agent.tools.tool_port import Tool
 
@@ -27,6 +27,9 @@ class ScheduleTaskParams(BaseModel):
     minute: int | None = None
     timezone: str | None = None
     cron: str | None = None
+    request_constraints: RequestConstraints = Field(
+        default_factory=RequestConstraints,
+    )
 
 
 class ScheduleTaskTool(Tool):
@@ -137,7 +140,8 @@ class ScheduleTaskTool(Tool):
                 timezone=tz_for_meta,
                 user_id=user_id,
                 skill_name=params.skill_name,
-                distilled_task=params.distilled_task.strip(),
+                distilled_task=params.distilled_task,
+                request_constraints=params.request_constraints,
             )
         else:
             if params.delay_minutes is not None:
@@ -186,7 +190,8 @@ class ScheduleTaskTool(Tool):
                 timezone=tz_for_meta,
                 user_id=user_id,
                 skill_name=params.skill_name,
-                distilled_task=params.distilled_task.strip(),
+                distilled_task=params.distilled_task,
+                request_constraints=params.request_constraints,
             )
 
         return ToolResult(
@@ -211,6 +216,7 @@ class ScheduleTaskTool(Tool):
         user_id: int,
         skill_name: str,
         distilled_task: str,
+        request_constraints: RequestConstraints,
     ) -> None:
         metadata = json.dumps({
             "job_id": job_id,
@@ -223,5 +229,6 @@ class ScheduleTaskTool(Tool):
             "user_id": user_id,
             "skill_name": skill_name,
             "distilled_task": distilled_task,
+            "request_constraints": request_constraints.model_dump(),
         })
         await self._storage_api.hset(active_jobs_key(chat_id), job_id, metadata)

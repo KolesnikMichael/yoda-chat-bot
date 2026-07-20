@@ -5,6 +5,7 @@ import datetime as dtm
 import logging
 from pathlib import Path
 
+from yoda.mind.agent.core.execution_context import ExecutionContextCore
 from yoda.mind.agent.core.react_loop import ReactLoop
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
@@ -14,6 +15,7 @@ from yoda.mind.agent.data.agent_data import (
     ExecutionDecision,
     ProtocolIssue,
     ProtocolIssueCategory,
+    RequestConstraints,
     SelectionDecision,
     ToolCall,
     ToolCallRequest,
@@ -93,7 +95,25 @@ class Agent:
         profile: UserProfile,
         chat_id: int,
         user_id: int = 0,
+        request_constraints: RequestConstraints | None = None,
     ) -> AgentResult:
+        try:
+            constraints = ExecutionContextCore.normalize_request_constraints(
+                request_constraints or RequestConstraints(),
+            )
+        except ValueError:
+            logger.warning(
+                "stage=%s category=%s",
+                AgentPhase.EXECUTION.value,
+                ProtocolIssueCategory.INVALID_CONSTRAINT.value,
+            )
+            return AgentResult(
+                failure=AgentFailure(
+                    stage=AgentPhase.EXECUTION,
+                    category="protocol_exhausted",
+                    issue=ProtocolIssueCategory.INVALID_CONSTRAINT,
+                ),
+            )
         base = AgentContext(
             task=task,
             profile=profile,
@@ -101,6 +121,8 @@ class Agent:
             user_id=user_id,
             catalog_summaries=self._catalog_summaries,
             phase=AgentPhase.EXECUTION,
+            request_constraints=constraints,
+            protocol_version=3,
         )
         context = self._activate_skill(
             base,
@@ -114,10 +136,8 @@ class Agent:
         if context is None:
             return AgentResult(answer="No pending session found.")
 
-        if context.protocol_version < 2:
-            context = ReactLoop.upgrade_legacy_protocol(
-                context, self._catalog_summaries,
-            )
+        if context.protocol_version < 3:
+            context = self._upgrade_session_protocol(context)
 
         answer_msg = {"role": "user", "content": f"User answered: {user_answer}"}
         context = context.with_messages(context.messages + [answer_msg])
@@ -158,6 +178,28 @@ class Agent:
 
             assert decision.selected_skill is not None
             assert decision.distilled_task is not None
+            try:
+                constraints = ExecutionContextCore.normalize_request_constraints(
+                    decision.request_constraints,
+                )
+            except ValueError:
+                logger.warning(
+                    "stage=%s category=%s",
+                    AgentPhase.EXECUTION.value,
+                    ProtocolIssueCategory.INVALID_CONSTRAINT.value,
+                )
+                await self._sessions.delete(context.chat_id)
+                return AgentResult(
+                    failure=AgentFailure(
+                        stage=AgentPhase.EXECUTION,
+                        category="protocol_exhausted",
+                        issue=ProtocolIssueCategory.INVALID_CONSTRAINT,
+                    ),
+                )
+            context = ReactLoop._copy_context(
+                context,
+                request_constraints=constraints,
+            )
             return self._activate_skill(
                 context,
                 skill_name=decision.selected_skill.strip(),
@@ -207,7 +249,18 @@ class Agent:
                 break
 
             assert decision.tool_calls is not None
-            tool_calls = self._build_tool_calls(context, decision.tool_calls)
+            prepared, prep_issue = ExecutionContextCore.prepare_tool_requests(
+                decision.tool_calls,
+                context.request_constraints,
+            )
+            if prep_issue is not None:
+                exhausted = await self._handle_phase_issue(context, prep_issue)
+                if isinstance(exhausted, AgentResult):
+                    return exhausted
+                context = exhausted
+                continue
+
+            tool_calls = self._build_tool_calls(context, prepared)
             results = await self._execute_tool_calls(tool_calls)
 
             suspended = next((r for r in results if r.suspend), None)
@@ -311,18 +364,29 @@ class Agent:
         context: AgentContext,
         requests: list[ToolCallRequest],
     ) -> list[ToolCall]:
-        return [
-            ToolCall(
-                tool_name=tc.tool_name,
-                arguments=tc.arguments,
-                metadata={
-                    "chat_id": context.chat_id,
-                    "user_id": context.user_id,
-                    "profile_timezone": context.profile.timezone,
-                },
+        calls: list[ToolCall] = []
+        for tc in requests:
+            arguments = dict(tc.arguments)
+            if tc.tool_name == "update_profile" and isinstance(
+                arguments.get("fields"), dict,
+            ):
+                arguments["fields"] = (
+                    ExecutionContextCore.canonicalize_profile_update_fields(
+                        arguments["fields"],
+                    )
+                )
+            calls.append(
+                ToolCall(
+                    tool_name=tc.tool_name,
+                    arguments=arguments,
+                    metadata={
+                        "chat_id": context.chat_id,
+                        "user_id": context.user_id,
+                        "profile_timezone": context.profile.timezone,
+                    },
+                ),
             )
-            for tc in requests
-        ]
+        return calls
 
     async def _execute_tool_calls(
         self, tool_calls: list[ToolCall],
@@ -360,6 +424,30 @@ class Agent:
                 success=False,
             )
 
+    def _upgrade_session_protocol(self, context: AgentContext) -> AgentContext:
+        skill_preferences: list[str] = []
+        activation_msg: dict | None = None
+        if context.active_skill is not None:
+            skill = SkillCatalog.load_skill(
+                self._skills_dir, context.active_skill.name,
+            )
+            context = ReactLoop._copy_context(context, active_skill=skill)
+            skill_preferences = ExecutionContextCore.effective_skill_preferences(
+                context.profile, skill.name,
+            )
+            filtered_schemas = ReactLoop.filter_tool_schemas(
+                self._tool_schemas, skill,
+            )
+            activation_msg = ReactLoop.build_activation_message(
+                skill, filtered_schemas,
+            )
+        return ReactLoop.upgrade_legacy_protocol(
+            context,
+            self._catalog_summaries,
+            skill_preferences=skill_preferences,
+            activation_msg=activation_msg,
+        )
+
     def _activate_skill(
         self,
         context: AgentContext,
@@ -372,8 +460,23 @@ class Agent:
             self._tool_schemas, skill)
         activation_msg = ReactLoop.build_activation_message(
             skill, filtered_schemas)
+        skill_preferences = ExecutionContextCore.effective_skill_preferences(
+            context.profile, skill.name,
+        )
+        logger.debug(
+            "Activating skill=%s preferences=%s constraints=%s",
+            skill.name,
+            skill_preferences,
+            context.request_constraints.model_dump(),
+        )
         messages = ReactLoop.build_compact_execution_messages(
-            context.profile, distilled_task, skill, activation_msg)
+            context.profile,
+            distilled_task,
+            skill,
+            activation_msg,
+            skill_preferences=skill_preferences,
+            request_constraints=context.request_constraints,
+        )
         return AgentContext(
             task=distilled_task,
             profile=context.profile,
@@ -387,5 +490,6 @@ class Agent:
             phase=AgentPhase.EXECUTION,
             selection_retry_used=context.selection_retry_used,
             execution_retry_used=context.execution_retry_used,
+            request_constraints=context.request_constraints,
             protocol_version=context.protocol_version,
         )

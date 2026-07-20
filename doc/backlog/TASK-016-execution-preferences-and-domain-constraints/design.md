@@ -101,7 +101,9 @@ list only when it is set-equal to that restriction. A conflicting, empty,
 broader, or malformed list yields a phase issue and no tool runs. Repeated calls
 therefore retain an equal restriction. `web_extract` URLs must have a host equal
 to, or below, an allowed host. `schedule_task` receives the current typed
-constraints from Core rather than trusting the model to copy them. With no
+constraints from Core rather than trusting the model to copy them. Core never
+injects soft or stored preference domains into `include_domains`; those tiers
+remain workflow-mediated in the skill prompt and executor arguments. With no
 strict constraint, soft domains guide the executor but may fall back according
 to the workflow (FR-2, FR-3, FR-5). No ADR candidate.
 

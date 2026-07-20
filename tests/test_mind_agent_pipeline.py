@@ -8,6 +8,7 @@ from yoda.mind.agent.data.agent_data import (
     AgentPhase,
     AgentResult,
     ProtocolIssueCategory,
+    RequestConstraints,
 )
 from yoda.mind.perception.perception import Perception
 
@@ -38,9 +39,10 @@ class FakeAgent:
 
     async def run_with_skill(
         self, *, skill_name, task, profile, chat_id, user_id=0,
+        request_constraints=None,
     ):
         self.run_with_skill_calls.append(
-            (skill_name, task, profile, chat_id, user_id))
+            (skill_name, task, profile, chat_id, user_id, request_constraints))
         return self._result
 
     async def resume(self, chat_id, user_answer):
@@ -319,7 +321,31 @@ async def test_execute_scheduled_task_delegates_to_agent():
     assert len(agent.run_with_skill_calls) == 1
     assert agent.run_with_skill_calls[0][0] == "search_web"
     assert agent.run_with_skill_calls[0][1] == "Find today's USD/RUB rate"
+    assert agent.run_with_skill_calls[0][5] == RequestConstraints()
     assert len(sender.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_scheduled_task_passes_constraints_not_merged_with_profile():
+    agent_result = AgentResult(answer="ok")
+    mind, lang, agent, memory, sender = _build_mind(
+        agent_result=agent_result,
+    )
+
+    constraints = RequestConstraints(strict_source_domains=["strict.example"])
+    await mind.execute_scheduled_task(
+        chat_id=1,
+        user_id=7,
+        skill_name="search_web",
+        distilled_task="Find weather only from strict.example",
+        request_constraints=constraints,
+    )
+
+    call = agent.run_with_skill_calls[0]
+    assert call[1] == "Find weather only from strict.example"
+    assert call[5] == constraints
+    # Mind loads then-current profile separately; it does not fold prefs into constraints.
+    assert call[2].timezone == "Europe/Moscow"
 
 
 @pytest.mark.asyncio

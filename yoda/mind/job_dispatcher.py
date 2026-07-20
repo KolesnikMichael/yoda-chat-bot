@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.storage_api import StorageApi
+from yoda.mind.agent.data.agent_data import RequestConstraints
 from yoda.mind.agent.tools.job_keys import active_jobs_key
 
 if TYPE_CHECKING:
@@ -49,11 +50,17 @@ class JobDispatcher:
 
         if kind == "task":
             try:
+                raw_constraints = data.get("request_constraints")
+                if raw_constraints is None:
+                    constraints = RequestConstraints()
+                else:
+                    constraints = RequestConstraints.model_validate(raw_constraints)
                 await self._mind.execute_scheduled_task(
                     chat_id=chat_id,
                     user_id=data.get("user_id", 0),
                     skill_name=data["skill_name"],
                     distilled_task=data["distilled_task"],
+                    request_constraints=constraints,
                 )
             except Exception:
                 logger.exception(

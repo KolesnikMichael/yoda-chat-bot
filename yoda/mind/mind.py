@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from yoda.mind.memory.data.pending_message import PendingMessage
 from yoda.mind.data.routing_context import RoutingContext
+from yoda.mind.agent.data.agent_data import RequestConstraints
 
 from .affect import AffectCore, AffectProvider
 from .cognition import CognitionCore, CognitionProvider
@@ -127,6 +128,7 @@ class Mind:
         user_id: int,
         skill_name: str,
         distilled_task: str,
+        request_constraints: RequestConstraints | None = None,
     ) -> None:
         if not self.agent:
             logger.error("execute_scheduled_task called without agent")
@@ -139,6 +141,7 @@ class Mind:
             profile=profile,
             chat_id=chat_id,
             user_id=user_id,
+            request_constraints=request_constraints or RequestConstraints(),
         )
 
         emotional_state = self.affect_provider.get_emotional_state()

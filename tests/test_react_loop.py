@@ -13,6 +13,7 @@ from yoda.mind.agent.data.agent_data import (
     ExecutionDecision,
     ProtocolIssue,
     ProtocolIssueCategory,
+    RequestConstraints,
     SelectionDecision,
     SkillSpec,
     SkillSummary,
@@ -113,6 +114,39 @@ def test_SelectionDecision_constructs_valid_select_skill():
     )
     assert d.mode == "select_skill"
     assert d.reason is None
+    assert d.request_constraints == RequestConstraints()
+
+
+def test_RequestConstraints_defaults_empty_lists():
+    c = RequestConstraints()
+    assert c.strict_source_domains == []
+    assert c.soft_source_domains == []
+
+
+def test_RequestConstraints_rejects_extra_forbid_fields():
+    try:
+        RequestConstraints(strict_source_domains=["a.com"], extra="nope")
+        assert False, "Expected ValidationError"
+    except ValidationError:
+        pass
+
+
+def test_SelectionDecision_accepts_request_constraints():
+    d = SelectionDecision(
+        mode="select_skill",
+        selected_skill="search_web",
+        distilled_task="forecast from accuweather only",
+        request_constraints=RequestConstraints(
+            strict_source_domains=["accuweather.com"],
+            soft_source_domains=["weather.com"],
+        ),
+    )
+    assert d.request_constraints.strict_source_domains == ["accuweather.com"]
+    assert d.request_constraints.soft_source_domains == ["weather.com"]
+
+
+def test_ProtocolIssueCategory_INVALID_CONSTRAINT_exists():
+    assert ProtocolIssueCategory.INVALID_CONSTRAINT == "invalid_constraint"
 
 
 def test_ExecutionDecision_constructs_valid_call_tools():
@@ -131,21 +165,25 @@ def test_agent_context_defaults_phase_protocol_retry():
     assert ctx.phase == AgentPhase.SELECTION
     assert ctx.selection_retry_used is False
     assert ctx.execution_retry_used is False
-    assert ctx.protocol_version == 2
+    assert ctx.protocol_version == 3
+    assert ctx.request_constraints == RequestConstraints()
 
 
 def test_agent_context_with_messages_preserves_protocol_fields():
+    constraints = RequestConstraints(strict_source_domains=["example.com"])
     ctx = _make_context(
         phase=AgentPhase.EXECUTION,
         selection_retry_used=True,
         execution_retry_used=True,
-        protocol_version=2,
+        protocol_version=3,
+        request_constraints=constraints,
     )
     new_ctx = ctx.with_messages([{"role": "user", "content": "x"}])
     assert new_ctx.phase == AgentPhase.EXECUTION
     assert new_ctx.selection_retry_used is True
     assert new_ctx.execution_retry_used is True
-    assert new_ctx.protocol_version == 2
+    assert new_ctx.protocol_version == 3
+    assert new_ctx.request_constraints == constraints
     assert new_ctx.messages == [{"role": "user", "content": "x"}]
 
 
@@ -432,16 +470,98 @@ def test_build_compact_execution_messages_order_and_content():
     profile = UserProfile(timezone="Europe/Moscow")
     activation = ReactLoop.build_activation_message(SKILL_SPEC, TOOL_SCHEMAS)
     msgs = ReactLoop.build_compact_execution_messages(
-        profile, "Distilled brief.", SKILL_SPEC, activation)
+        profile,
+        "Distilled brief.",
+        SKILL_SPEC,
+        activation,
+        skill_preferences=["prefer short"],
+        request_constraints=RequestConstraints(
+            strict_source_domains=["example.com"],
+            soft_source_domains=["fallback.example"],
+        ),
+    )
 
     assert len(msgs) == 3
     assert msgs[0]["role"] == "system"
+    assert '<profile_data trust="untrusted">' in msgs[0]["content"]
+    assert '"skill_preferences": ["prefer short"]' in msgs[0]["content"]
     assert msgs[1]["role"] == "user"
-    assert msgs[1]["content"] == "Task:\nDistilled brief."
+    assert "<task>" in msgs[1]["content"]
+    assert "Distilled brief." in msgs[1]["content"]
+    assert '"strict_source_domains": ["example.com"]' in msgs[1]["content"]
+    assert '"soft_source_domains": ["fallback.example"]' in msgs[1]["content"]
+    assert "prefer short" not in msgs[1]["content"]
     assert msgs[2] == activation
     assert msgs[2]["role"] == "system"
     assert not any(m["role"] == "assistant" for m in msgs)
     assert "selected_skill" not in msgs[0]["content"]
+
+
+def test_execution_profile_data_only_active_skill_preferences():
+    profile = UserProfile(
+        timezone="Europe/Moscow",
+        skill_preferences={
+            "search_web": ["prefer Reuters"],
+            "schedule_message": ["short reminders"],
+        },
+    )
+    activation = ReactLoop.build_activation_message(SKILL_SPEC, TOOL_SCHEMAS)
+    msgs = ReactLoop.build_compact_execution_messages(
+        profile,
+        "remind vitamins",
+        SKILL_SPEC,
+        activation,
+        skill_preferences=["short reminders"],
+    )
+    content = msgs[0]["content"]
+    assert '"skill_name": "schedule_message"' in content
+    assert '"skill_preferences": ["short reminders"]' in content
+    assert "prefer Reuters" not in content
+    assert "skill_preferences" not in ReactLoop.build_selection_system_message(
+        profile,
+    )["content"]
+
+
+def test_execution_empty_preferences_and_constraints_render_explicit_lists():
+    activation = ReactLoop.build_activation_message(SKILL_SPEC, TOOL_SCHEMAS)
+    msgs = ReactLoop.build_compact_execution_messages(
+        UserProfile(), "task", SKILL_SPEC, activation,
+    )
+    assert '"skill_preferences": []' in msgs[0]["content"]
+    assert (
+        '<request_constraints>{"strict_source_domains": [], '
+        '"soft_source_domains": []}</request_constraints>'
+    ) in msgs[1]["content"]
+
+
+def test_selection_schema_mentions_request_constraints():
+    content = ReactLoop.build_selection_system_message(UserProfile())["content"]
+    assert "request_constraints" in content
+    assert "strict_source_domains" in content
+    assert "soft_source_domains" in content
+    assert "skill_preferences" not in content
+
+
+def test_selection_decision_missing_request_constraints_defaults_empty():
+    d = SelectionDecision.model_validate({
+        "mode": "select_skill",
+        "selected_skill": "search_web",
+        "distilled_task": "find news",
+    })
+    assert d.request_constraints == RequestConstraints()
+
+
+def test_selection_decision_with_domains_parses():
+    d = SelectionDecision.model_validate({
+        "mode": "select_skill",
+        "selected_skill": "search_web",
+        "distilled_task": "forecast only from accuweather",
+        "request_constraints": {
+            "strict_source_domains": ["accuweather.com"],
+            "soft_source_domains": [],
+        },
+    })
+    assert d.request_constraints.strict_source_domains == ["accuweather.com"]
 
 
 def test_build_activation_message_contains_skill_spec_and_tools():
@@ -523,10 +643,8 @@ def test_append_tool_results_preserves_retry_flags():
     assert new_ctx.selection_retry_used is True
     assert new_ctx.execution_retry_used is True
     assert new_ctx.phase == AgentPhase.EXECUTION
-    assert new_ctx.protocol_version == 2
-
-
-def test_append_tool_results_does_not_mutate_original():
+    assert new_ctx.protocol_version == 3
+    assert new_ctx.request_constraints == RequestConstraints()
     ctx = _make_context(active_skill=SKILL_SPEC)
     results = [ToolResult(tool_name="schedule_message", output="OK", success=True)]
 
@@ -732,13 +850,14 @@ def test_upgrade_legacy_pre_selection_refreshes_seed():
         ],
     )
     upgraded = ReactLoop.upgrade_legacy_protocol(ctx, CATALOG)
-    assert upgraded.protocol_version == 2
+    assert upgraded.protocol_version == 3
     assert upgraded.phase == AgentPhase.SELECTION
     assert "skill-selection agent" in upgraded.messages[0]["content"]
     assert "tool_calls" not in upgraded.messages[0]["content"]
     assert "ask_user" not in upgraded.messages[0]["content"]
     assert "<skill_selection_control>" in upgraded.messages[1]["content"]
     assert upgraded.messages[3]["content"] == '{"selected_skill":"schedule_message"}'
+    assert upgraded.request_constraints == RequestConstraints()
 
 
 def test_upgrade_legacy_active_execution_replaces_system():
@@ -746,6 +865,7 @@ def test_upgrade_legacy_active_execution_replaces_system():
         "role": "system",
         "content": LEGACY_COMBINED_SYSTEM_CONTENT,
     }
+    tool_history = {"role": "system", "content": "[web_search] (OK) results"}
     ctx = _make_context(
         protocol_version=1,
         active_skill=SKILL_SPEC,
@@ -753,16 +873,48 @@ def test_upgrade_legacy_active_execution_replaces_system():
         messages=[
             old_system,
             {"role": "user", "content": "Task:\nbrief"},
+            ReactLoop.build_activation_message(SKILL_SPEC, TOOL_SCHEMAS),
             {"role": "assistant", "content": '{"tool_calls":[]}'},
+            tool_history,
         ],
+        request_constraints=RequestConstraints(
+            strict_source_domains=["example.com"],
+        ),
     )
-    upgraded = ReactLoop.upgrade_legacy_protocol(ctx, CATALOG)
-    assert upgraded.protocol_version == 2
+    upgraded = ReactLoop.upgrade_legacy_protocol(
+        ctx,
+        CATALOG,
+        skill_preferences=["short"],
+    )
+    assert upgraded.protocol_version == 3
     assert upgraded.phase == AgentPhase.EXECUTION
     assert "selected_skill" not in upgraded.messages[0]["content"]
     assert "call_tools" in upgraded.messages[0]["content"]
-    assert upgraded.messages[2]["content"] == '{"tool_calls":[]}'
+    assert '<profile_data trust="untrusted">' in upgraded.messages[0]["content"]
+    assert "<task>" in upgraded.messages[1]["content"]
+    assert '"strict_source_domains": ["example.com"]' in upgraded.messages[1]["content"]
+    assert upgraded.messages[-2]["content"] == '{"tool_calls":[]}'
+    assert upgraded.messages[-1] == tool_history
     assert upgraded.active_skill == SKILL_SPEC
+    assert upgraded.request_constraints.strict_source_domains == ["example.com"]
+
+
+def test_append_correction_INVALID_CONSTRAINT_is_sanitized():
+    ctx = _make_context(
+        phase=AgentPhase.EXECUTION,
+        request_constraints=RequestConstraints(
+            strict_source_domains=["secret-domain.example"],
+        ),
+    )
+    issue = ProtocolIssue(
+        stage=AgentPhase.EXECUTION,
+        category=ProtocolIssueCategory.INVALID_CONSTRAINT,
+    )
+    new_ctx = ReactLoop.append_correction(ctx, issue)
+    content = new_ctx.messages[-1]["content"]
+    assert "ExecutionDecision" in content
+    assert "secret-domain.example" not in content
+    assert "source constraints" in content
 
 
 # --- is_done ---

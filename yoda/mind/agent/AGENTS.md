@@ -2,36 +2,61 @@
 
 Two-phase ReAct loop with declarative skills and typed tools. `Agent`
 (Integration) orchestrates; `ReactLoop` (Core) builds phase-specific context and
-validates decisions; Providers adapt language, sessions, and tools.
+validates decisions; `ExecutionContextCore` owns preference aliasing, host
+normalization, and pre-dispatch constraint preparation; Providers adapt language,
+sessions, and tools.
 
 ## Two-phase execution
 
 1. **Selection** — tool-free. LLM sees a compact skill catalog (control message)
-   and returns a `SelectionDecision`: `select_skill` (with distilled task) or
-   `no_skill` (`reason=unsupported`). No tools, no clarification, no final answer.
+   and returns a `SelectionDecision`: `select_skill` (with distilled task +
+   typed `request_constraints`) or `no_skill` (`reason=unsupported`). No tools,
+   no clarification, no final answer. Selection prompts must **not** inject
+   `skill_preferences`.
 2. **Execution** — after skill activation. Full skill spec + filtered tool schemas
-   are injected. LLM returns an `ExecutionDecision`: `call_tools` or `finish`.
+   are injected. Only the **active skill's** effective preferences appear in a
+   delimited untrusted `<profile_data>` block. The user message carries `<task>`
+   and `<request_constraints>`. LLM returns an `ExecutionDecision`: `call_tools`
+   or `finish`.
 
 Phase-specific Pydantic models use `extra="forbid"`. Semantic cross-field and
 membership rules live in `ReactLoop.validate_selection_decision` /
 `validate_execution_decision` and return `ProtocolIssue`, never answer strings.
+Before tool dispatch, `Agent` calls `ExecutionContextCore.prepare_tool_requests`;
+`INVALID_CONSTRAINT` consumes the execution corrective budget and dispatches
+nothing.
+
+### Preferences vs constraints
+
+- **Stored preferences** (`UserProfile.skill_preferences`) are durable defaults.
+  Reads for `search_web` merge canonical `search_web` values first, then legacy
+  `web_search`, with case-insensitive dedupe; the profile is never mutated by
+  reads. New writes canonicalize to `search_web` (via summarizer /
+  `update_profile` / `ExecutionContextCore.canonicalize_profile_update_fields`).
+- **Request constraints** (`RequestConstraints`) are per-request strict/soft
+  source domains carried beside the self-contained `distilled_task`. Precedence:
+  strict → soft → stored → skill default. One-off restrictions are not promoted
+  to profile data.
 
 ### Corrective retry
 
 Each phase has one persisted boolean budget (`selection_retry_used` /
-`execution_retry_used`). On malformed or invalid output, `ReactLoop.append_correction`
-appends a closed-template `system` message and marks the budget used. A second
-failure returns typed `AgentFailure(category="protocol_exhausted")` and deletes
-any pending session. Rejected model output is never appended as accepted history.
+`execution_retry_used`). On malformed or invalid output (including
+`INVALID_CONSTRAINT`), `ReactLoop.append_correction` appends a closed-template
+`system` message and marks the budget used. A second failure returns typed
+`AgentFailure(category="protocol_exhausted")` and deletes any pending session.
+Rejected model output is never appended as accepted history. Correction text
+never interpolates user/query/domain strings.
 
 ### Message accumulation
 
 Messages accumulate in `AgentContext.messages` across the active phase:
 
 ```
-[system]    Selection or execution role + phase JSON schema + profile
-[system]    Selection control catalog (selection only)
-[user]      Selection input / task
+[system]    Selection or execution role + phase JSON schema
+[system]    Selection control catalog (selection) OR untrusted profile_data (execution)
+[user]      Selection input OR <task> + <request_constraints>
+[system]    Skill activation + tools (execution)
 [assistant] Phase decision JSON
 [system]    Tool results (execution)
 [assistant] {"mode":"finish","final_answer":"..."}
@@ -43,12 +68,13 @@ stored in context.
 ## Suspend / resume
 
 When `ask_user` fires (execution only), the loop suspends and `AgentContext`
-(including `phase`, retry flags, and `protocol_version`) is saved via
-`AgentSessionProvider`. On `resume()`, context is restored. Sessions with
-`protocol_version < 2` are upgraded lazily: pre-selection refreshes the catalog
-seed; active execution replaces only the recognized generated base system
-message. Historical combined-decision assistant JSON stays opaque. Session is
-deleted after final answer or typed protocol failure.
+(including `phase`, retry flags, `protocol_version`, and `request_constraints`)
+is saved via `AgentSessionProvider`. New sessions use `protocol_version=3`.
+On `resume()`, sessions with `protocol_version < 3` are upgraded lazily: the
+named skill is reloaded; recognized generated execution system/task/activation
+messages are refreshed; task, clarification, assistant, and tool history are
+preserved. Missing `request_constraints` on v1/v2 sessions decode as empty.
+Session is deleted after final answer or typed protocol failure.
 
 If a resumed session is still in pre-selection (`active_skill is None`),
 `Agent` refreshes the selection seed from the current validated catalog before
@@ -66,6 +92,8 @@ clarification messages.
   `AgentResult.failure`; there is no `"Task completed."` fallback for those paths.
 - **Metadata injection**: `chat_id`, `user_id`, `profile_timezone` are added to
   every `ToolCall.metadata` by `Agent`.
+- **Constraint preparation**: every `web_search` / `web_extract` / `schedule_task`
+  dispatch path goes through `ExecutionContextCore.prepare_tool_requests`.
 
 ## Adding a new skill
 
@@ -91,4 +119,7 @@ The agent selection phase always sees the full catalog (public + private).
 ## Infrastructure tools (available after skill activation)
 
 - **`ask_user`** — suspends loop, signals clarification needed. Mind delivers the question in Yoda's voice. Not available during selection.
-- **`update_profile`** — saves user profile fields (timezone, location, etc.) via MemoryProvider. Can be batched with other tool calls.
+- **`update_profile`** — saves user profile fields (timezone, location,
+  `skill_preferences` / `skill_preferences_to_add` with canonical skill-name
+  keys) via MemoryProvider. Can be batched with other tool calls. Agent
+  canonicalizes preference write deltas before dispatch.

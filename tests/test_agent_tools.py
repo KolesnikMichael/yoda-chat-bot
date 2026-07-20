@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -418,6 +419,71 @@ async def test_update_profile_saves_skill_preferences():
 
 
 @pytest.mark.asyncio
+async def test_update_profile_accepts_skill_preferences_to_add():
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage_api = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage_api)
+    tool = UpdateProfileTool(memory_provider=memory)
+
+    call = ToolCall(
+        tool_name="update_profile",
+        arguments={
+            "fields": {
+                "skill_preferences_to_add": {
+                    "search_web": ["prefer Reuters"],
+                },
+            },
+        },
+        metadata={"user_id": 123, "chat_id": 42},
+    )
+
+    result = await tool.execute(call)
+
+    assert result.success is True
+    stored = json.loads(storage_api.data["user_profiles"]["123@42"])
+    assert stored["skill_preferences"]["search_web"] == ["prefer Reuters"]
+
+
+@pytest.mark.asyncio
+async def test_update_profile_logs_preference_content_at_debug_only(caplog):
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage_api = FakeStorageApi()
+    tool = UpdateProfileTool(
+        memory_provider=MemoryProvider(storage_api=storage_api),
+    )
+    marker = "private source preference"
+    call = ToolCall(
+        tool_name="update_profile",
+        arguments={
+            "fields": {
+                "skill_preferences_to_add": {
+                    "search_web": [marker],
+                },
+            },
+        },
+        metadata={"user_id": 123, "chat_id": 42},
+    )
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="yoda.mind.agent.tools.update_profile_tool",
+    ):
+        result = await tool.execute(call)
+
+    assert result.success is True
+    content_records = [
+        record for record in caplog.records
+        if marker in record.getMessage()
+    ]
+    assert content_records
+    assert all(record.levelno == logging.DEBUG for record in content_records)
+
+
+@pytest.mark.asyncio
 async def test_update_profile_rejects_delta_keys():
     from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
     from yoda.mind.memory.memory import MemoryProvider
@@ -655,12 +721,14 @@ class FakeTavilyApi:
         max_results: int = 5,
         search_depth: str = "basic",
         topic: str = "general",
+        include_domains: list[str] | None = None,
     ):
         self.last_search_kwargs = {
             "query": query,
             "max_results": max_results,
             "search_depth": search_depth,
             "topic": topic,
+            "include_domains": include_domains,
         }
         if self.search_error:
             raise self.search_error
@@ -718,6 +786,43 @@ async def test_web_search_tool_empty_results():
 
     assert result.success is True
     assert "No results" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_forwards_include_domains():
+    from yoda.mind.agent.tools.web_search_tool import WebSearchParams, WebSearchTool
+
+    schema = WebSearchParams.model_json_schema()
+    assert "include_domains" in schema["properties"]
+
+    fake = FakeTavilyApi()
+    fake.search_response = {"results": []}
+    tool = WebSearchTool(tavily_api=fake)
+    call = ToolCall(
+        tool_name="web_search",
+        arguments={
+            "query": "forecast",
+            "include_domains": ["accuweather.com", "weather.com"],
+        },
+    )
+    result = await tool.execute(call)
+    assert result.success is True
+    assert fake.last_search_kwargs["include_domains"] == [
+        "accuweather.com",
+        "weather.com",
+    ]
+    assert "No results" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_omits_include_domains_when_none():
+    from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+
+    fake = FakeTavilyApi()
+    tool = WebSearchTool(tavily_api=fake)
+    call = ToolCall(tool_name="web_search", arguments={"query": "news"})
+    await tool.execute(call)
+    assert fake.last_search_kwargs["include_domains"] is None
 
 
 @pytest.mark.asyncio

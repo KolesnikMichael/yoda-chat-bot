@@ -268,6 +268,24 @@ def test_production_catalog_static_dynamic_contrasts():
     assert forward == reversed_sorted
 
 
+def test_search_web_workflow_declares_precedence_and_durable_write_boundary():
+    search = SkillCatalog.load_skill(PRODUCTION_SKILLS_DIR, "search_web")
+    instructions = search.instructions
+
+    tiers = [
+        "**Strict request constraints**",
+        "**Soft request preferences**",
+        "**Stored active-skill preferences**",
+        "**Skill defaults**",
+    ]
+    positions = [instructions.index(tier) for tier in tiers]
+    assert positions == sorted(positions)
+    assert "One-off" in instructions
+    assert "only when the user explicitly wants it from now on" in instructions
+    assert "skill_preferences_to_add.search_web" in instructions
+    assert "never `web_search`" in instructions
+
+
 def test_production_public_summaries_excludes_manage_user_data():
     catalog = SkillCatalog.load_catalog(PRODUCTION_SKILLS_DIR)
     names = {s.name for s in catalog}

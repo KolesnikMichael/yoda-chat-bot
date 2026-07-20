@@ -2,7 +2,7 @@
 id: TASK-016
 doc: plan
 updated: 2026-07-20
-last_step: 
+last_step: 7.2
 branch: 
 ---
 
@@ -84,13 +84,13 @@ If any item below fails and cannot be satisfied immediately, do not proceed to i
 
 **Goal:** Typed source-constraint sidecar and invalid-constraint issue category exist on selection/context DTOs; new sessions default to protocol 3.
 
-- [ ] **1.1** Add `RequestConstraints` and extend selection / issue enums
+- [x] **1.1** Add `RequestConstraints` and extend selection / issue enums
   - Files: `yoda/mind/agent/data/agent_data.py`, `tests/test_react_loop.py` (or small data tests)
   - Action: **Data** — add `RequestConstraints` with `strict_source_domains` / `soft_source_domains` (`extra="forbid"`, default empty lists) per [[design#Data model]]. Add `request_constraints: RequestConstraints = Field(default_factory=RequestConstraints)` to `SelectionDecision`. Add `ProtocolIssueCategory.INVALID_CONSTRAINT`. **TDD:** construction, empty defaults, extra-field rejection.
   - Verify: `.venv/bin/python -m pytest tests/test_react_loop.py -k "RequestConstraints or SelectionDecision or INVALID_CONSTRAINT or extra_forbid" -q`
   - Commit: `feat(TASK-016): 1.1 add RequestConstraints and invalid-constraint category`
 
-- [ ] **1.2** Persist constraints on `AgentContext` and bump protocol default to 3
+- [x] **1.2** Persist constraints on `AgentContext` and bump protocol default to 3
   - Files: `yoda/mind/agent/data/agent_data.py`, `tests/test_react_loop.py`
   - Action: **Data** — add `request_constraints` field (default empty) and set `protocol_version: int = 3`. Update `with_messages` (and any other context-copy helpers introduced later in Core) to preserve both. **TDD:** defaults and copy fidelity.
   - Verify: `.venv/bin/python -m pytest tests/test_react_loop.py -k "agent_context or request_constraints or protocol" -q`
@@ -104,25 +104,25 @@ If any item below fails and cannot be satisfied immediately, do not proceed to i
 
 **Goal:** Pure preference aliasing, host normalization, tool-call preparation, and profile-write canonicalization live in Core with deterministic unit coverage.
 
-- [ ] **2.1** Create `ExecutionContextCore.effective_skill_preferences`
+- [x] **2.1** Create `ExecutionContextCore.effective_skill_preferences`
   - Files: `yoda/mind/agent/core/execution_context.py` (create), `tests/test_execution_context_core.py` (create)
   - Action: **Core** — implement `effective_skill_preferences(profile, skill_name) -> list[str]` per [[design#Decision 2]]: exact key for non-search skills; for `search_web`, emit canonical values first then legacy `web_search`, case-insensitive dedupe, never mutate profile; missing → `[]`. **TDD first:** only-legacy, only-canonical, dual-key with duplicates, other skill untouched, empty profile.
   - Verify: `.venv/bin/python -m pytest tests/test_execution_context_core.py -k "effective_skill_preferences" -q`
   - Commit: `feat(TASK-016): 2.1 resolve active-skill preferences with legacy alias`
 
-- [ ] **2.2** `normalize_request_constraints` with exact-host policy
+- [x] **2.2** `normalize_request_constraints` with exact-host policy
   - Files: `yoda/mind/agent/core/execution_context.py`, `tests/test_execution_context_core.py`
   - Action: **Core** — implement host normalization per [[design#Decision 4]]: accept bare hosts and `http`/`https` URL-like input; lowercase + IDNA; strip trailing DNS dot only; reject credentials, wildcards, leading dots, unsupported schemes, IP literals, empty/invalid labels; do not strip `www`, collapse to parent, or broaden. Strict wins over soft for duplicates; stable order + case-insensitive dedupe within each list. **TDD first:** happy paths and each rejection class.
   - Verify: `.venv/bin/python -m pytest tests/test_execution_context_core.py -k "normalize_request_constraints or normalize_host" -q`
   - Commit: `feat(TASK-016): 2.2 normalize request constraint hosts exactly`
 
-- [ ] **2.3** `prepare_tool_requests` for search, extract, and schedule
+- [x] **2.3** `prepare_tool_requests` for search, extract, and schedule
   - Files: `yoda/mind/agent/core/execution_context.py`, `tests/test_execution_context_core.py`
   - Action: **Core** — implement `prepare_tool_requests(requests, constraints) -> tuple[list[ToolCallRequest], ProtocolIssue | None]` per [[design#Decision 3]]: under strict domains, inject exact `include_domains` when absent; accept only set-equal lists; reject empty/broader/malformed as `INVALID_CONSTRAINT` with no dispatch list; repeated calls keep equal restriction; `web_extract` URLs must be host-equal-or-beneath an allowed host; `schedule_task` arguments receive Core-injected `request_constraints` (do not trust the model). Soft-only contexts do not force injection. **TDD first:** inject, accept equal, reject conflict/widen, extract under/over policy, schedule injection.
   - Verify: `.venv/bin/python -m pytest tests/test_execution_context_core.py -k "prepare_tool_requests" -q`
   - Commit: `feat(TASK-016): 2.3 prepare constrained tool requests in Core`
 
-- [ ] **2.4** `canonicalize_profile_update_fields`
+- [x] **2.4** `canonicalize_profile_update_fields`
   - Files: `yoda/mind/agent/core/execution_context.py`, `tests/test_execution_context_core.py`
   - Action: **Core** — map any `web_search` bucket under `skill_preferences` / `skill_preferences_to_add` into `search_web`, merging and deduplicating when both appear; leave other skill keys alone. **TDD first:** only-legacy write → canonical; dual-key merge; unrelated keys unchanged.
   - Verify: `.venv/bin/python -m pytest tests/test_execution_context_core.py -k "canonicalize_profile" -q`
@@ -136,19 +136,19 @@ If any item below fails and cannot be satisfied immediately, do not proceed to i
 
 **Goal:** Selection records typed constraints; execution renders separated untrusted profile data and user task/constraint blocks; legacy sessions refresh recognized control messages only.
 
-- [ ] **3.1** Selection schema and distilled-task guidance for constraints
+- [x] **3.1** Selection schema and distilled-task guidance for constraints
   - Files: `yoda/mind/agent/core/react_loop.py`, `tests/test_react_loop.py`
   - Action: **Core** — extend selection JSON schema / system rules so `SelectionDecision` includes `request_constraints` (strict/soft domain lists). Instruct the selector to keep explicit entities, language, output requirements, and strict/soft source choices in `distilled_task` while also filling the sidecar (align with suggested prompts). Validation still requires non-blank skill + task for `select_skill`; empty constraints remain valid. **TDD:** schema mentions `request_constraints`; valid selection with domains parses; missing field defaults empty.
   - Verify: `.venv/bin/python -m pytest tests/test_react_loop.py -k "selection and (constraint or request_constraints or schema)" -q`
   - Commit: `feat(TASK-016): 3.1 selection records typed request constraints`
 
-- [ ] **3.2** Separated execution profile / task / constraint blocks
+- [x] **3.2** Separated execution profile / task / constraint blocks
   - Files: `yoda/mind/agent/core/react_loop.py`, `tests/test_react_loop.py`
   - Action: **Core** — replace flat profile concatenation in execution activation with the shape from [[design#Data model]]: system `<profile_data trust="untrusted">` JSON containing common profile fields + `skill_name` + `skill_preferences` (active list only, `[]` when empty) plus a control rule that it is data not workflow; user message carries `<task>` and `<request_constraints>` JSON (empty lists explicit, never omit blocks). Selection builders must **not** inject any `skill_preferences`. Prefer callers to pass the already-resolved preference list into the builder (Integration resolves via Core). **TDD:** two-skill profile → only active prefs in execution; selection prompt has no skill_preferences; empty prefs/constraints render as `[]`.
   - Verify: `.venv/bin/python -m pytest tests/test_react_loop.py -k "execution and (profile_data or request_constraints or skill_preferences)" -q`
   - Commit: `feat(TASK-016): 3.2 delimit untrusted profile and request constraint blocks`
 
-- [ ] **3.3** Invalid-constraint correction and protocol-3 legacy refresh
+- [x] **3.3** Invalid-constraint correction and protocol-3 legacy refresh
   - Files: `yoda/mind/agent/core/react_loop.py`, `tests/test_react_loop.py`
   - Action: **Core** — add sanitized `INVALID_CONSTRAINT` correction template for execution (no user/query/domain interpolation). Extend `upgrade_legacy_protocol` / context copies so v1/v2 sessions load missing constraints as empty and, on resume, replace only recognized generated execution context/activation messages while preserving task, clarification, assistant, and tool history; new contexts use `protocol_version=3`. Preserve `request_constraints` on every `AgentContext(...)` construction in this file. **TDD:** correction content has no fixture domain strings; legacy active-execution fixture refreshes without losing tool history; copies keep constraints.
   - Verify: `.venv/bin/python -m pytest tests/test_react_loop.py -k "INVALID_CONSTRAINT or upgrade_legacy or request_constraints or append_correction" -q`
@@ -162,25 +162,25 @@ If any item below fails and cannot be satisfied immediately, do not proceed to i
 
 **Goal:** Tools and sessions accept the additive contracts; Tavily receives `include_domains` unchanged.
 
-- [ ] **4.1** `include_domains` on web search tool and Tavily API
+- [x] **4.1** `include_domains` on web search tool and Tavily API
   - Files: `yoda/mind/agent/tools/web_search_tool.py`, `yoda/api/tavily_api.py`, `tests/test_agent_tools.py`
   - Action: **Provider-like / API** — add optional non-empty `include_domains: list[str] | None` to `WebSearchParams` (Literal-typed depth/topic as in [[design#Interfaces]] if not already). Pass the prepared list unchanged to `TavilyApi.search(..., include_domains=...)`, which forwards to `AsyncTavilyClient.search`. Keep the existing no-results output path (wording may note restriction only via tool output already returned; do not widen). **TDD:** schema accepts list; fake Tavily receives exact domains; `None` omits restriction; empty-results string still success path for the tool.
   - Verify: `.venv/bin/python -m pytest tests/test_agent_tools.py -k "web_search or include_domains" -q`
   - Commit: `feat(TASK-016): 4.1 forward include_domains to Tavily`
 
-- [ ] **4.2** Persist `request_constraints` on `schedule_task`
+- [x] **4.2** Persist `request_constraints` on `schedule_task`
   - Files: `yoda/mind/agent/tools/schedule_task_tool.py`, `tests/test_schedule_task_tool.py`
   - Action: **Provider-like** — accept `request_constraints` on params (default empty object) and write it beside unchanged `distilled_task` in job metadata JSON. Do not redistil. **TDD:** strict/soft domains round-trip in saved payload; omitted field → empty object in new writes; distilled_task byte-stable.
   - Verify: `.venv/bin/python -m pytest tests/test_schedule_task_tool.py -q`
   - Commit: `feat(TASK-016): 4.2 persist constraints on scheduled tasks`
 
-- [ ] **4.3** Additive `skill_preferences_to_add` on `update_profile`
+- [x] **4.3** Additive `skill_preferences_to_add` on `update_profile`
   - Files: `yoda/mind/agent/tools/update_profile_tool.py`, `tests/test_agent_tools.py`
   - Action: **Provider-like** — allow `skill_preferences_to_add` in `ALLOWED_FIELDS` (and document canonical skill-name keys). Tool receives already-canonicalized `fields` from `Agent`; keep existing full `skill_preferences` replacement for compatibility. **TDD:** additive field accepted; unknown fields still rejected.
   - Verify: `.venv/bin/python -m pytest tests/test_agent_tools.py -k "update_profile" -q`
   - Commit: `feat(TASK-016): 4.3 allow additive skill preference updates`
 
-- [ ] **4.4** Session round-trip for protocol-3 constraints
+- [x] **4.4** Session round-trip for protocol-3 constraints
   - Files: `yoda/mind/agent/session_provider.py`, `tests/test_agent_session.py`
   - Action: **Provider** — save/load `request_constraints`; missing field on v1/v2 sessions → empty `RequestConstraints`. Do not parse historical assistant bodies. **TDD:** protocol-3 round-trip with non-empty strict domains; legacy fixtures load empty constraints.
   - Verify: `.venv/bin/python -m pytest tests/test_agent_session.py -q`
@@ -194,13 +194,13 @@ If any item below fails and cannot be satisfied immediately, do not proceed to i
 
 **Goal:** Integration wires Core policy on all entry paths without merging profile preferences into request constraints.
 
-- [ ] **5.1** `Agent` applies preferences, preparation gate, and constraint plumbing
+- [x] **5.1** `Agent` applies preferences, preparation gate, and constraint plumbing
   - Files: `yoda/mind/agent/agent.py`, `tests/test_agent.py`
   - Action: **Integration** — after valid selection, normalize `decision.request_constraints` via Core and store on context; resolve `effective_skill_preferences` only at/after activation (never during selection); build execution messages with that list. Before dispatching tools, call `prepare_tool_requests`; on `INVALID_CONSTRAINT` use existing execution corrective budget and dispatch nothing. Canonicalize `update_profile` fields before tool construction. Extend `run_with_skill(..., request_constraints: RequestConstraints | None = None)` and resume path (reload named skill + Core refresh of recognized control messages). **TDD:** two-skill profile filtering on direct/resume/forced paths; prepared strict `web_search`; conflict → no Tavily call; repeated restriction retained; canonical profile update args.
   - Verify: `.venv/bin/python -m pytest tests/test_agent.py -k "preference or constraint or include_domains or run_with_skill or update_profile or prepare" -q`
   - Commit: `feat(TASK-016): 5.1 Agent wires preferences and constraint preparation`
 
-- [ ] **5.2** Scheduled path: dispatcher → Mind → `run_with_skill`
+- [x] **5.2** Scheduled path: dispatcher → Mind → `run_with_skill`
   - Files: `yoda/mind/job_dispatcher.py`, `yoda/mind/mind.py`, `tests/test_job_dispatcher.py`, `tests/test_mind_agent_pipeline.py`
   - Action: **Integration** — decode `request_constraints` from task payloads (default empty for legacy); pass `distilled_task` unchanged with constraints to `Mind.execute_scheduled_task`; Mind loads then-current profile and calls `run_with_skill` without merging profile values into constraints. **TDD:** new payload constraints reach fake Agent; old payload → empty constraints + original task; profile prefs do not overwrite strict sidecar.
   - Verify: `.venv/bin/python -m pytest tests/test_job_dispatcher.py tests/test_mind_agent_pipeline.py -q`
@@ -214,19 +214,19 @@ If any item below fails and cannot be satisfied immediately, do not proceed to i
 
 **Goal:** Summarizer and skill prompts converge on `search_web`; module docs match the new contracts.
 
-- [ ] **6.1** Summarizer prompt + Core remapping to `search_web`
+- [x] **6.1** Summarizer prompt + Core remapping to `search_web`
   - Files: `yoda/mind/memory/data/summarizer_prompt.py`, `yoda/mind/memory/summarizer.py`, `tests/test_summarizer.py`, `tests/test_memory_operation.py`
   - Action: **Data/Core** — replace legacy `web_search` examples/instructions with `search_web` only. In `SummarizerCore`, remap any nevertheless-emitted `web_search` delta to `search_web` with merge/dedupe before persistence. Assert Redis/profile load of only-legacy, only-canonical, and dual-key fixtures: effective reads (via Core or memory path under test) and that load/apply does not mutate persisted legacy JSON. **TDD first** for remapping and non-mutation.
   - Verify: `.venv/bin/python -m pytest tests/test_summarizer.py tests/test_memory_operation.py -k "skill_preferences or search_web or web_search" -q`
   - Commit: `feat(TASK-016): 6.1 canonicalize summarizer preference writes`
 
-- [ ] **6.2** Update `search_web` skill workflow
+- [x] **6.2** Update `search_web` skill workflow
   - Files: `yoda/mind/agent/skills/specs/search_web.md`
   - Action: **Skill config** — state fixed precedence (strict → soft → stored → default); durable updates via `skill_preferences_to_add.search_web`; self-contained scheduled `distilled_task` + constraints; mandatory `include_domains` for strict sources; retain restriction on refinements; on no usable results report limitation / ask to widen — never retry with empty/omitted/wider domains. Soft preferences may fall back only when no strict constraint applies. Align examples with suggested prompts.
   - Verify: file review + `.venv/bin/python -m pytest tests/test_skill_catalog.py -q` (catalog still loads)
   - Commit: `docs(TASK-016): 6.2 update search_web precedence and domain rules`
 
-- [ ] **6.3** Update `yoda/mind/agent/AGENTS.md`
+- [x] **6.3** Update `yoda/mind/agent/AGENTS.md`
   - Files: `yoda/mind/agent/AGENTS.md`
   - Action: **Documentation** — document active-only preference injection, typed `request_constraints`, Core preparation gate, `search_web`/`web_search` alias policy, and protocol-3 persistence. Remove stale `AgentProvider` wording if still present from pre-TASK-015 text.
   - Verify: manual doc review (no test)
@@ -240,13 +240,13 @@ If any item below fails and cannot be satisfied immediately, do not proceed to i
 
 **Goal:** Every FR acceptance criterion has an automated or explicit manual check; full suite green.
 
-- [ ] **7.1** Close FR gaps across unit and integration tests
+- [x] **7.1** Close FR gaps across unit and integration tests
   - Files: `tests/test_execution_context_core.py`, `tests/test_react_loop.py`, `tests/test_agent.py`, `tests/test_agent_session.py`, `tests/test_agent_tools.py`, `tests/test_schedule_task_tool.py`, `tests/test_job_dispatcher.py`, `tests/test_mind_agent_pipeline.py`, `tests/test_summarizer.py`, `tests/test_memory_operation.py`, `tests/fakes.py` as needed
   - Action: Add any missing cases called out in requirements AC: immediate constrained search; scheduled recurring search surviving selection → persist → load → `run_with_skill`; precedence tiers; no unrestricted dispatch on conflict; refinement retention; no-results without widening; dual-key Redis fixtures. Prefer fakes over live APIs.
   - Verify: `.venv/bin/python -m pytest`
   - Commit: `test(TASK-016): 7.1 cover FR acceptance criteria`
 
-- [ ] **7.2** Manual AC smoke (optional if Redis/Tavily available; otherwise mark N/A with reason)
+- [x] **7.2** Manual AC smoke (optional if Redis/Tavily available; otherwise mark N/A with reason)
   - FR-1: profile with prefs for two skills → only active prefs appear in execution context logs (DEBUG)
   - FR-2: one-off “only from X” does not write `skill_preferences`; explicit “from now on prefer X” can
   - FR-3: schedule constrained search → job payload contains task + `request_constraints`
@@ -303,12 +303,12 @@ graph LR
 
 ## Definition of Done
 
-- [ ] All plan steps checked (`last_step` reflects final completed id)
-- [ ] All FR-1…FR-5 acceptance criteria pass
-- [ ] Full suite green: `.venv/bin/python -m pytest`
-- [ ] IODA + coding guidelines (`AGENTS.md`, `coding_behavior.md`) respected — Core owns policy; `Agent` only orchestrates; no Operation→Operation calls
-- [ ] Additive external contract honored: legacy profiles/jobs/sessions load without migration; new writes use `search_web`
-- [ ] `yoda/mind/agent/AGENTS.md` and `search_web.md` updated
+- [x] All plan steps checked (`last_step` reflects final completed id)
+- [x] All FR-1…FR-5 acceptance criteria pass
+- [x] Full suite green: `.venv/bin/python -m pytest`
+- [x] IODA + coding guidelines (`AGENTS.md`, `coding_behavior.md`) respected — Core owns policy; `Agent` only orchestrates; no Operation→Operation calls
+- [x] Additive external contract honored: legacy profiles/jobs/sessions load without migration; new writes use `search_web`
+- [x] `yoda/mind/agent/AGENTS.md` and `search_web.md` updated
 - [ ] `review.md`: verdict `pass` or `pass-with-follow-ups` (via review-task)
 - [ ] `task.md`: `status: done`, `updated: <today>` after close-task
 - [ ] `design.md` / ADR updated only if execution diverged (no ADR expected per design)

@@ -5,6 +5,7 @@ import pytest
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
     AgentPhase,
+    RequestConstraints,
     SkillSpec,
     SkillSummary,
 )
@@ -81,7 +82,43 @@ async def test_save_and_load_roundtrip():
     assert loaded.phase == AgentPhase.SELECTION
     assert loaded.selection_retry_used is False
     assert loaded.execution_retry_used is False
+    assert loaded.protocol_version == 3
+    assert loaded.request_constraints == RequestConstraints()
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_roundtrip_request_constraints():
+    storage = FakeStorageApi()
+    provider = AgentSessionProvider(storage_api=storage)
+    context = _make_context()
+    context.protocol_version = 3
+    context.request_constraints = RequestConstraints(
+        strict_source_domains=["accuweather.com"],
+        soft_source_domains=["weather.com"],
+    )
+    await provider.save(context)
+    loaded = await provider.load(42)
+    assert loaded is not None
+    assert loaded.protocol_version == 3
+    assert loaded.request_constraints.strict_source_domains == ["accuweather.com"]
+    assert loaded.request_constraints.soft_source_domains == ["weather.com"]
+
+
+@pytest.mark.asyncio
+async def test_load_legacy_session_missing_constraints_defaults_empty():
+    storage = FakeStorageApi()
+    provider = AgentSessionProvider(storage_api=storage)
+    context = _make_context()
+    await provider.save(context)
+    raw = json.loads(storage.data["agent_sessions"]["42"])
+    del raw["request_constraints"]
+    raw["protocol_version"] = 2
+    storage.data["agent_sessions"]["42"] = json.dumps(raw)
+
+    loaded = await provider.load(42)
+    assert loaded is not None
     assert loaded.protocol_version == 2
+    assert loaded.request_constraints == RequestConstraints()
 
 
 @pytest.mark.asyncio

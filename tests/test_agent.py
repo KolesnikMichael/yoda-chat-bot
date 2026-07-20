@@ -12,6 +12,7 @@ from yoda.mind.agent.data.agent_data import (
     AgentPhase,
     ExecutionDecision,
     ProtocolIssueCategory,
+    RequestConstraints,
     SelectionDecision,
     ToolCallRequest,
     ToolResult,
@@ -23,6 +24,9 @@ from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.perception.language import StructuredOutputError
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "skills"
+PRODUCTION_SKILLS_DIR = (
+    Path(__file__).resolve().parents[1] / "yoda" / "mind" / "agent" / "skills"
+)
 LEGACY_COMBINED_SYSTEM_CONTENT = (
     "You are an executor agent. Your job is to complete tasks using "
     "available tools. Be precise, follow the skill workflow, and produce "
@@ -71,6 +75,16 @@ class FakeTool(Tool):
     async def execute(self, call):
         self.calls.append(call)
         return ToolResult(tool_name=self.name, output="search result", success=True)
+
+
+class NoResultsTool(FakeTool):
+    async def execute(self, call):
+        self.calls.append(call)
+        return ToolResult(
+            tool_name=self.name,
+            output="No results found.",
+            success=True,
+        )
 
 
 class ParallelProbeTool(Tool):
@@ -225,8 +239,9 @@ async def test_llm_context_static_system_and_tools_in_activation():
     assert "<skill_selection_control>" not in joined
     task_user = phase2[1]
     assert task_user["role"] == "user"
-    assert "Task:" in task_user["content"]
+    assert "<task>" in task_user["content"]
     assert "Do the distilled task." in task_user["content"]
+    assert "<request_constraints>" in task_user["content"]
     activation = next(
         m for m in phase2 if m["role"] == "system" and "activated" in m["content"])
     assert "Available tools:" in activation["content"]
@@ -636,7 +651,13 @@ async def test_resume_legacy_active_execution_skips_selection():
     storage = agent._sessions._storage_api
     legacy = {
         "task": "search after clarification",
-        "profile": {},
+        "profile": {
+            "skill_preferences": {
+                "test_skill": ["prefer concise results"],
+                "other_skill": ["never expose this"],
+            },
+            "schema_version": 2,
+        },
         "chat_id": 405,
         "user_id": 0,
         "catalog_summaries": [
@@ -678,6 +699,12 @@ async def test_resume_legacy_active_execution_skips_selection():
         str(message.get("content", ""))
         for message in llm.messages_log[0]
     )
+    resumed_context = "\n".join(
+        str(message.get("content", ""))
+        for message in llm.messages_log[0]
+    )
+    assert "prefer concise results" in resumed_context
+    assert "never expose this" not in resumed_context
     assert await agent.has_pending_session(405) is False
 
 
@@ -719,7 +746,7 @@ async def test_retry_flag_survives_suspend_resume():
     assert loaded is not None
     assert loaded.execution_retry_used is True
     assert loaded.phase == AgentPhase.EXECUTION
-    assert loaded.protocol_version == 2
+    assert loaded.protocol_version == 3
 
     r2 = await agent.resume(808, "UTC")
     assert r2.failure == AgentFailure(
@@ -728,3 +755,449 @@ async def test_retry_flag_survives_suspend_resume():
         issue=ProtocolIssueCategory.MALFORMED_OUTPUT,
     )
     assert await agent.has_pending_session(808) is False
+
+
+@pytest.mark.asyncio
+async def test_run_with_skill_filters_active_preferences_only():
+    decisions = [
+        _call_tools(ToolCallRequest(
+            tool_name="web_search", arguments={"query": "q"},
+        )),
+        _finish("done"),
+    ]
+    agent, llm = _build_agent(decisions)
+    profile = UserProfile(
+        skill_preferences={
+            "test_skill": ["prefer short answers"],
+            "other_skill": ["never show this"],
+        },
+    )
+    result = await agent.run_with_skill(
+        skill_name="test_skill",
+        task="Do the task",
+        profile=profile,
+        chat_id=1,
+    )
+    assert result.answer == "done"
+    joined = "\n".join(m["content"] for m in llm.messages_log[0])
+    assert "prefer short answers" in joined
+    assert "never show this" not in joined
+    assert '<profile_data trust="untrusted">' in joined
+
+
+@pytest.mark.asyncio
+async def test_run_filters_active_preferences_only_after_selection():
+    decisions = [
+        _select("test_skill", "Do the selected task"),
+        _finish("done"),
+    ]
+    agent, llm = _build_agent(decisions)
+    profile = UserProfile(
+        skill_preferences={
+            "test_skill": ["prefer short answers"],
+            "other_skill": ["never show this"],
+        },
+    )
+
+    result = await agent.run(
+        task="Do something",
+        profile=profile,
+        chat_id=2,
+    )
+
+    assert result.answer == "done"
+    selection_context = "\n".join(m["content"] for m in llm.messages_log[0])
+    execution_context = "\n".join(m["content"] for m in llm.messages_log[1])
+    assert "prefer short answers" not in selection_context
+    assert "never show this" not in selection_context
+    assert "prefer short answers" in execution_context
+    assert "never show this" not in execution_context
+
+
+@pytest.mark.asyncio
+async def test_run_with_skill_prepares_strict_include_domains():
+    tool = FakeTool()
+    decisions = [
+        _call_tools(ToolCallRequest(
+            tool_name="web_search", arguments={"query": "forecast"},
+        )),
+        _finish("done"),
+    ]
+    agent, _ = _build_agent(decisions, tools=[AskUserTool(), tool])
+    result = await agent.run_with_skill(
+        skill_name="test_skill",
+        task="forecast from accuweather only",
+        profile=UserProfile(),
+        chat_id=1,
+        request_constraints=RequestConstraints(
+            strict_source_domains=["accuweather.com"],
+        ),
+    )
+    assert result.answer == "done"
+    assert tool.calls[0].arguments["include_domains"] == ["accuweather.com"]
+
+
+@pytest.mark.asyncio
+async def test_direct_selection_applies_strict_precedence_without_persisting_one_off() -> None:
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage = FakeStorageApi()
+    search_tool = FakeTool()
+    profile_tool = UpdateProfileTool(
+        memory_provider=MemoryProvider(storage_api=storage),
+    )
+    decisions = [
+        SelectionDecision(
+            mode="select_skill",
+            selected_skill="search_web",
+            distilled_task="Find the forecast using only strict.example.",
+            request_constraints=RequestConstraints(
+                strict_source_domains=["strict.example"],
+                soft_source_domains=["soft.example"],
+            ),
+        ),
+        _call_tools(ToolCallRequest(
+            tool_name="web_search",
+            arguments={"query": "forecast"},
+        )),
+        _finish("done"),
+    ]
+    llm = FakeLanguageProvider(decisions)
+    agent = Agent(
+        language_provider=llm,
+        tools=[AskUserTool(), search_tool, profile_tool],
+        skills_dir=PRODUCTION_SKILLS_DIR,
+        session_provider=AgentSessionProvider(storage_api=storage),
+    )
+    profile = UserProfile(
+        skill_preferences={
+            "search_web": ["stored source: stored.example"],
+        },
+    )
+    original_preferences = {
+        key: list(values) for key, values in profile.skill_preferences.items()
+    }
+
+    result = await agent.run(
+        task="Use only strict.example for this forecast.",
+        profile=profile,
+        chat_id=4,
+        user_id=9,
+    )
+
+    assert result.answer == "done"
+    assert search_tool.calls[0].arguments["include_domains"] == ["strict.example"]
+    execution_context = "\n".join(
+        message["content"] for message in llm.messages_log[1]
+    )
+    assert '"strict_source_domains": ["strict.example"]' in execution_context
+    assert '"soft_source_domains": ["soft.example"]' in execution_context
+    assert "stored source: stored.example" in execution_context
+    precedence_tiers = [
+        "**Strict request constraints**",
+        "**Soft request preferences**",
+        "**Stored active-skill preferences**",
+        "**Skill defaults**",
+    ]
+    positions = [execution_context.index(tier) for tier in precedence_tiers]
+    assert positions == sorted(positions)
+    assert profile.skill_preferences == original_preferences
+    assert "user_profiles" not in storage.data
+
+
+@pytest.mark.parametrize(
+    ("tier", "constraints", "stored_preferences", "include_domains"),
+    [
+        (
+            "soft",
+            RequestConstraints(soft_source_domains=["soft.example"]),
+            ["stored source: stored.example"],
+            ["soft.example"],
+        ),
+        (
+            "stored",
+            RequestConstraints(),
+            ["stored source: stored.example"],
+            ["stored.example"],
+        ),
+        (
+            "default",
+            RequestConstraints(),
+            [],
+            None,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_direct_selection_materializes_remaining_precedence_tiers(
+    tier: str,
+    constraints: RequestConstraints,
+    stored_preferences: list[str],
+    include_domains: list[str] | None,
+) -> None:
+    search_tool = FakeTool()
+    arguments: dict = {"query": "forecast"}
+    if include_domains is not None:
+        arguments["include_domains"] = include_domains
+    decisions = [
+        SelectionDecision(
+            mode="select_skill",
+            selected_skill="search_web",
+            distilled_task=f"Use the {tier} source policy.",
+            request_constraints=constraints,
+        ),
+        _call_tools(ToolCallRequest(
+            tool_name="web_search",
+            arguments=arguments,
+        )),
+        _finish("done"),
+    ]
+    llm = FakeLanguageProvider(decisions)
+    agent = Agent(
+        language_provider=llm,
+        tools=[AskUserTool(), search_tool],
+        skills_dir=PRODUCTION_SKILLS_DIR,
+        session_provider=AgentSessionProvider(storage_api=FakeStorageApi()),
+    )
+    profile = UserProfile(
+        skill_preferences=(
+            {"search_web": stored_preferences}
+            if stored_preferences
+            else {}
+        ),
+    )
+
+    result = await agent.run(
+        task=f"Use the {tier} source policy.",
+        profile=profile,
+        chat_id=5,
+    )
+
+    assert result.answer == "done"
+    assert search_tool.calls[0].arguments.get("include_domains") == include_domains
+    execution_context = "\n".join(
+        message["content"] for message in llm.messages_log[1]
+    )
+    assert (
+        f'"soft_source_domains": {json.dumps(constraints.soft_source_domains)}'
+        in execution_context
+    )
+    assert (
+        f'"skill_preferences": {json.dumps(stored_preferences)}'
+        in execution_context
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_results_retry_retains_strict_include_domains():
+    tool = NoResultsTool()
+    decisions = [
+        _call_tools(ToolCallRequest(
+            tool_name="web_search", arguments={"query": "forecast"},
+        )),
+        _call_tools(ToolCallRequest(
+            tool_name="web_search", arguments={"query": "forecast refined"},
+        )),
+        _finish("No result from the required source."),
+    ]
+    agent, _ = _build_agent(decisions, tools=[AskUserTool(), tool])
+
+    result = await agent.run_with_skill(
+        skill_name="test_skill",
+        task="forecast from accuweather only",
+        profile=UserProfile(),
+        chat_id=3,
+        request_constraints=RequestConstraints(
+            strict_source_domains=["accuweather.com"],
+        ),
+    )
+
+    assert result.answer == "No result from the required source."
+    assert len(tool.calls) == 2
+    assert all(
+        call.arguments["include_domains"] == ["accuweather.com"]
+        for call in tool.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_constraint_survives_selection_persistence_and_dispatch():
+    from tests.test_agent_tools import FakeSchedulerApi, FakeStorageApi
+    from yoda.mind.agent.tools.schedule_task_tool import ScheduleTaskTool
+    from yoda.mind.job_dispatcher import JobDispatcher
+
+    scheduler = FakeSchedulerApi()
+    storage = FakeStorageApi()
+    schedule_tool = ScheduleTaskTool(
+        scheduler_api=scheduler,
+        storage_api=storage,
+        skills_dir=PRODUCTION_SKILLS_DIR,
+    )
+    search_tool = FakeTool()
+    scheduled_task = (
+        "Find the daily Saint Petersburg forecast in Russian using only "
+        "accuweather.com."
+    )
+    decisions = [
+        SelectionDecision(
+            mode="select_skill",
+            selected_skill="search_web",
+            distilled_task="Schedule a constrained daily forecast.",
+            request_constraints=RequestConstraints(
+                strict_source_domains=["accuweather.com"],
+            ),
+        ),
+        _call_tools(ToolCallRequest(
+            tool_name="schedule_task",
+            arguments={
+                "skill_name": "search_web",
+                "distilled_task": scheduled_task,
+                "description": "Daily constrained forecast",
+                "cron": "0 9 * * *",
+                "timezone": "UTC",
+            },
+        )),
+        _call_tools(ToolCallRequest(
+            tool_name="web_search",
+            arguments={"query": "Saint Petersburg weather"},
+        )),
+        _finish("Forecast delivered."),
+    ]
+    llm = FakeLanguageProvider(decisions)
+    agent = Agent(
+        language_provider=llm,
+        tools=[AskUserTool(), schedule_tool, search_tool],
+        skills_dir=PRODUCTION_SKILLS_DIR,
+        session_provider=AgentSessionProvider(storage_api=storage),
+    )
+
+    scheduled = await agent.run(
+        task="Every morning use only AccuWeather for the forecast",
+        profile=UserProfile(),
+        chat_id=77,
+        user_id=7,
+    )
+    assert scheduled.answer is not None
+
+    jobs = storage.data["active_jobs:77"]
+    assert len(jobs) == 1
+    job_id, raw_payload = next(iter(jobs.items()))
+    payload = json.loads(raw_payload)
+    assert payload["distilled_task"] == scheduled_task
+    assert payload["request_constraints"] == {
+        "strict_source_domains": ["accuweather.com"],
+        "soft_source_domains": [],
+    }
+
+    class ForwardingMind:
+        def __init__(self) -> None:
+            self.task = ""
+            self.constraints = RequestConstraints()
+            self.result = None
+
+        async def execute_scheduled_task(
+            self,
+            chat_id: int,
+            user_id: int,
+            skill_name: str,
+            distilled_task: str,
+            request_constraints: RequestConstraints,
+        ) -> None:
+            self.task = distilled_task
+            self.constraints = request_constraints
+            self.result = await agent.run_with_skill(
+                skill_name=skill_name,
+                task=distilled_task,
+                profile=UserProfile(
+                    skill_preferences={
+                        "search_web": ["prefer unrelated.example"],
+                    },
+                ),
+                chat_id=chat_id,
+                user_id=user_id,
+                request_constraints=request_constraints,
+            )
+
+        async def notify_scheduled_failure(
+            self,
+            chat_id: int,
+            brief: str,
+        ) -> None:
+            raise AssertionError(f"unexpected scheduled failure: {chat_id} {brief}")
+
+    mind = ForwardingMind()
+    dispatcher = JobDispatcher(storage, scheduler, mind)
+    await dispatcher.fire(77, job_id)
+
+    assert mind.task == scheduled_task
+    assert mind.constraints.strict_source_domains == ["accuweather.com"]
+    assert mind.result is not None
+    assert mind.result.answer == "Forecast delivered."
+    assert search_tool.calls[0].arguments["include_domains"] == [
+        "accuweather.com",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conflicting_include_domains_does_not_dispatch():
+    tool = FakeTool()
+    decisions = [
+        _call_tools(ToolCallRequest(
+            tool_name="web_search",
+            arguments={
+                "query": "forecast",
+                "include_domains": ["other.com"],
+            },
+        )),
+        _finish("recovered"),
+    ]
+    agent, _ = _build_agent(decisions, tools=[AskUserTool(), tool])
+    result = await agent.run_with_skill(
+        skill_name="test_skill",
+        task="only from accuweather.com",
+        profile=UserProfile(),
+        chat_id=1,
+        request_constraints=RequestConstraints(
+            strict_source_domains=["accuweather.com"],
+        ),
+    )
+    assert tool.calls == []
+    assert result.answer == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_fields_are_canonicalized():
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage)
+    profile_tool = UpdateProfileTool(memory_provider=memory)
+    decisions = [
+        _call_tools(ToolCallRequest(
+            tool_name="update_profile",
+            arguments={
+                "fields": {
+                    "skill_preferences_to_add": {
+                        "web_search": ["prefer BBC"],
+                    },
+                },
+            },
+        )),
+        _finish("saved"),
+    ]
+    agent, _ = _build_agent(
+        decisions, tools=[AskUserTool(), FakeTool(), profile_tool],
+    )
+    result = await agent.run_with_skill(
+        skill_name="test_skill",
+        task="remember preference",
+        profile=UserProfile(),
+        chat_id=42,
+        user_id=123,
+    )
+    assert result.answer == "saved"
+    stored = json.loads(storage.data["user_profiles"]["123@42"])
+    assert stored["skill_preferences"]["search_web"] == ["prefer BBC"]
+    assert "web_search" not in stored["skill_preferences"]

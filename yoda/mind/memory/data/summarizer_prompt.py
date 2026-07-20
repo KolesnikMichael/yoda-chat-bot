@@ -102,10 +102,12 @@ Rules:
   same names that appear in `task_result` content), value is a list of
   short preference strings learned in the chunk. Each preference is a
   free-form phrase such as
-    "web_search": ["weather forecast: accuweather.com",
+    "search_web": ["weather forecast: accuweather.com",
                    "currency rates: ligovka.ru"],
     "create_picture": ["prefers anime style"].
-  The storage layer dedupes per-skill against the existing list.
+  Always use the canonical skill name `search_web` for web-search
+  preferences (never `web_search`). The storage layer dedupes per-skill
+  against the existing list.
   Capture a preference only when the user expressed it as a stable
   preference, not as a one-off request.
 - Redaction in profile_updates means **dropping the item entirely**,
@@ -120,14 +122,14 @@ For a chunk in which user 42 asked Yoda to find a weather forecast site,
 mentioned a recent move, and noted a household pet:
 
 {
-  "summary": "User 42 asked for a reliable weather forecast site; web_search returned https://accuweather.com and user 42 confirmed they would use it from now on. Later user 42 mentioned they had moved to Saint Petersburg the previous month and that they have a dog named Buddy.",
+  "summary": "User 42 asked for a reliable weather forecast site; a search returned https://accuweather.com and user 42 confirmed they would use it from now on. Later user 42 mentioned they had moved to Saint Petersburg the previous month and that they have a dog named Buddy.",
   "topics": ["прогноз погоды", "переезд"],
   "profile_updates": {
     "42": {
       "location": "Saint Petersburg",
       "facts_to_add": ["has a dog named Buddy"],
       "skill_preferences_to_add": {
-        "web_search": ["weather forecast: accuweather.com"]
+        "search_web": ["weather forecast: accuweather.com"]
       }
     }
   }

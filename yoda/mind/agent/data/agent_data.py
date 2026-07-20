@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from yoda.mind.memory.data.user_profile import UserProfile
 
@@ -62,6 +62,12 @@ class ToolCallRequest(BaseModel):
     arguments: dict
 
 
+class RequestConstraints(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    strict_source_domains: list[str] = Field(default_factory=list)
+    soft_source_domains: list[str] = Field(default_factory=list)
+
+
 class SelectionDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["select_skill", "no_skill"]
@@ -69,6 +75,9 @@ class SelectionDecision(BaseModel):
     distilled_task: str | None = None
     reason: Literal["unsupported"] | None = None
     reasoning: str = ""
+    request_constraints: RequestConstraints = Field(
+        default_factory=RequestConstraints,
+    )
 
 
 class ExecutionDecision(BaseModel):
@@ -85,6 +94,7 @@ class ProtocolIssueCategory(StrEnum):
     UNKNOWN_SKILL = "unknown_skill"
     UNKNOWN_TOOL = "unknown_tool"
     ITERATION_LIMIT = "iteration_limit"
+    INVALID_CONSTRAINT = "invalid_constraint"
 
 
 @dataclass(frozen=True)
@@ -116,7 +126,10 @@ class AgentContext:
     phase: AgentPhase = AgentPhase.SELECTION
     selection_retry_used: bool = False
     execution_retry_used: bool = False
-    protocol_version: int = 2
+    request_constraints: RequestConstraints = field(
+        default_factory=RequestConstraints,
+    )
+    protocol_version: int = 3
 
     def with_messages(self, messages: list[dict]) -> AgentContext:
         return AgentContext(
@@ -132,6 +145,7 @@ class AgentContext:
             phase=self.phase,
             selection_retry_used=self.selection_retry_used,
             execution_retry_used=self.execution_retry_used,
+            request_constraints=self.request_constraints,
             protocol_version=self.protocol_version,
         )
 

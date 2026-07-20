@@ -6,6 +6,7 @@ from yoda.api.storage_api import StorageApi
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
     AgentPhase,
+    RequestConstraints,
     SkillSpec,
     SkillSummary,
 )
@@ -36,6 +37,7 @@ class AgentSessionProvider:
             "selection_retry_used": context.selection_retry_used,
             "execution_retry_used": context.execution_retry_used,
             "protocol_version": context.protocol_version,
+            "request_constraints": context.request_constraints.model_dump(),
         }
         await self._storage_api.hset(
             AGENT_SESSION_KEY, str(context.chat_id), json.dumps(data))
@@ -64,6 +66,12 @@ class AgentSessionProvider:
         else:
             phase = AgentPhase.SELECTION
 
+        raw_constraints = data.get("request_constraints")
+        if raw_constraints is None:
+            request_constraints = RequestConstraints()
+        else:
+            request_constraints = RequestConstraints.model_validate(raw_constraints)
+
         return AgentContext(
             task=data["task"],
             profile=profile,
@@ -77,6 +85,7 @@ class AgentSessionProvider:
             phase=phase,
             selection_retry_used=selection_retry_used,
             execution_retry_used=execution_retry_used,
+            request_constraints=request_constraints,
             protocol_version=protocol_version,
         )
 
