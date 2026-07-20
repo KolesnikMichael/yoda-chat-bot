@@ -6,3 +6,4 @@ data/chroma/
 __pycache__/
 settings.json
 .obsidian/
+logs/

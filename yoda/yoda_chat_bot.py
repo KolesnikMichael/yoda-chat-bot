@@ -129,7 +129,8 @@ def main() -> None:
         raise ValueError(
             f"Settings missing agent key: {e.args[0]}") from e
 
-    llm_api = LLMApi(api_key=language_api_key)
+    debug_log_dir = Path("logs") if args.debug else None
+    llm_api = LLMApi(api_key=language_api_key, debug_log_dir=debug_log_dir)
     language_provider = LanguageProvider(
         settings=language_settings, llm_api=llm_api)
     agent_language_settings = {
@@ -145,7 +146,7 @@ def main() -> None:
         vision_backend = OpenRouterApi(
             api_key=vision_api_key, base_url=vision_base)
     else:
-        vision_backend = LLMApi(api_key=vision_api_key)
+        vision_backend = LLMApi(api_key=vision_api_key, debug_log_dir=debug_log_dir)
     vision_provider = VisionProvider(
         settings=vision_settings, chat_backend=vision_backend)
     audio_provider = AudioProvider(
