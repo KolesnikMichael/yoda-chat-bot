@@ -9,4 +9,5 @@ redis
 apscheduler~=3.11
 pyyaml
 pydantic
+chromadb>=0.5.0
 tavily-python

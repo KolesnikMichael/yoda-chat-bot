@@ -1,11 +1,11 @@
 ---
 name: create-requirements
-description: Drafts and fills doc/backlog task requirements.md from task.md, project docs, and code when needed. Use when the user asks to create or complete requirements, acceptance criteria, or FR sections for a backlog task; provides a requirements template path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → close. It is designed to provide the agent with everything necessary to design the changes. 
+description: Drafts and fills doc/backlog task requirements.md from task.md, project docs, and code when needed. Use when the user asks to create or complete requirements, acceptance criteria, or FR sections for a backlog task; provides a requirements template path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → review → close. It is designed to provide the agent with everything necessary to design the changes. 
 ---
 
 # Create Requirements
 
-Produce a complete `requirements.md` for a backlog task from `task.md`, project documentation, and targeted code review. This skill starts the agent pipeline: **create `requirements.md`** → create `design.md` → create `plan.md` → implement plan → close task.
+Produce a complete `requirements.md` for a backlog task from `task.md`, project documentation, and targeted code review. This skill starts the agent pipeline: **create `requirements.md`** → create `design.md` → create `plan.md` → implement plan → create `review.md` → close task.
 
 ## Input (resolve first)
 
@@ -171,4 +171,4 @@ When done, briefly report:
 2. Summary of FRs added (count and titles)
 3. Open questions deferred to design or a follow-up task
 4. Assumptions made (if any)
-5. Next step: when requirements are reviewed and stable, invoke **create-design** to build the architecture contract.
+5. Advise next skill for the user: when requirements are reviewed and stable, run **create-design**.

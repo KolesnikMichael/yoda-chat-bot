@@ -1,6 +1,6 @@
 ---
 name: close-task
-description: Closes a backlog task after implement-task finishes — verifies DoD, harvests implementation-notes.md into design reconciliation, ADRs, and follow-up tasks, flips statuses, and runs the epic close-out check (milestone, all-members-done, shared-branch merge proposal). Use when the user asks to close, finalize, wrap up, or run a postmortem for a backlog task; provides a task folder or task id (TASK-NNN). Tail of the flow task → requirements → design → plan → implementation → close. It is designed to extract the most valuable information and insights from the entire flow.
+description: Closes a backlog task after review.md gate passes (or is waived) — pytest freshness, harvests implementation-notes.md into design reconciliation, ADRs, and follow-up tasks, flips statuses, and runs the epic close-out check (milestone, all-members-done, shared-branch merge proposal). Use when the user asks to close, finalize, wrap up, or run a postmortem for a backlog task; provides a task folder or task id (TASK-NNN). Tail of the flow task → requirements → design → plan → implementation → review → close. It is designed to extract the most valuable information and insights from the entire flow.
 ---
 
 # Close Task
@@ -8,7 +8,7 @@ description: Closes a backlog task after implement-task finishes — verifies Do
 Close out an implemented backlog task: verify it is genuinely done, turn what the
 implementation *taught us* into durable artifacts (design updates, ADRs, follow-up
 tasks), and check whether the owning epic reached its milestone or completion.
-This is the tail of the pipeline: requirements → design → plan → implement → **close**.
+This is the tail of the pipeline: requirements → design → plan → implement → review → **close**.
 
 ## Input (resolve first)
 
@@ -16,7 +16,7 @@ The user may pass **one** of:
 
 | Input | Resolution |
 |-------|------------|
-| Path to task folder (e.g. `doc/backlog/TASK-007-skill-selection/`) | Read `plan.md`, `task.md`, `implementation-notes.md` inside |
+| Path to task folder (e.g. `doc/backlog/TASK-007-skill-selection/`) | Read `plan.md`, `task.md`, `review.md`, `implementation-notes.md` inside |
 | Task id (`TASK-007`, `007`, `7`) | Find folder: `doc/backlog/TASK-{NNN}-*/` (zero-pad to 3 digits) |
 
 If multiple folders match or none exist, stop and ask.
@@ -27,17 +27,26 @@ ls -d doc/backlog/TASK-{NNN}-*   # substitute the zero-padded id, e.g. TASK-007
 
 ## Prerequisites
 
-1. **`plan.md`** executed: all step checkboxes checked and the full suite green
-   (`.venv/bin/python -m pytest`). If steps remain unchecked or the suite is red —
-   **stop** and ask: finish via `implement-task`, or explicitly approve a **partial
-   close** (remaining work then becomes follow-up proposals, recorded in the report).
-2. Read the root `AGENTS.md` and [doc/AGENTS.md](../../../doc/AGENTS.md) for vault conventions.
+1. **`review.md` gate:** frontmatter `verdict` is `pass`, `pass-with-follow-ups`,
+   or `waived`. If `verdict` is empty / `fix` — **stop** and **advise the
+   user** to run **review-task** first (or to set `verdict: waived`). Plan Stages /
+   FR / IODA are **not** re-checked here — review already gated them.
+2. **`waived` / partial close only:** if verdict is `waived`, or the user approved a
+   **partial close**, then also confirm `plan.md` Stages checkboxes and note what
+   remains as follow-ups. For `pass` / `pass-with-follow-ups`, skip the checkbox walk.
+3. **Freshness:** re-run `.venv/bin/python -m pytest`. If red — **stop** and 
+   advise the user to run **implement-task** and then **review-task** again
+   before retrying close (do not close on a stale green from an old `review.md`).
+   Skip the re-run only if the user explicitly says the suite was just proven green
+   in this session.
+4. Read the root `AGENTS.md` and [doc/AGENTS.md](../../../doc/AGENTS.md) for vault conventions.
 
 ## Documentation map
 
 | File | Role |
 |------|------|
-| `plan.md` | **Input** — Definition of Done, executed steps |
+| `review.md` | **Input** — verdict + Follow-ups |
+| `plan.md` | **Input for paperwork** — DoD items close itself performs (`task.md` done, design/ADR); not a second compliance audit |
 | `implementation-notes.md` | **Input** — incidents, workarounds, divergences, ADR candidates (absent = clean run) |
 | `design.md` (task) | **Output** — reconcile with what was actually built |
 | Epic master design (linked from `epic.md` as `Master design`) | **Output (on confirmation)** — cross-cutting corrections |
@@ -49,22 +58,25 @@ ls -d doc/backlog/TASK-{NNN}-*   # substitute the zero-padded id, e.g. TASK-007
 Copy and track:
 
 ```
-- [ ] Task folder resolved; plan + implementation-notes read
-- [ ] Definition of Done verified (suite green, all items)
+- [ ] Task folder resolved; review.md + implementation-notes read
+- [ ] review.md verdict is pass / pass-with-follow-ups / waived
+- [ ] Pytest freshness green (or user-confirmed skip)
+- [ ] If waived/partial: plan Stages gaps recorded as follow-ups
 - [ ] Task design.md reconciled with as-built reality
 - [ ] Master-design corrections proposed (epic members, if any)
 - [ ] ADR candidates triaged; handoff produced for accepted ones
-- [ ] Follow-up tasks / notes proposed
+- [ ] Follow-up tasks / notes proposed (incl. review.md Follow-ups)
 - [ ] Statuses flipped (task.md done, updated dates)
 - [ ] Epic rollup checked (milestone / all done / merge proposal)
 ```
 
-### 1. Verify Definition of Done
+### 1. Confirm gate and freshness
 
-Walk every item in `plan.md` **Definition of Done**: re-run the full suite, confirm
-FR acceptance criteria are test-covered, IODA/coding-guideline review done, docs
-updated. Anything unmet → stop and resolve (or record it under the user-approved
-partial close).
+Confirm `review.md` `verdict` (prerequisite). Run pytest freshness check. Trust
+`review.md` for plan/FR/IODA — **do not** walk Stages checkboxes or re-audit DoD
+compliance on a `pass` / `pass-with-follow-ups`. Carry **Follow-ups** into step 5.
+On `waived` or user-approved partial close: skim `plan.md` Stages for unchecked
+work and record it under follow-ups. Suite red or gate unmet → stop.
 
 ### 2. Harvest implementation notes
 
@@ -95,6 +107,8 @@ Decision / Consequences and link the originating task under **Related documents*
 
 ### 5. Propose follow-ups
 
+- Start from **`review.md` Follow-ups** (and any remaining Low/Info findings) —
+  fold them into proposals below or `main.md` notes.
 - Work that earned its own task (deferred scope, tech debt with a revisit condition):
   propose `title | size | depends-on | rationale`; the developer creates it from the
   `new-task` Templater template. For epic members, flag whether it belongs inside the
@@ -130,7 +144,12 @@ Never merge or delete branches yourself — propose; the user merges or explicit
 
 ## Do not
 
-- Close while the suite is red or DoD items are open (unless the user explicitly approved a partial close)
+- Close while `review.md` `verdict` is empty or `fix` (unless the user
+  sets `waived` / approves a partial close)
+- Close while pytest freshness is red (unless the user explicitly confirmed green
+  in this session and asked to skip the re-run)
+- Re-walk plan Stages / FR / IODA on a `pass` — that is **review-task**; trust
+  `review.md`. If code is still wrong, advise the user to re-run **review-task**
 - Create ADR or task files from templates yourself — handoff to the developer, then fill
 - Rewrite `plan.md` history (checkboxes, steps, `last_step`) — corrections live in `design.md` and the notes
 - Edit the master design without user confirmation
@@ -140,9 +159,9 @@ Never merge or delete branches yourself — propose; the user merges or explicit
 
 When done, briefly report:
 
-1. Task id; DoD status (full close / partial close with carried-over items)
+1. Task id; `review.md` verdict; pytest freshness (ran / skipped); full vs partial close
 2. Notes harvested: counts per bucket; plan-quality lessons verbatim
 3. Design updates applied (task `design.md`; master-design patches proposed/applied)
 4. ADR handoffs (accepted candidates with proposed numbers/names) and dropped candidates with reasons
 5. Follow-up proposals (`title | size | depends-on`) and main.md note suggestions
-6. Epic state: `X/N` member tasks done, milestone reached or not, merge proposal if applicable; next unblocked task — start it with **create-requirements**.
+6. Epic state: `X/N` member tasks done, milestone reached or not, merge proposal if applicable; advise next step for the user: **create-requirements** on the next unblocked task.

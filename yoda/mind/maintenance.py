@@ -3,6 +3,7 @@ import datetime as dtm
 import logging
 import time
 from collections.abc import Awaitable, Coroutine
+from typing import Literal
 
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.storage_api import StorageApi
@@ -14,8 +15,11 @@ from yoda.mind.memory.data.compression_snapshot import CompressionTransformResul
 from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.memory.data.inline_summary_envelope import InlineSummaryEnvelope
 from yoda.mind.memory.data.user_profile import UserProfile
+from yoda.mind.memory.embedding import EmbeddingProvider
 from yoda.mind.memory.memory import MemoryCore, MemoryProvider
 from yoda.mind.memory.summarizer import SummarizerCore, SummarizerProvider
+from yoda.mind.memory.summary_store_core import SummaryStoreCore
+from yoda.mind.memory.vector import VectorProvider
 
 logger = logging.getLogger(__name__)
 
@@ -50,18 +54,23 @@ class Maintenance:
         compression_settings: ChatCompressionSettings,
         maintenance_settings: MaintenanceSettings,
         summarizer_provider: SummarizerProvider,
+        embedding_provider: EmbeddingProvider,
+        vector_provider: VectorProvider,
     ) -> None:
         self._storage_api = storage_api
         self._scheduler_api = scheduler_api
         self._memory_provider = memory_provider
         self._compression_settings = compression_settings
         self._summarizer_provider = summarizer_provider
+        self._embedding_provider = embedding_provider
+        self._vector_provider = vector_provider
         self._tick_seconds = float(maintenance_settings.tick_minutes * 60)
         self._tick_count = 0
         self._loop_task: asyncio.Task[None] | None = None
 
     async def run_initial_pass(self) -> None:
         await reconcile_active_jobs(self._storage_api, self._scheduler_api)
+        await self.reconcile_chroma_incomplete_records()
 
     def start(self) -> None:
         self._loop_task = asyncio.create_task(self._tick_loop())
@@ -121,15 +130,30 @@ class Maintenance:
                     triggers,
                 )
             if "size" in triggers:
-                await self._run_size_trigger_compression(conversation)
+                await self._run_compression_apply(conversation, "size", chat_type)
+            elif "timeout" in triggers:
+                await self._run_compression_apply(conversation, "timeout", chat_type)
 
-    async def _run_size_trigger_compression(self, conversation: Conversation) -> None:
+    async def _run_compression_apply(
+        self,
+        conversation: Conversation,
+        trigger: Literal["size", "timeout"],
+        chat_type: str,
+    ) -> None:
         chat_id = conversation.chat_id
         snapshot = await self._memory_provider.take_compression_snapshot(chat_id)
         if snapshot is None:
             return
 
-        split = CompressionCore.select_size_trigger_window(snapshot.copy.messages)
+        if trigger == "size":
+            split = CompressionCore.select_size_trigger_window(snapshot.copy.messages)
+        else:
+            split = CompressionCore.select_timeout_trigger_window(
+                snapshot.copy.messages,
+                self._compression_settings,
+                chat_type,
+                self._tick_seconds,
+            )
         if split is None:
             return
 
@@ -255,10 +279,49 @@ class Maintenance:
             removed_users,
             intro_text_for_user_id,
         )
-        logger.debug("compression applied: chat_id=%s trigger=size", chat_id)
+        logger.debug("compression applied: chat_id=%s trigger=%s", chat_id, trigger)
 
     async def flush_summary_outbox(self) -> None:
-        return None
+        threshold = self._compression_settings.outbox_health_threshold
+        for conversation in self._memory_provider.iter_conversations():
+            outbox = conversation.pending_vectorization
+            if not outbox:
+                continue
+            if len(outbox) > threshold:
+                logger.warning(
+                    "summary outbox depth exceeded: chat_id=%s depth=%s",
+                    conversation.chat_id,
+                    len(outbox),
+                )
+            texts = [entry.document for entry in outbox]
+            try:
+                embeddings = await self._embedding_provider.embed_batch(texts)
+                records = SummaryStoreCore.outbox_entries_to_records(outbox, embeddings)
+                await self._vector_provider.persist_summaries(conversation.chat_id, records)
+            except Exception:
+                logger.warning(
+                    "flush_summary_outbox failed for chat_id=%s",
+                    conversation.chat_id,
+                    exc_info=True,
+                )
+                continue
+            conversation.pending_vectorization.clear()
+
+    async def reconcile_chroma_incomplete_records(self) -> int:
+        conversations = list(self._memory_provider.iter_conversations())
+        pending_ids = SummaryStoreCore.pending_outbox_ids(conversations)
+        expected_dimension = self._embedding_provider.vector_dimension
+        deleted = 0
+        for chat_id in self._vector_provider.list_chat_ids():
+            records = await self._vector_provider.list_stored_records(chat_id)
+            to_delete = SummaryStoreCore.incomplete_ids_to_delete(
+                records,
+                pending_ids,
+                expected_dimension=expected_dimension,
+            )
+            await self._vector_provider.delete_summary_ids(chat_id, to_delete)
+            deleted += len(to_delete)
+        return deleted
 
     async def _run_subroutine(
         self,

@@ -1,11 +1,11 @@
 ---
 name: create-design
-description: Drafts and fills doc/backlog task design.md from task.md and requirements.md after requirements review. Use when the user asks to create or complete design, architecture decisions, API/data model sections, or diagrams for a backlog task; provides a design template path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → close. It is designed to provide the agent with everything necessary to plan the implementation.
+description: Drafts and fills doc/backlog task design.md from task.md and requirements.md after requirements review. Use when the user asks to create or complete design, architecture decisions, API/data model sections, or diagrams for a backlog task; provides a design template path, task folder, or task id (TASK-NNN). Part of the flow task → requirements → design → plan → implementation → review → close. It is designed to provide the agent with everything necessary to plan the implementation.
 ---
 
 # Create Design
 
-Produce a complete `design.md` for a backlog task from `task.md` after reviewing `requirements.md`, project architecture, and targeted code. This skill continues the agent harness pipeline: create `requirements.md` → **create `design.md`** → create `plan.md` → implement plan → close task.
+Produce a complete `design.md` for a backlog task from `task.md` after reviewing `requirements.md`, project architecture, and targeted code. This skill continues the agent harness pipeline: create `requirements.md` → **create `design.md`** → create `plan.md` → implement plan → create `review.md` → close task.
 
 ## Input (resolve first)
 
@@ -210,6 +210,6 @@ When done, briefly report:
 6. Suggested updates to `requirements.md` (if review found gaps), without applying unless asked
 7. Plan readiness: **Open questions** = `None.` (or non-blocking) **and** «System impact» lists concrete files/classes with IODA categories → ready to invoke **create-plan**. Otherwise list what still needs to be closed.
 8. Size estimate: `XS` | `S` | `M` | `L` | `XL` — one-line rationale.
-    - `XS` → suggest skipping plan, go straight to implement-task
-    - `XL` → suggest invoking **create-epic** with the produced `design.md` as an input
-    - `S`–`L` → suggest proceeding to **create-plan**
+    - `XS` → advise skipping plan; user may run **implement-task**
+    - `XL` → advise running **create-epic** with the produced `design.md` as an input
+    - `S`–`L` → advise running **create-plan**

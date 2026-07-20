@@ -47,6 +47,7 @@ Pick and implement a cleaner Provider cache contract. Not urgent — behaviour i
 - [[requirements]] — problem statement and solution alternatives
 - [[design]] — chosen approach (filled at design time)
 - [[plan]] — implementation plan
+- [[review]] — plan-compliance gate (verdict + findings)
 - [[ADR-000-sensitive-data-persistence]]
 
 ## Dependencies

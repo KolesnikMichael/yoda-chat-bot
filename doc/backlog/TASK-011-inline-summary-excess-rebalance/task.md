@@ -47,6 +47,7 @@ Part of the Chat Context Management chain — see [[EPIC-001-chat-context-manage
 - [[requirements]] — problem statement and solution alternatives
 - [[design]] — chosen approach (filled at design time)
 - [[plan]] — implementation plan
+- [[review]] — plan-compliance gate (verdict + findings)
 - [[EPIC-001-chat-context-management/epic|EPIC-001]] — epic decomposition and master design
 
 ## Dependencies

@@ -44,6 +44,7 @@ Part of the Chat Context Management chain — see the program map in [[EPIC-001-
 - [[requirements]] — requirements and acceptance criteria
 - [[design]] — architectural solution
 - [[plan]] — implementation plan
+- [[review]] — plan-compliance gate (verdict + findings)
 - [[chat_context_management]] — master design
 - [[EPIC-001-chat-context-management/epic|EPIC-001]] — program map and position in the chain
 

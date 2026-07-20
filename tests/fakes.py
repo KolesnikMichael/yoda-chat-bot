@@ -165,3 +165,60 @@ class FakeCognitionProvider:
 
     async def classify_intent(self, routing: RoutingContext) -> str:
         return self._intent
+
+
+class StubEmbeddingProvider:
+    def __init__(self, *, fail: bool = False, dimension: int = 1536) -> None:
+        self.fail = fail
+        self._dimension = dimension
+        self.calls: list[list[str]] = []
+
+    @property
+    def model_name(self) -> str:
+        return "openai/text-embedding-3-small"
+
+    @property
+    def vector_dimension(self) -> int:
+        return self._dimension
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(texts)
+        if self.fail:
+            raise RuntimeError("embed failed")
+        return [[0.0] * self._dimension for _ in texts]
+
+    async def embed(self, text: str) -> list[float]:
+        return (await self.embed_batch([text]))[0]
+
+
+class StubVectorProvider:
+    def __init__(self) -> None:
+        from yoda.mind.memory.vector import StoredSummaryRecord
+
+        self._StoredSummaryRecord = StoredSummaryRecord
+        self.records: dict[int, dict[str, object]] = {}
+        self.persist_calls: list[tuple[int, int]] = []
+
+    async def persist_summaries(self, chat_id: int, records: list) -> None:
+        self.persist_calls.append((chat_id, len(records)))
+        bucket = self.records.setdefault(chat_id, {})
+        for record in records:
+            bucket[record.summary_id] = self._StoredSummaryRecord(
+                summary_id=record.summary_id,
+                document=record.document,
+                embedding=list(record.embedding),
+            )
+
+    async def list_stored_records(self, chat_id: int) -> list:
+        bucket = self.records.get(chat_id, {})
+        return list(bucket.values())
+
+    async def delete_summary_ids(self, chat_id: int, ids: list[str]) -> None:
+        bucket = self.records.get(chat_id)
+        if not bucket:
+            return
+        for summary_id in ids:
+            bucket.pop(summary_id, None)
+
+    def list_chat_ids(self) -> list[int]:
+        return sorted(self.records.keys())
