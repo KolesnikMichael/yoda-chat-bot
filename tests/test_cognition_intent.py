@@ -1,6 +1,8 @@
+from yoda.mind import cognition as cognition_module
 from yoda.mind.cognition import CognitionCore
 from yoda.mind.memory.data.conversation import Conversation
 from yoda.mind.memory.data.message import Message
+from yoda.mind.memory.memory import VISIBLE_KINDS
 
 
 def test_build_intent_messages_structure():
@@ -46,8 +48,115 @@ def test_build_intent_context_messages_excludes_bootstrap_tail():
     assert out == [
         {"role": "user", "content": "u1"},
         {"role": "assistant", "content": "a1"},
-        {"role": "system", "content": "Agent completed: ok"},
     ]
+
+
+def test_visible_kinds_parity_with_memory():
+    assert cognition_module._VISIBLE_KINDS == VISIBLE_KINDS
+
+
+def test_build_intent_context_messages_excludes_user_introduction():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="bootstrap"),
+            Message(
+                role="system",
+                kind="user_introduction",
+                text="User profile snapshot:\nPreferred name: Luke",
+                user_id=42,
+            ),
+            Message(
+                role="system",
+                kind="user",
+                text='On 2026-03-20 Luke sent text message: "hello"',
+                user_id=42,
+            ),
+        ],
+    )
+    assert CognitionCore.build_intent_context_messages(
+        conv, exclude_trailing=1) == []
+
+
+def test_build_routing_context_first_ingest_excludes_introduction():
+    perceived = [
+        {"role": "system", "text": 'On 2026-03-20 Luke sent text message: "hello"',
+         "timestamp": "2026-03-20"},
+    ]
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="bootstrap"),
+            Message(
+                role="system",
+                kind="user_introduction",
+                text="User profile snapshot:\nPreferred name: Luke",
+                user_id=42,
+            ),
+            Message(
+                role="system",
+                kind="user",
+                text='On 2026-03-20 Luke sent text message: "hello"',
+                user_id=42,
+            ),
+        ],
+    )
+    rc = CognitionCore.build_routing_context(perceived, conv)
+    assert rc.current_user_text == "hello"
+    assert rc.recent_messages == []
+
+
+def test_build_routing_context_new_participant_keeps_prior_visible_history():
+    perceived = [
+        {"role": "system", "text": 'On 2026-03-20 Sam sent text message: "hi"',
+         "timestamp": "2026-03-20"},
+    ]
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="bootstrap"),
+            Message(role="user", kind="user", text="prior", user_id=1),
+            Message(role="assistant", kind="assistant", text="reply"),
+            Message(
+                role="system",
+                kind="user_introduction",
+                text="User profile snapshot:\nPreferred name: Sam",
+                user_id=2,
+            ),
+            Message(
+                role="system",
+                kind="user",
+                text='On 2026-03-20 Sam sent text message: "hi"',
+                user_id=2,
+            ),
+        ],
+    )
+    rc = CognitionCore.build_routing_context(perceived, conv)
+    assert rc.current_user_text == "hi"
+    assert rc.recent_messages == [
+        {"role": "user", "content": "prior"},
+        {"role": "assistant", "content": "reply"},
+    ]
+
+
+def test_build_intent_context_messages_limit_counts_visible_only():
+    conv = Conversation(
+        chat_id=1,
+        messages=[
+            Message(role="system", kind="prompt", text="b"),
+            Message(role="user", kind="user", text="v0"),
+            Message(role="system", kind="task_result", text="internal"),
+            Message(role="user", kind="user", text="v1"),
+            Message(role="system", kind="user_introduction", text="profile", user_id=1),
+            Message(role="assistant", kind="assistant", text="a1"),
+            Message(role="user", kind="user", text="v2"),
+            Message(role="system", kind="summary", text="compressed"),
+            Message(role="user", kind="user", text="v3"),
+            Message(role="assistant", kind="assistant", text="a2"),
+        ],
+    )
+    out = CognitionCore.build_intent_context_messages(conv)
+    assert [m["content"] for m in out] == ["a1", "v2", "v3", "a2"]
 
 
 def test_build_intent_context_messages_limit_four():

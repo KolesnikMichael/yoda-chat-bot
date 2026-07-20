@@ -4,6 +4,7 @@ from typing import TypedDict
 from pydantic import BaseModel
 
 from yoda.mind.memory.data.conversation import Conversation
+from yoda.mind.memory.data.message import MessageKind
 from yoda.mind.data.routing_context import (
     RoutingContext,
     format_recent_messages_block,
@@ -11,6 +12,8 @@ from yoda.mind.data.routing_context import (
 from yoda.mind.perception.language import LanguageProvider
 
 logger = logging.getLogger(__name__)
+
+_VISIBLE_KINDS: frozenset[MessageKind] = frozenset({"user", "assistant"})
 
 INTENT_CLASSIFICATION_PROMPT = (
     "Classify the user's intent from one or more messages. "
@@ -69,7 +72,10 @@ class CognitionCore:
             msgs = msgs[:-exclude_trailing]
         if not msgs:
             return []
-        tail = msgs[-limit:]
+        visible = [m for m in msgs if m.kind in _VISIBLE_KINDS]
+        if not visible:
+            return []
+        tail = visible[-limit:]
         return [m.to_llm_dict() for m in tail]
 
     @staticmethod
