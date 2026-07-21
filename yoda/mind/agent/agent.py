@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from yoda.mind.agent.core.execution_context import ExecutionContextCore
+from yoda.mind.agent.core.outcome_core import OutcomeCore
 from yoda.mind.agent.core.react_loop import ReactLoop
 from yoda.mind.agent.data.agent_data import (
     AgentContext,
@@ -20,6 +21,11 @@ from yoda.mind.agent.data.agent_data import (
     ToolCall,
     ToolCallRequest,
     ToolResult,
+)
+from yoda.mind.agent.data.outcome_data import (
+    ClarificationResult,
+    SafeFailureCategory,
+    UserOperation,
 )
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.skills.catalog import SkillCatalog
@@ -107,12 +113,13 @@ class Agent:
                 AgentPhase.EXECUTION.value,
                 ProtocolIssueCategory.INVALID_CONSTRAINT.value,
             )
-            return AgentResult(
-                failure=AgentFailure(
+            return self._failure_result(
+                AgentFailure(
                     stage=AgentPhase.EXECUTION,
                     category="protocol_exhausted",
                     issue=ProtocolIssueCategory.INVALID_CONSTRAINT,
                 ),
+                skill_name=skill_name,
             )
         base = AgentContext(
             task=task,
@@ -122,7 +129,7 @@ class Agent:
             catalog_summaries=self._catalog_summaries,
             phase=AgentPhase.EXECUTION,
             request_constraints=constraints,
-            protocol_version=3,
+            protocol_version=4,
         )
         context = self._activate_skill(
             base,
@@ -134,9 +141,14 @@ class Agent:
     async def resume(self, chat_id: int, user_answer: str) -> AgentResult:
         context = await self._sessions.load(chat_id)
         if context is None:
-            return AgentResult(answer="No pending session found.")
+            return AgentResult(
+                outcome=OutcomeCore.failure(
+                    UserOperation.REQUESTED_WORK,
+                    SafeFailureCategory.AMBIGUOUS,
+                ),
+            )
 
-        if context.protocol_version < 3:
+        if context.protocol_version < 4:
             context = self._upgrade_session_protocol(context)
 
         answer_msg = {"role": "user", "content": f"User answered: {user_answer}"}
@@ -169,8 +181,8 @@ class Agent:
 
             if decision.mode == "no_skill":
                 await self._sessions.delete(context.chat_id)
-                return AgentResult(
-                    failure=AgentFailure(
+                return self._failure_result(
+                    AgentFailure(
                         stage=AgentPhase.SELECTION,
                         category="unsupported",
                     ),
@@ -189,12 +201,13 @@ class Agent:
                     ProtocolIssueCategory.INVALID_CONSTRAINT.value,
                 )
                 await self._sessions.delete(context.chat_id)
-                return AgentResult(
-                    failure=AgentFailure(
+                return self._failure_result(
+                    AgentFailure(
                         stage=AgentPhase.EXECUTION,
                         category="protocol_exhausted",
                         issue=ProtocolIssueCategory.INVALID_CONSTRAINT,
                     ),
+                    skill_name=decision.selected_skill.strip(),
                 )
             context = ReactLoop._copy_context(
                 context,
@@ -227,7 +240,7 @@ class Agent:
         return raw, issue
 
     async def _execute_loop(self, context: AgentContext) -> AgentResult:
-        last_success_output: str | None = None
+        terminal_success = False
         finished_answer: str | None = None
 
         while not ReactLoop.is_done(context):
@@ -248,6 +261,15 @@ class Agent:
                 finished_answer = (decision.final_answer or "").strip()
                 break
 
+            if decision.mode == "fail":
+                await self._sessions.delete(context.chat_id)
+                return AgentResult(
+                    outcome=OutcomeCore.failure(
+                        self._operation_for_context(context),
+                        SafeFailureCategory.UNSUPPORTED,
+                    ),
+                )
+
             assert decision.tool_calls is not None
             prepared, prep_issue = ExecutionContextCore.prepare_tool_requests(
                 decision.tool_calls,
@@ -262,16 +284,25 @@ class Agent:
 
             tool_calls = self._build_tool_calls(context, prepared)
             results = await self._execute_tool_calls(tool_calls)
+            context = self._append_results_with_evidence(context, results)
+            failed_terminal = any(
+                not result.success
+                and result.tool_name in self._tools
+                and self._tools[result.tool_name].terminal
+                for result in results
+            )
+            if failed_terminal:
+                context = ReactLoop._copy_context(
+                    context,
+                    terminal_failure_pending=True,
+                )
 
             suspended = next((r for r in results if r.suspend), None)
             if suspended:
-                context = ReactLoop.append_tool_results(context, list(results))
                 await self._sessions.save(context)
-                return AgentResult(clarification=suspended.output)
-
-            for r in results:
-                if r.success:
-                    last_success_output = r.output
+                return AgentResult(
+                    clarification=ClarificationResult(question=suspended.output),
+                )
 
             terminal_completed = any(
                 r.success and self._tools[r.tool_name].terminal
@@ -280,29 +311,47 @@ class Agent:
             )
             if terminal_completed:
                 logger.info("Terminal tool succeeded, finishing loop")
-                context = ReactLoop.append_tool_results(context, list(results))
-                finished_answer = last_success_output
+                terminal_success = True
                 break
-
-            context = ReactLoop.append_tool_results(context, list(results))
 
         await self._sessions.delete(context.chat_id)
 
-        if finished_answer:
-            return AgentResult(answer=finished_answer, tools_used=context.tools_used)
+        if terminal_success:
+            return AgentResult(
+                outcome=OutcomeCore.success_from_terminal(context.outcome_evidence),
+            )
+
+        if finished_answer is not None:
+            if context.terminal_failure_pending:
+                return AgentResult(
+                    outcome=OutcomeCore.failure(
+                        self._operation_for_context(context),
+                        SafeFailureCategory.TRANSIENT,
+                    ),
+                )
+            skill_name = (
+                context.active_skill.name if context.active_skill is not None else ""
+            )
+            return AgentResult(
+                outcome=OutcomeCore.success_from_finish(
+                    skill_name,
+                    finished_answer,
+                    context.outcome_evidence,
+                ),
+            )
 
         logger.warning(
             "stage=%s category=%s",
             AgentPhase.EXECUTION.value,
             ProtocolIssueCategory.ITERATION_LIMIT.value,
         )
-        return AgentResult(
-            failure=AgentFailure(
+        return self._failure_result(
+            AgentFailure(
                 stage=AgentPhase.EXECUTION,
                 category="protocol_exhausted",
                 issue=ProtocolIssueCategory.ITERATION_LIMIT,
             ),
-            tools_used=context.tools_used,
+            context=context,
         )
 
     async def _parse_execution(
@@ -342,13 +391,13 @@ class Agent:
             return ReactLoop.append_correction(context, issue)
 
         await self._sessions.delete(context.chat_id)
-        return AgentResult(
-            failure=AgentFailure(
+        return self._failure_result(
+            AgentFailure(
                 stage=issue.stage,
                 category="protocol_exhausted",
                 issue=issue.category,
             ),
-            tools_used=context.tools_used,
+            context=context,
         )
 
     def _available_tools_for_validation(self, context: AgentContext) -> set[str]:
@@ -492,4 +541,45 @@ class Agent:
             execution_retry_used=context.execution_retry_used,
             request_constraints=context.request_constraints,
             protocol_version=context.protocol_version,
+            outcome_evidence=[],
+            terminal_failure_pending=False,
+        )
+
+    @staticmethod
+    def _append_results_with_evidence(
+        context: AgentContext,
+        results: list[ToolResult],
+    ) -> AgentContext:
+        skill_name = (
+            context.active_skill.name if context.active_skill is not None else ""
+        )
+        added = OutcomeCore.evidence_from_results(skill_name, results)
+        evidence = list(context.outcome_evidence) + added
+        return ReactLoop.append_tool_results(
+            context,
+            list(results),
+            outcome_evidence=evidence,
+        )
+
+    @staticmethod
+    def _operation_for_context(context: AgentContext) -> UserOperation:
+        if context.active_skill is None:
+            return UserOperation.REQUESTED_WORK
+        return OutcomeCore.operation_for_skill(context.active_skill.name)
+
+    @staticmethod
+    def _failure_result(
+        failure: AgentFailure,
+        *,
+        context: AgentContext | None = None,
+        skill_name: str | None = None,
+    ) -> AgentResult:
+        if context is not None:
+            operation = Agent._operation_for_context(context)
+        elif skill_name:
+            operation = OutcomeCore.operation_for_skill(skill_name)
+        else:
+            operation = UserOperation.REQUESTED_WORK
+        return AgentResult(
+            outcome=OutcomeCore.failure_from_agent(failure, operation),
         )

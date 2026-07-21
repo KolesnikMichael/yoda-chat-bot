@@ -14,6 +14,7 @@ from yoda.mind.agent.data.agent_data import (
     SkillSummary,
     ToolResult,
 )
+from yoda.mind.agent.data.outcome_data import OutcomeEvidence
 from yoda.mind.data.routing_context import format_recent_messages_block
 from yoda.mind.memory.data.user_profile import UserProfile
 
@@ -48,14 +49,19 @@ EXECUTION_SYSTEM_PROMPT = (
     "You are an executor agent. Complete the active skill using available tools.\n\n"
     "You MUST respond with a JSON object matching this schema:\n"
     "{{\n"
-    '  "mode": "call_tools" | "finish",\n'
+    '  "mode": "call_tools" | "finish" | "fail",\n'
     '  "tool_calls": [{{"tool_name": "name", "arguments": {{...}}}}] or null,\n'
     '  "final_answer": "answer text or null",\n'
+    '  "failure_reason": "unsupported" | null,\n'
     '  "reasoning": "brief explanation of your decision"\n'
     "}}\n"
     "Rules:\n"
-    '- mode="call_tools": provide one or more tool_calls; final_answer must be null.\n'
-    '- mode="finish": provide a non-empty final_answer; tool_calls must be null.\n'
+    '- mode="call_tools": provide one or more tool_calls; final_answer and '
+    "failure_reason must be null.\n"
+    '- mode="finish": provide a non-empty final_answer; tool_calls and '
+    "failure_reason must be null.\n"
+    '- mode="fail": set failure_reason to "unsupported"; tool_calls and '
+    "final_answer must be null.\n"
     "Do not select skills."
 )
 
@@ -77,7 +83,7 @@ _LEGACY_SELECTION_INSTRUCTION = (
 
 EXECUTION_INSTRUCTION = (
     "Now execute the skill workflow. "
-    'Each response must use mode="call_tools" or mode="finish".'
+    'Each response must use mode="call_tools", mode="finish", or mode="fail".'
 )
 
 INFRA_TOOLS = frozenset({"ask_user", "update_profile"})
@@ -362,7 +368,10 @@ class ReactLoop:
 
     @staticmethod
     def append_tool_results(
-        context: AgentContext, results: list[ToolResult],
+        context: AgentContext,
+        results: list[ToolResult],
+        *,
+        outcome_evidence: list[OutcomeEvidence] | None = None,
     ) -> AgentContext:
         new_messages = list(context.messages)
         new_tools_used = list(context.tools_used)
@@ -370,18 +379,27 @@ class ReactLoop:
         for r in results:
             if r.tool_name == "ask_user":
                 content = f"User was asked: {r.output}"
+            elif r.success:
+                content = f"[{r.tool_name}] (OK) {r.output}"
             else:
-                status = "OK" if r.success else "FAILED"
-                content = f"[{r.tool_name}] ({status}) {r.output}"
+                content = (
+                    f"[{r.tool_name}] (FAILED, not outcome evidence) {r.output}"
+                )
             new_messages.append({"role": "system", "content": content})
             if r.tool_name not in new_tools_used:
                 new_tools_used.append(r.tool_name)
 
+        evidence = (
+            list(context.outcome_evidence)
+            if outcome_evidence is None
+            else list(outcome_evidence)
+        )
         return ReactLoop._copy_context(
             context,
             messages=new_messages,
             iteration=context.iteration + 1,
             tools_used=new_tools_used,
+            outcome_evidence=evidence,
         )
 
     @staticmethod
@@ -434,7 +452,7 @@ class ReactLoop:
     ) -> ProtocolIssue | None:
         if decision.mode == "call_tools":
             calls = decision.tool_calls or []
-            if decision.final_answer is not None:
+            if decision.final_answer is not None or decision.failure_reason is not None:
                 return ProtocolIssue(
                     stage=AgentPhase.EXECUTION,
                     category=ProtocolIssueCategory.INVALID_MODE,
@@ -459,7 +477,20 @@ class ReactLoop:
                     stage=AgentPhase.EXECUTION,
                     category=ProtocolIssueCategory.INVALID_MODE,
                 )
-            if decision.tool_calls:
+            if decision.tool_calls or decision.failure_reason is not None:
+                return ProtocolIssue(
+                    stage=AgentPhase.EXECUTION,
+                    category=ProtocolIssueCategory.INVALID_MODE,
+                )
+            return None
+
+        if decision.mode == "fail":
+            if decision.failure_reason != "unsupported":
+                return ProtocolIssue(
+                    stage=AgentPhase.EXECUTION,
+                    category=ProtocolIssueCategory.INVALID_MODE,
+                )
+            if decision.tool_calls or decision.final_answer is not None:
                 return ProtocolIssue(
                     stage=AgentPhase.EXECUTION,
                     category=ProtocolIssueCategory.INVALID_MODE,
@@ -520,7 +551,7 @@ class ReactLoop:
         skill_preferences: list[str] | None = None,
         activation_msg: dict | None = None,
     ) -> AgentContext:
-        if context.protocol_version >= 3:
+        if context.protocol_version >= 4:
             return context
 
         constraints = context.request_constraints or RequestConstraints()
@@ -539,7 +570,7 @@ class ReactLoop:
                     refreshed,
                     messages=messages,
                     phase=AgentPhase.SELECTION,
-                    protocol_version=3,
+                    protocol_version=4,
                     request_constraints=constraints,
                 )
 
@@ -548,15 +579,15 @@ class ReactLoop:
                 current_catalog=current_catalog,
                 skill_preferences=skill_preferences or [],
                 activation_msg=activation_msg,
-                protocol_version=3,
+                protocol_version=4,
                 request_constraints=constraints,
             )
 
-        # protocol 2 → 3
+        # protocol 2/3 → 4
         if context.active_skill is None:
             return ReactLoop._copy_context(
                 context,
-                protocol_version=3,
+                protocol_version=4,
                 request_constraints=constraints,
                 catalog_summaries=current_catalog,
             )
@@ -566,7 +597,7 @@ class ReactLoop:
             current_catalog=current_catalog,
             skill_preferences=skill_preferences or [],
             activation_msg=activation_msg,
-            protocol_version=3,
+            protocol_version=4,
             request_constraints=constraints,
         )
 
@@ -658,6 +689,8 @@ class ReactLoop:
         active_skill: SkillSpec | None = None,
         task: str | None = None,
         request_constraints: RequestConstraints | None = None,
+        outcome_evidence: list[OutcomeEvidence] | None = None,
+        terminal_failure_pending: bool | None = None,
     ) -> AgentContext:
         return AgentContext(
             task=context.task if task is None else task,
@@ -697,6 +730,16 @@ class ReactLoop:
                 context.protocol_version
                 if protocol_version is None
                 else protocol_version
+            ),
+            outcome_evidence=(
+                list(context.outcome_evidence)
+                if outcome_evidence is None
+                else list(outcome_evidence)
+            ),
+            terminal_failure_pending=(
+                context.terminal_failure_pending
+                if terminal_failure_pending is None
+                else terminal_failure_pending
             ),
         )
 

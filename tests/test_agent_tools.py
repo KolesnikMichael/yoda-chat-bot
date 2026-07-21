@@ -125,6 +125,11 @@ async def test_scheduler_tool_schedules_reminder():
 
     assert result.success is True
     assert "call mom" in result.output
+    assert result.terminal_facts is not None
+    assert result.terminal_facts.job_kind.value == "message"
+    assert result.terminal_facts.result_kind.value == "scheduled_job"
+    assert result.terminal_facts.schedule
+    assert result.terminal_facts.scheduled_skill_name is None
     assert len(scheduler_api.scheduled) == 1
     job = scheduler_api.scheduled[0]
     assert job["chat_id"] == 42
@@ -1222,6 +1227,10 @@ async def test_delete_user_data_removes_everything():
     assert result.success is True
     assert "user record" in result.output
     assert "2 profile(s)" in result.output
+    assert result.terminal_facts is not None
+    assert result.terminal_facts.result_kind.value == "user_data"
+    assert "redis" not in result.terminal_facts.summary.lower()
+    assert "active_jobs" not in result.terminal_facts.summary
     assert "2 scheduled job(s)" in result.output
     assert "private chat metadata" in result.output
     assert memory.forget_calls == [100]
@@ -1396,6 +1405,10 @@ async def test_send_picture_success_deletes_file(tmp_path):
     assert "red balloon" in result.output.lower()
     assert "description:" in result.output.lower()
     assert not img.exists()
+    assert result.terminal_facts is not None
+    assert result.terminal_facts.result_kind.value == "picture_sent"
+    assert "/tmp" not in result.terminal_facts.summary
+    assert str(img) not in result.terminal_facts.summary
 
 
 @pytest.mark.asyncio
@@ -1417,6 +1430,7 @@ async def test_send_picture_missing_file(tmp_path):
     result = await tool.execute(call)
     assert result.success is False
     assert "not found" in result.output.lower()
+    assert result.terminal_facts is None
 
 
 @pytest.mark.asyncio

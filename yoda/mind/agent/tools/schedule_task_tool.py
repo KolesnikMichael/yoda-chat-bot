@@ -9,6 +9,7 @@ from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.storage_api import StorageApi
 from yoda.mind.agent.core.schedule_core import ScheduleCore
 from yoda.mind.agent.data.agent_data import RequestConstraints, ToolCall, ToolResult
+from yoda.mind.agent.data.outcome_data import JobKind, ResultKind, TerminalResultFacts
 from yoda.mind.agent.tools.job_keys import active_jobs_key
 from yoda.mind.agent.tools.tool_port import Tool
 
@@ -226,6 +227,13 @@ class ScheduleTaskTool(Tool):
                 f"'{params.description}' — {display_str}"
             ),
             success=True,
+            terminal_facts=TerminalResultFacts(
+                result_kind=ResultKind.SCHEDULED_JOB,
+                summary=f"Scheduled task set for {display_str}.",
+                job_kind=JobKind.TASK,
+                scheduled_skill_name=params.skill_name,
+                schedule=display_str,
+            ),
         )
 
     async def _save_job_metadata(

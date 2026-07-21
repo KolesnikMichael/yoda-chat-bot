@@ -10,6 +10,12 @@ from yoda.mind.agent.data.agent_data import (
     SkillSpec,
     SkillSummary,
 )
+from yoda.mind.agent.data.outcome_data import (
+    JobKind,
+    OutcomeEvidence,
+    ResultKind,
+    UserOperation,
+)
 from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.memory.migration import migrate
 
@@ -38,6 +44,8 @@ class AgentSessionProvider:
             "execution_retry_used": context.execution_retry_used,
             "protocol_version": context.protocol_version,
             "request_constraints": context.request_constraints.model_dump(),
+            "outcome_evidence": [asdict(item) for item in context.outcome_evidence],
+            "terminal_failure_pending": context.terminal_failure_pending,
         }
         await self._storage_api.hset(
             AGENT_SESSION_KEY, str(context.chat_id), json.dumps(data))
@@ -72,6 +80,11 @@ class AgentSessionProvider:
         else:
             request_constraints = RequestConstraints.model_validate(raw_constraints)
 
+        outcome_evidence = [
+            _decode_outcome_evidence(item)
+            for item in data.get("outcome_evidence", [])
+        ]
+
         return AgentContext(
             task=data["task"],
             profile=profile,
@@ -87,6 +100,10 @@ class AgentSessionProvider:
             execution_retry_used=execution_retry_used,
             request_constraints=request_constraints,
             protocol_version=protocol_version,
+            outcome_evidence=outcome_evidence,
+            terminal_failure_pending=bool(
+                data.get("terminal_failure_pending", False),
+            ),
         )
 
     async def has_session(self, chat_id: int) -> bool:
@@ -96,3 +113,21 @@ class AgentSessionProvider:
     async def delete(self, chat_id: int) -> None:
         await self._storage_api.hdel(AGENT_SESSION_KEY, str(chat_id))
         logger.info(f"Deleted agent session for chat {chat_id}")
+
+
+def _decode_outcome_evidence(raw: dict) -> OutcomeEvidence:
+    job_kind_raw = raw.get("job_kind")
+    scheduled_operation_raw = raw.get("scheduled_operation")
+    return OutcomeEvidence(
+        operation=UserOperation(raw["operation"]),
+        result_kind=ResultKind(raw["result_kind"]),
+        terminal=bool(raw["terminal"]),
+        safe_summary=raw.get("safe_summary"),
+        job_kind=JobKind(job_kind_raw) if job_kind_raw is not None else None,
+        scheduled_operation=(
+            UserOperation(scheduled_operation_raw)
+            if scheduled_operation_raw is not None
+            else None
+        ),
+        schedule=raw.get("schedule"),
+    )

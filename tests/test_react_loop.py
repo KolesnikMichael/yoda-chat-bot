@@ -165,7 +165,7 @@ def test_agent_context_defaults_phase_protocol_retry():
     assert ctx.phase == AgentPhase.SELECTION
     assert ctx.selection_retry_used is False
     assert ctx.execution_retry_used is False
-    assert ctx.protocol_version == 3
+    assert ctx.protocol_version == 4
     assert ctx.request_constraints == RequestConstraints()
 
 
@@ -175,14 +175,14 @@ def test_agent_context_with_messages_preserves_protocol_fields():
         phase=AgentPhase.EXECUTION,
         selection_retry_used=True,
         execution_retry_used=True,
-        protocol_version=3,
+        protocol_version=4,
         request_constraints=constraints,
     )
     new_ctx = ctx.with_messages([{"role": "user", "content": "x"}])
     assert new_ctx.phase == AgentPhase.EXECUTION
     assert new_ctx.selection_retry_used is True
     assert new_ctx.execution_retry_used is True
-    assert new_ctx.protocol_version == 3
+    assert new_ctx.protocol_version == 4
     assert new_ctx.request_constraints == constraints
     assert new_ctx.messages == [{"role": "user", "content": "x"}]
 
@@ -643,7 +643,7 @@ def test_append_tool_results_preserves_retry_flags():
     assert new_ctx.selection_retry_used is True
     assert new_ctx.execution_retry_used is True
     assert new_ctx.phase == AgentPhase.EXECUTION
-    assert new_ctx.protocol_version == 3
+    assert new_ctx.protocol_version == 4
     assert new_ctx.request_constraints == RequestConstraints()
     ctx = _make_context(active_skill=SKILL_SPEC)
     results = [ToolResult(tool_name="schedule_message", output="OK", success=True)]
@@ -670,7 +670,7 @@ def test_append_tool_results_failed_tool():
 
     new_ctx = ReactLoop.append_tool_results(ctx, results)
 
-    assert "(FAILED)" in new_ctx.messages[0]["content"]
+    assert "(FAILED, not outcome evidence)" in new_ctx.messages[0]["content"]
 
 
 # --- validate_selection / validate_execution ---
@@ -787,6 +787,32 @@ def test_validate_execution_rejects_blank_final_answer():
     assert issue.category == ProtocolIssueCategory.INVALID_MODE
 
 
+def test_validate_execution_accepts_fail_unsupported():
+    decision = ExecutionDecision(mode="fail", failure_reason="unsupported")
+    assert ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS) is None
+
+
+def test_validate_execution_rejects_fail_with_wrong_reason():
+    decision = ExecutionDecision.model_construct(
+        mode="fail",
+        failure_reason="other",
+    )
+    issue = ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.INVALID_MODE
+
+
+def test_validate_execution_rejects_fail_with_tool_calls():
+    decision = ExecutionDecision(
+        mode="fail",
+        failure_reason="unsupported",
+        tool_calls=[ToolCallRequest(tool_name="ask_user", arguments={"question": "?"})],
+    )
+    issue = ReactLoop.validate_execution_decision(decision, AVAILABLE_TOOLS)
+    assert issue is not None
+    assert issue.category == ProtocolIssueCategory.INVALID_MODE
+
+
 # --- append_correction ---
 
 def test_append_correction_selection_sets_retry_and_system_message():
@@ -850,7 +876,7 @@ def test_upgrade_legacy_pre_selection_refreshes_seed():
         ],
     )
     upgraded = ReactLoop.upgrade_legacy_protocol(ctx, CATALOG)
-    assert upgraded.protocol_version == 3
+    assert upgraded.protocol_version == 4
     assert upgraded.phase == AgentPhase.SELECTION
     assert "skill-selection agent" in upgraded.messages[0]["content"]
     assert "tool_calls" not in upgraded.messages[0]["content"]
@@ -886,7 +912,7 @@ def test_upgrade_legacy_active_execution_replaces_system():
         CATALOG,
         skill_preferences=["short"],
     )
-    assert upgraded.protocol_version == 3
+    assert upgraded.protocol_version == 4
     assert upgraded.phase == AgentPhase.EXECUTION
     assert "selected_skill" not in upgraded.messages[0]["content"]
     assert "call_tools" in upgraded.messages[0]["content"]

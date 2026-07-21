@@ -17,7 +17,7 @@ Replace the all-nullable `Decision` with strict `SelectionDecision` and `Executi
 ## Goal / Non-goals
 
 - **Goal:** Selection and execution parse into separate extra-forbidding models with Core-owned semantic validation; selection never exposes or runs tools; one code-enforced corrective retry per phase then typed protocol failure; `Agent` Integration owns phase/tool/session orchestration; legacy and new sessions load/resume correctly; full suite green.
-- **Non-goals:** Skill catalog metadata / control-role catalog boundary (TASK-014); preference/domain propagation (TASK-016); IANA timezone guidance (TASK-017); grounded outcomes and user-visible failure wording (TASK-018); deterministic Telegram commands (TASK-019); multilingual eval corpus and live telemetry (TASK-020/021); new skills, tools, scheduling backends, or bulk Redis migration.
+- **Non-goals:** Skill catalog metadata / control-role catalog boundary (TASK-014); preference/domain propagation (TASK-016); IANA timezone guidance (TASK-017); grounded outcomes and user-visible failure wording (TASK-018); multilingual eval corpus and live telemetry (TASK-020/021); new skills, tools, scheduling backends, or bulk Redis migration.
 
 ## Context to load
 

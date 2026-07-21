@@ -3,12 +3,15 @@ import pytest
 from yoda.mind.affect import AffectProvider
 from yoda.mind.mind import Mind
 from yoda.mind.memory.data.pending_message import PendingMessage
-from yoda.mind.agent.data.agent_data import (
-    AgentFailure,
-    AgentPhase,
-    AgentResult,
-    ProtocolIssueCategory,
-    RequestConstraints,
+from yoda.mind.agent.core.delivery_core import DELIVERY_INSTRUCTION_PREFIX
+from yoda.mind.agent.core.outcome_core import OutcomeCore
+from yoda.mind.agent.data.agent_data import AgentResult, RequestConstraints
+from yoda.mind.agent.data.outcome_data import (
+    ClarificationResult,
+    OutcomeStatus,
+    ResultKind,
+    SafeFailureCategory,
+    UserOperation,
 )
 from yoda.mind.perception.perception import Perception
 
@@ -24,7 +27,9 @@ from tests.fakes import (
 
 class FakeAgent:
     def __init__(self, result=None, has_session=False):
-        self._result = result or AgentResult(answer="Done!")
+        self._result = result or AgentResult(
+            outcome=ExecutionOutcome_success("Done!"),
+        )
         self._has_session = has_session
         self.run_calls = []
         self.run_with_skill_calls = []
@@ -48,6 +53,17 @@ class FakeAgent:
     async def resume(self, chat_id, user_answer):
         self.resume_calls.append((chat_id, user_answer))
         return self._result
+
+
+def ExecutionOutcome_success(summary: str):
+    from yoda.mind.agent.data.outcome_data import ExecutionOutcome
+
+    return ExecutionOutcome(
+        operation=UserOperation.RETRIEVE_INFORMATION,
+        status=OutcomeStatus.SUCCESS,
+        summary=summary,
+        result_kind=ResultKind.INFORMATION,
+    )
 
 
 def _make_pending(text="Hello", user_id=1, message_id: int = 100) -> PendingMessage:
@@ -90,6 +106,13 @@ def _build_mind(intent="chat", agent_result=None, has_session=False):
     return mind, lang, agent, memory, sender
 
 
+def _grounded_lines(conversation) -> list[str]:
+    return [
+        m.text for m in conversation.messages
+        if m.role == "system" and m.text.startswith(DELIVERY_INSTRUCTION_PREFIX)
+    ]
+
+
 @pytest.mark.asyncio
 async def test_chat_intent_goes_to_yoda():
     mind, lang, agent, memory, sender = _build_mind(intent="chat")
@@ -100,17 +123,10 @@ async def test_chat_intent_goes_to_yoda():
     assert len(agent.run_calls) == 0
 
 
-def _system_task_lines(conversation) -> list[str]:
-    return [
-        m.text for m in conversation.messages
-        if m.role == "system" and "Agent completed a task" in m.text
-    ]
-
-
 @pytest.mark.asyncio
-async def test_agent_task_stores_tools_used_single():
+async def test_agent_task_stores_grounded_delivery_instruction():
     agent_result = AgentResult(
-        answer="Weather is sunny", tools_used=["search_web"],
+        outcome=ExecutionOutcome_success("Weather is sunny"),
     )
     mind, lang, agent, memory, sender = _build_mind(
         intent="agent_task", agent_result=agent_result)
@@ -119,44 +135,19 @@ async def test_agent_task_stores_tools_used_single():
         1, [_make_pending("what's the weather?", user_id=1)])
 
     conversation = memory.get_conversation(1)
-    lines = _system_task_lines(conversation)
+    lines = _grounded_lines(conversation)
     assert len(lines) == 1
-    assert "Tools used: search_web" in lines[0]
-    assert "Result: Weather is sunny" in lines[0]
+    assert "operation_completed" in lines[0]
+    assert "Weather is sunny" in lines[0]
+    assert "search_web" not in lines[0]
+    assert "Tools used:" not in lines[0]
 
 
 @pytest.mark.asyncio
-async def test_agent_task_stores_tools_used_none_when_empty():
-    agent_result = AgentResult(answer="Done!", tools_used=[])
-    mind, lang, agent, memory, sender = _build_mind(
-        intent="agent_task", agent_result=agent_result)
-
-    await mind.process_message_batch(1, [_make_pending("do it", user_id=1)])
-
-    conversation = memory.get_conversation(1)
-    lines = _system_task_lines(conversation)
-    assert len(lines) == 1
-    assert "Tools used: none" in lines[0]
-
-
-@pytest.mark.asyncio
-async def test_agent_task_stores_tools_used_order():
+async def test_agent_clarification_has_no_success_claims():
     agent_result = AgentResult(
-        answer="Done", tools_used=["search_web", "update_profile"],
+        clarification=ClarificationResult(question="What timezone are you in?"),
     )
-    mind, lang, agent, memory, sender = _build_mind(
-        intent="agent_task", agent_result=agent_result)
-
-    await mind.process_message_batch(1, [_make_pending("task", user_id=1)])
-
-    conversation = memory.get_conversation(1)
-    lines = _system_task_lines(conversation)
-    assert "Tools used: search_web, update_profile" in lines[0]
-
-
-@pytest.mark.asyncio
-async def test_agent_clarification_has_no_tools_used():
-    agent_result = AgentResult(clarification="What timezone are you in?")
     mind, lang, agent, memory, sender = _build_mind(
         intent="agent_task", agent_result=agent_result)
 
@@ -164,13 +155,15 @@ async def test_agent_clarification_has_no_tools_used():
         1, [_make_pending("remind me later", user_id=1)])
 
     conversation = memory.get_conversation(1)
-    for m in conversation.messages:
-        if m.role == "system":
-            assert "Tools used:" not in m.text
+    lines = _grounded_lines(conversation)
+    assert len(lines) == 1
+    assert "status=clarification" in lines[0]
+    assert "operation_completed" not in lines[0]
+    assert "Tools used:" not in lines[0]
 
 
 @pytest.mark.asyncio
-async def test_deliver_scheduled_reminder_has_no_tools_used():
+async def test_deliver_scheduled_reminder_prohibits_live_recomputation():
     lang = FakeLanguageProvider()
     memory = FakeMemoryProvider()
     sender = FakeSender()
@@ -186,13 +179,19 @@ async def test_deliver_scheduled_reminder_has_no_tools_used():
     await mind.deliver_scheduled_reminder(42, 42, "call mom")
 
     conversation = memory.get_conversation(42)
-    for m in conversation.messages:
-        assert "Tools used:" not in m.text
+    lines = _grounded_lines(conversation)
+    assert len(lines) == 1
+    assert "stored_text_delivered" in lines[0]
+    assert "live_recomputation" in lines[0]
+    assert "Tools used:" not in lines[0]
+    assert "call mom" in lines[0]
 
 
 @pytest.mark.asyncio
 async def test_agent_task_delegates_to_agent():
-    agent_result = AgentResult(answer="Reminder set for 15:30")
+    agent_result = AgentResult(
+        outcome=ExecutionOutcome_success("Reminder set for 15:30"),
+    )
     mind, lang, agent, memory, sender = _build_mind(
         intent="agent_task", agent_result=agent_result)
 
@@ -209,7 +208,9 @@ async def test_agent_task_delegates_to_agent():
 
 @pytest.mark.asyncio
 async def test_agent_resume_delegates_to_resume():
-    agent_result = AgentResult(answer="OK, Moscow time")
+    agent_result = AgentResult(
+        outcome=ExecutionOutcome_success("OK, Moscow time"),
+    )
     mind, lang, agent, memory, sender = _build_mind(
         intent="chat",
         agent_result=agent_result,
@@ -226,7 +227,9 @@ async def test_agent_resume_delegates_to_resume():
 
 @pytest.mark.asyncio
 async def test_agent_clarification_prompts_user():
-    agent_result = AgentResult(clarification="What timezone are you in?")
+    agent_result = AgentResult(
+        clarification=ClarificationResult(question="What timezone are you in?"),
+    )
     mind, lang, agent, memory, sender = _build_mind(
         intent="agent_task", agent_result=agent_result)
 
@@ -306,7 +309,9 @@ async def test_deliver_scheduled_reminder_group_prompt():
 
 @pytest.mark.asyncio
 async def test_execute_scheduled_task_delegates_to_agent():
-    agent_result = AgentResult(answer="USD/RUB is 92.5")
+    agent_result = AgentResult(
+        outcome=ExecutionOutcome_success("USD/RUB is 92.5"),
+    )
     mind, lang, agent, memory, sender = _build_mind(
         agent_result=agent_result,
     )
@@ -327,7 +332,7 @@ async def test_execute_scheduled_task_delegates_to_agent():
 
 @pytest.mark.asyncio
 async def test_execute_scheduled_task_passes_constraints_not_merged_with_profile():
-    agent_result = AgentResult(answer="ok")
+    agent_result = AgentResult(outcome=ExecutionOutcome_success("ok"))
     mind, lang, agent, memory, sender = _build_mind(
         agent_result=agent_result,
     )
@@ -344,17 +349,15 @@ async def test_execute_scheduled_task_passes_constraints_not_merged_with_profile
     call = agent.run_with_skill_calls[0]
     assert call[1] == "Find weather only from strict.example"
     assert call[5] == constraints
-    # Mind loads then-current profile separately; it does not fold prefs into constraints.
     assert call[2].timezone == "Europe/Moscow"
 
 
 @pytest.mark.asyncio
-async def test_agent_failure_maps_to_generic_instruction():
+async def test_agent_failure_maps_to_safe_instruction():
     agent_result = AgentResult(
-        failure=AgentFailure(
-            stage=AgentPhase.SELECTION,
-            category="protocol_exhausted",
-            issue=ProtocolIssueCategory.MALFORMED_OUTPUT,
+        outcome=OutcomeCore.failure(
+            UserOperation.REQUESTED_WORK,
+            SafeFailureCategory.TRANSIENT,
         ),
     )
     mind, lang, agent, memory, sender = _build_mind(
@@ -368,8 +371,34 @@ async def test_agent_failure_maps_to_generic_instruction():
         m.text for m in conversation.messages if m.role == "system"
     ]
     joined = "\n".join(system_lines)
-    assert any("could not complete" in line for line in system_lines)
+    assert any(DELIVERY_INSTRUCTION_PREFIX in line for line in system_lines)
+    assert "failure_category=transient" in joined or "try_later" in joined
     assert "protocol_exhausted" not in joined
     assert "malformed_output" not in joined
     assert "AgentPhase" not in joined
     assert "Unknown tool" not in joined
+    assert "search_web" not in joined
+
+
+@pytest.mark.asyncio
+async def test_notify_scheduled_failure_is_category_only():
+    lang = FakeLanguageProvider()
+    memory = FakeMemoryProvider()
+    sender = FakeSender()
+    mind = Mind(
+        language_provider=lang,
+        perception=_default_perception(),
+        memory_provider=memory,
+        affect_provider=AffectProvider(),
+        cognition_provider=None,
+    )
+    mind.bind_message_sender(sender)
+
+    await mind.notify_scheduled_failure(99)
+
+    conversation = memory.get_conversation(99)
+    lines = _grounded_lines(conversation)
+    assert len(lines) == 1
+    assert "try_later" in lines[0]
+    assert "RuntimeError" not in lines[0]
+    assert "exception" not in lines[0].lower()

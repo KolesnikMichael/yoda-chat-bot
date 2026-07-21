@@ -6,6 +6,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from yoda.mind.agent.data.outcome_data import (
+    ClarificationResult,
+    ExecutionOutcome,
+    OutcomeEvidence,
+    TerminalResultFacts,
+)
 from yoda.mind.memory.data.user_profile import UserProfile
 
 
@@ -47,6 +53,11 @@ class ToolResult:
     output: str
     success: bool
     suspend: bool = False
+    terminal_facts: TerminalResultFacts | None = None
+
+    def __post_init__(self) -> None:
+        if self.terminal_facts is not None and not self.success:
+            raise ValueError("terminal_facts only allowed on successful ToolResult")
 
 
 # --- Phase protocol (Pydantic for structured output) ---
@@ -82,9 +93,10 @@ class SelectionDecision(BaseModel):
 
 class ExecutionDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["call_tools", "finish"]
+    mode: Literal["call_tools", "finish", "fail"]
     tool_calls: list[ToolCallRequest] | None = None
     final_answer: str | None = None
+    failure_reason: Literal["unsupported"] | None = None
     reasoning: str = ""
 
 
@@ -129,7 +141,9 @@ class AgentContext:
     request_constraints: RequestConstraints = field(
         default_factory=RequestConstraints,
     )
-    protocol_version: int = 3
+    protocol_version: int = 4
+    outcome_evidence: list[OutcomeEvidence] = field(default_factory=list)
+    terminal_failure_pending: bool = False
 
     def with_messages(self, messages: list[dict]) -> AgentContext:
         return AgentContext(
@@ -147,12 +161,18 @@ class AgentContext:
             execution_retry_used=self.execution_retry_used,
             request_constraints=self.request_constraints,
             protocol_version=self.protocol_version,
+            outcome_evidence=list(self.outcome_evidence),
+            terminal_failure_pending=self.terminal_failure_pending,
         )
 
 
-@dataclass
+@dataclass(frozen=True)
 class AgentResult:
-    answer: str | None = None
-    clarification: str | None = None
-    failure: AgentFailure | None = None
-    tools_used: list[str] = field(default_factory=list)
+    outcome: ExecutionOutcome | None = None
+    clarification: ClarificationResult | None = None
+
+    def __post_init__(self) -> None:
+        has_outcome = self.outcome is not None
+        has_clarification = self.clarification is not None
+        if has_outcome == has_clarification:
+            raise ValueError("AgentResult requires exactly one of outcome or clarification")

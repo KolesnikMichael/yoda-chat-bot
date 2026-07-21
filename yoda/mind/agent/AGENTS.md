@@ -16,8 +16,8 @@ sessions, and tools.
 2. **Execution** — after skill activation. Full skill spec + filtered tool schemas
    are injected. Only the **active skill's** effective preferences appear in a
    delimited untrusted `<profile_data>` block. The user message carries `<task>`
-   and `<request_constraints>`. LLM returns an `ExecutionDecision`: `call_tools`
-   or `finish`.
+   and `<request_constraints>`. LLM returns an `ExecutionDecision`: `call_tools`,
+   `finish`, or `fail` (`failure_reason=unsupported` only).
 
 Phase-specific Pydantic models use `extra="forbid"`. Semantic cross-field and
 membership rules live in `ReactLoop.validate_selection_decision` /
@@ -82,13 +82,16 @@ stored in context.
 ## Suspend / resume
 
 When `ask_user` fires (execution only), the loop suspends and `AgentContext`
-(including `phase`, retry flags, `protocol_version`, and `request_constraints`)
-is saved via `AgentSessionProvider`. New sessions use `protocol_version=3`.
-On `resume()`, sessions with `protocol_version < 3` are upgraded lazily: the
-named skill is reloaded; recognized generated execution system/task/activation
-messages are refreshed; task, clarification, assistant, and tool history are
-preserved. Missing `request_constraints` on v1/v2 sessions decode as empty.
-Session is deleted after final answer or typed protocol failure.
+(including `phase`, retry flags, `protocol_version`, `request_constraints`,
+`outcome_evidence`, and any unresolved terminal failure) is saved via
+`AgentSessionProvider`. New sessions use
+`protocol_version=4`. On `resume()`, sessions with `protocol_version < 4` are
+upgraded lazily: the named skill is reloaded; recognized generated execution
+system/task/activation messages are refreshed to the protocol-4 schema (including
+`fail`); task, clarification, assistant, tool history, constraints, and retries
+are preserved. Missing `outcome_evidence` / `request_constraints` on legacy
+sessions decode as empty. Session is deleted after a terminal
+`ExecutionOutcome` or typed protocol failure.
 
 If a resumed session is still in pre-selection (`active_skill is None`),
 `Agent` refreshes the selection seed from the current validated catalog before
@@ -96,14 +99,33 @@ the next selector call. Legacy combined catalog-in-user transcripts are rewritte
 into the control/input split while preserving the user-data prefix and later
 clarification messages.
 
+## Outcomes and delivery
+
+`AgentResult` is exclusive: either `outcome: ExecutionOutcome` or
+`clarification: ClarificationResult`. Success is authorized only by
+code-derived `OutcomeEvidence` (from successful tools / typed
+`TerminalResultFacts`); a model `finish` without relevant evidence becomes a
+`transient` failure. A failed terminal tool also blocks a later `finish`, even
+when earlier non-terminal evidence exists; a subsequent successful terminal
+retry remains authoritative. Execution `fail/unsupported` maps to an
+`unsupported` safe failure. `OutcomeCore` maps internal failures to
+`ambiguous` / `transient` / `unsupported` without skill, tool, schema, or
+provider strings. `Mind` passes outcomes through `DeliveryCore`, which emits
+semantic allowed/prohibited claim tokens and an authoritative
+`GROUNDED DELIVERY:` instruction (JSON-delimited untrusted source text). Static
+`job_kind=message` creation and firing never authorize live recomputation;
+`job_kind=task` never claims a future result before the job runs.
+
 ## Invariants
 
 - **Immutability**: `append_assistant()` / `append_tool_results()` /
   `append_correction()` return a new `AgentContext`, never mutate.
 - **Stateless tools**: tools receive only their `ToolCall`, never `AgentContext`.
-- **Terminal tools**: `terminal=True` → loop exits immediately on success.
-- **Typed failures**: unsupported / protocol / iteration exhaustion use
-  `AgentResult.failure`; there is no `"Task completed."` fallback for those paths.
+- **Terminal tools**: `terminal=True` → loop exits immediately on success and
+  builds success from typed terminal facts / evidence.
+- **Typed outcomes**: unsupported / protocol / iteration exhaustion /
+  evidence-free finish use `AgentResult.outcome` failures; there is no free-form
+  `"Task completed."` fallback for those paths.
 - **Metadata injection**: `chat_id`, `user_id`, `profile_timezone` are added to
   every `ToolCall.metadata` by `Agent`.
 - **Constraint preparation**: every `web_search` / `web_extract` / `schedule_task`

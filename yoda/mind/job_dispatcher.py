@@ -68,10 +68,7 @@ class JobDispatcher:
                     job_id,
                     chat_id,
                 )
-                await self._mind.notify_scheduled_failure(
-                    chat_id,
-                    "A scheduled task could not be completed this time.",
-                )
+                await self._mind.notify_scheduled_failure(chat_id)
             return
 
         logger.error("Unknown job kind %r for job %s", kind, job_id)

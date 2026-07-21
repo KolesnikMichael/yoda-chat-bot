@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING
 
 from yoda.mind.memory.data.pending_message import PendingMessage
 from yoda.mind.data.routing_context import RoutingContext
-from yoda.mind.agent.data.agent_data import RequestConstraints
+from yoda.mind.agent.core.delivery_core import DeliveryCore
+from yoda.mind.agent.core.outcome_core import OutcomeCore
+from yoda.mind.agent.data.agent_data import AgentResult, RequestConstraints
+from yoda.mind.agent.data.outcome_data import (
+    SafeFailureCategory,
+    StaticMessageDelivery,
+    UserOperation,
+)
 
 from .affect import AffectCore, AffectProvider
 from .cognition import CognitionCore, CognitionProvider
@@ -153,7 +160,7 @@ class Mind:
         await self._handle_agent_result(
             chat_id, result, system_prompt, conversation)
 
-    async def notify_scheduled_failure(self, chat_id: int, brief: str) -> None:
+    async def notify_scheduled_failure(self, chat_id: int) -> None:
         emotional_state = self.affect_provider.get_emotional_state()
         chat_type = CognitionCore.determine_chat_type(0, chat_id)
         system_prompt = AffectCore.build_system_prompt(
@@ -161,25 +168,16 @@ class Mind:
         )
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
-        line = (
-            f"SCHEDULED TASK FAILED: {brief}. "
-            f"Tell the user briefly in your voice. "
-            f"Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        outcome = OutcomeCore.failure(
+            UserOperation.REQUESTED_WORK,
+            SafeFailureCategory.TRANSIENT,
         )
-        conversation, messages = await self.memory_provider.append_message(
-            conversation=conversation,
+        await self._deliver_via_core(
             chat_id=chat_id,
-            kind="task_result",
-            role="system",
-            line=line,
+            result=outcome,
             system_prompt=system_prompt,
-            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+            conversation=conversation,
         )
-        self.memory_provider.save_conversation(conversation)
-
-        if messages:
-            await self._reply_and_send(
-                chat_id, messages, system_prompt, conversation)
 
     async def deliver_scheduled_reminder(self, chat_id: int, user_id: int, reminder_text: str) -> None:
         emotional_state = self.affect_provider.get_emotional_state()
@@ -188,21 +186,12 @@ class Mind:
             emotional_state, chat_type=chat_type)
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
-        line = f"SCHEDULED REMINDER: {reminder_text}. Deliver this reminder naturally. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
-        conversation, messages = await self.memory_provider.append_message(
-            conversation=conversation,
+        await self._deliver_via_core(
             chat_id=chat_id,
-            kind="task_result",
-            role="system",
-            line=line,
+            result=StaticMessageDelivery(reminder_text=reminder_text),
             system_prompt=system_prompt,
-            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+            conversation=conversation,
         )
-        self.memory_provider.save_conversation(conversation)
-
-        if messages:
-            await self._reply_and_send(
-                chat_id, messages, system_prompt, conversation)
 
     @staticmethod
     def _cleanup_temp_files(batch: list[PendingMessage]) -> None:
@@ -267,26 +256,33 @@ class Mind:
             chat_id, result, system_prompt, conversation)
 
     async def _handle_agent_result(
-        self, chat_id: int, result, system_prompt: str, conversation,
+        self, chat_id: int, result: AgentResult, system_prompt: str, conversation,
     ) -> None:
-        if result.failure is not None:
-            line = (
-                "The agent could not complete the request. "
-                "Tell the user briefly and naturally that it did not work, "
-                "without technical detail"
-            )
-        elif result.clarification:
-            line = f"Ask the user (rephrase naturally in your voice): {result.clarification}"
-        elif result.answer:
-            tools = ", ".join(result.tools_used) if result.tools_used else "none"
-            line = (
-                f"Agent completed a task. Tools used: {tools}. "
-                f"Result: {result.answer}. Communicate this to the user naturally"
-            )
+        if result.clarification is not None:
+            payload_source = result.clarification
+        elif result.outcome is not None:
+            payload_source = result.outcome
         else:
             return
 
-        line = f"{line}. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        await self._deliver_via_core(
+            chat_id=chat_id,
+            result=payload_source,
+            system_prompt=system_prompt,
+            conversation=conversation,
+        )
+
+    async def _deliver_via_core(
+        self,
+        *,
+        chat_id: int,
+        result,
+        system_prompt: str,
+        conversation,
+    ) -> None:
+        payload = DeliveryCore.build_payload(result)
+        utc_now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        line = DeliveryCore.build_instruction(payload, current_time_utc=utc_now)
 
         conversation, messages = await self.memory_provider.append_message(
             conversation=conversation,

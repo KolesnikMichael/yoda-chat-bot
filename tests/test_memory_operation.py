@@ -344,6 +344,14 @@ def test_infer_kind_cases():
         {"role": "system", "text": "Agent completed a task. Tools: none", "user_id": None},
         is_first=False, chat_id=1, message_index=2,
     ) == "task_result"
+    assert MemoryCore.infer_kind(
+        {
+            "role": "system",
+            "text": "GROUNDED DELIVERY: Render only the authorized meaning.",
+            "user_id": None,
+        },
+        is_first=False, chat_id=1, message_index=2,
+    ) == "task_result"
 
 
 def test_infer_kind_unknown_prefix_raises():

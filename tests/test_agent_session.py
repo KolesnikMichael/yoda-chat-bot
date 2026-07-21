@@ -82,7 +82,7 @@ async def test_save_and_load_roundtrip():
     assert loaded.phase == AgentPhase.SELECTION
     assert loaded.selection_retry_used is False
     assert loaded.execution_retry_used is False
-    assert loaded.protocol_version == 3
+    assert loaded.protocol_version == 4
     assert loaded.request_constraints == RequestConstraints()
 
 
@@ -91,7 +91,7 @@ async def test_save_and_load_roundtrip_request_constraints():
     storage = FakeStorageApi()
     provider = AgentSessionProvider(storage_api=storage)
     context = _make_context()
-    context.protocol_version = 3
+    context.protocol_version = 4
     context.request_constraints = RequestConstraints(
         strict_source_domains=["accuweather.com"],
         soft_source_domains=["weather.com"],
@@ -99,7 +99,7 @@ async def test_save_and_load_roundtrip_request_constraints():
     await provider.save(context)
     loaded = await provider.load(42)
     assert loaded is not None
-    assert loaded.protocol_version == 3
+    assert loaded.protocol_version == 4
     assert loaded.request_constraints.strict_source_domains == ["accuweather.com"]
     assert loaded.request_constraints.soft_source_domains == ["weather.com"]
 
@@ -287,3 +287,39 @@ async def test_save_load_roundtrip_phase_retry_protocol():
     assert summary.when_to_use == ["Known payload."]
     assert summary.do_not_use_when == ["Needs fresh data."]
     assert summary.selection_examples == ['"vitamins" -> use']
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_roundtrip_outcome_evidence():
+    from yoda.mind.agent.data.outcome_data import (
+        JobKind,
+        OutcomeEvidence,
+        ResultKind,
+        UserOperation,
+    )
+
+    storage = FakeStorageApi()
+    provider = AgentSessionProvider(storage_api=storage)
+    evidence = [
+        OutcomeEvidence(
+            operation=UserOperation.SCHEDULE_WORK,
+            result_kind=ResultKind.SCHEDULED_JOB,
+            terminal=True,
+            safe_summary="Stored reminder scheduled for tomorrow.",
+            job_kind=JobKind.MESSAGE,
+            schedule="2030-06-15 15:00 Europe/Moscow",
+        ),
+    ]
+    context = _make_context()
+    context.outcome_evidence = evidence
+    context.terminal_failure_pending = True
+    context.protocol_version = 4
+
+    await provider.save(context)
+    loaded = await provider.load(42)
+
+    assert loaded is not None
+    assert len(loaded.outcome_evidence) == 1
+    loaded_item = loaded.outcome_evidence[0]
+    assert loaded_item == evidence[0]
+    assert loaded.terminal_failure_pending is True

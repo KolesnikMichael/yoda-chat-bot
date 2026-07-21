@@ -38,6 +38,12 @@ async def test_schedule_task_once(skills_dir: Path):
     result = await tool.execute(call)
 
     assert result.success is True
+    assert result.terminal_facts is not None
+    assert result.terminal_facts.job_kind.value == "task"
+    assert result.terminal_facts.result_kind.value == "scheduled_job"
+    assert result.terminal_facts.scheduled_skill_name == "search_web"
+    assert result.terminal_facts.schedule
+    assert "search_web" not in result.terminal_facts.summary
     assert len(scheduler_api.scheduled) == 1
     stored = json.loads(
         list(storage_api.data["active_jobs:42"].values())[0]

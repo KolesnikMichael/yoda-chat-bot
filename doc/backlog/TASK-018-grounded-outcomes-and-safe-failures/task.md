@@ -2,11 +2,11 @@
 id: TASK-018
 epic: EPIC-002
 title: "grounded outcomes and safe failures"
-status: todo
+status: done
 priority: high
 size: M
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-21
 tags:
   - agent
   - outcomes

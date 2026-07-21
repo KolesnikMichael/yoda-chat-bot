@@ -8,14 +8,21 @@ import pytest
 from yoda.mind.agent.agent import Agent
 from yoda.mind.agent.core.react_loop import SELECTION_INSTRUCTION
 from yoda.mind.agent.data.agent_data import (
-    AgentFailure,
     AgentPhase,
     ExecutionDecision,
     ProtocolIssueCategory,
     RequestConstraints,
     SelectionDecision,
+    ToolCall,
     ToolCallRequest,
     ToolResult,
+)
+from yoda.mind.agent.data.outcome_data import (
+    JobKind,
+    OutcomeStatus,
+    ResultKind,
+    SafeFailureCategory,
+    TerminalResultFacts,
 )
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.tools.ask_user_tool import AskUserTool
@@ -130,6 +137,110 @@ class FailingWebSearchTool(Tool):
         raise RuntimeError("search backend is unavailable")
 
 
+class FailingTerminalWebSearchTool(FakeTool):
+    terminal = True
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        self.calls.append(call)
+        return ToolResult(
+            tool_name=self.name,
+            output="The terminal side effect failed.",
+            success=False,
+        )
+
+
+class ThrowingTerminalWebSearchTool(FailingTerminalWebSearchTool):
+    async def execute(self, call: ToolCall) -> ToolResult:
+        self.calls.append(call)
+        raise RuntimeError("terminal search backend is unavailable")
+
+
+class RecoveringTerminalWebSearchTool(FailingTerminalWebSearchTool):
+    async def execute(self, call: ToolCall) -> ToolResult:
+        self.calls.append(call)
+        if len(self.calls) == 1:
+            return ToolResult(
+                tool_name=self.name,
+                output="The terminal side effect failed.",
+                success=False,
+            )
+        return ToolResult(
+            tool_name=self.name,
+            output="The terminal side effect completed.",
+            success=True,
+            terminal_facts=TerminalResultFacts(
+                result_kind=ResultKind.INFORMATION,
+                summary="The requested work completed.",
+            ),
+        )
+
+
+class SuccessfulImageTool(Tool):
+    name = "text_to_image"
+
+    class Params:
+        @classmethod
+        def model_json_schema(cls) -> dict:
+            return {
+                "properties": {"english_prompt": {"type": "string"}},
+                "required": ["english_prompt"],
+            }
+
+    parameters_schema = Params
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult(
+            tool_name=self.name,
+            output="/tmp/generated.png",
+            success=True,
+        )
+
+
+class FailingSendPictureTool(Tool):
+    name = "send_picture"
+    terminal = True
+
+    class Params:
+        @classmethod
+        def model_json_schema(cls) -> dict:
+            return {
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "summary_for_chat": {"type": "string"},
+                },
+                "required": ["file_path", "summary_for_chat"],
+            }
+
+    parameters_schema = Params
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult(
+            tool_name=self.name,
+            output="The picture could not be sent.",
+            success=False,
+        )
+
+
+class FailThenSucceedWebSearchTool(Tool):
+    name = "web_search"
+
+    class Params:
+        @classmethod
+        def model_json_schema(cls):
+            return {"properties": {"query": {"type": "string"}}, "required": ["query"]}
+
+    parameters_schema = Params
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    async def execute(self, call):
+        self.calls.append(call)
+        if len(self.calls) == 1:
+            raise RuntimeError("search backend is unavailable")
+        return ToolResult(tool_name=self.name, output="search result", success=True)
+
+
 class FakeLanguageProvider:
     """Returns pre-configured decisions or raises StructuredOutputError."""
 
@@ -201,9 +312,10 @@ async def test_full_flow_select_skill_and_use_tool():
         chat_id=1,
     )
 
-    assert result.answer == "Here is the answer"
-    assert result.failure is None
-    assert "web_search" in result.tools_used
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "Here is the answer"
     assert len(llm.messages_log) == 3
     assert llm.response_formats[0] is SelectionDecision
     assert llm.response_formats[1] is ExecutionDecision
@@ -286,11 +398,172 @@ async def test_no_skill_returns_unsupported_failure():
         chat_id=1,
     )
 
-    assert result.answer is None
-    assert result.failure == AgentFailure(
-        stage=AgentPhase.SELECTION,
-        category="unsupported",
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.UNSUPPORTED
+
+
+@pytest.mark.asyncio
+async def test_active_skill_fail_returns_unsupported_failure() -> None:
+    decisions = [
+        _select("test_skill", "Do unsupported work."),
+        ExecutionDecision(mode="fail", failure_reason="unsupported"),
+    ]
+    agent, _ = _build_agent(decisions)
+
+    result = await agent.run(
+        task="do unsupported work",
+        profile=UserProfile(),
+        chat_id=2,
     )
+
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.UNSUPPORTED
+
+
+@pytest.mark.asyncio
+async def test_finish_without_evidence_returns_transient_failure() -> None:
+    decisions = [
+        _select("test_skill", "Claim completion without tools."),
+        _finish("Everything completed."),
+    ]
+    agent, _ = _build_agent(decisions)
+
+    result = await agent.run(
+        task="claim completion",
+        profile=UserProfile(),
+        chat_id=3,
+    )
+
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
+    assert result.outcome.result_kind is None
+    assert result.outcome.job_kind is None
+
+
+@pytest.mark.asyncio
+async def test_failed_terminal_tool_cannot_produce_success() -> None:
+    decisions = [
+        _select("test_skill", "Run a terminal operation."),
+        _call_tools(
+            ToolCallRequest(tool_name="web_search", arguments={"query": "test"}),
+        ),
+        _finish("The terminal operation completed."),
+    ]
+    tool = FailingTerminalWebSearchTool()
+    agent, _ = _build_agent(decisions, tools=[AskUserTool(), tool])
+
+    result = await agent.run(
+        task="run terminal operation",
+        profile=UserProfile(),
+        chat_id=4,
+    )
+
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
+    assert result.outcome.result_kind is None
+    assert result.outcome.job_kind is None
+
+
+@pytest.mark.asyncio
+async def test_failed_terminal_tool_blocks_prior_same_operation_evidence() -> None:
+    llm = FakeLanguageProvider([
+        _call_tools(
+            ToolCallRequest(
+                tool_name="text_to_image",
+                arguments={"english_prompt": "a green frog"},
+            ),
+        ),
+        _call_tools(
+            ToolCallRequest(
+                tool_name="send_picture",
+                arguments={
+                    "file_path": "/tmp/generated.png",
+                    "summary_for_chat": "A green frog.",
+                },
+            ),
+        ),
+        _finish("The picture task completed."),
+    ])
+    agent = Agent(
+        language_provider=llm,
+        tools=[SuccessfulImageTool(), FailingSendPictureTool()],
+        skills_dir=PRODUCTION_SKILLS_DIR,
+        session_provider=AgentSessionProvider(storage_api=FakeStorageApi()),
+    )
+
+    result = await agent.run_with_skill(
+        skill_name="create_picture",
+        task="Create and send a green frog picture.",
+        profile=UserProfile(),
+        chat_id=5,
+    )
+
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
+    assert result.outcome.result_kind is None
+
+
+@pytest.mark.asyncio
+async def test_terminal_tool_exception_returns_transient_failure() -> None:
+    decisions = [
+        _select("test_skill", "Run a terminal operation."),
+        _call_tools(
+            ToolCallRequest(tool_name="web_search", arguments={"query": "test"}),
+        ),
+        _finish("The terminal operation completed."),
+    ]
+    agent, _ = _build_agent(
+        decisions,
+        tools=[AskUserTool(), ThrowingTerminalWebSearchTool()],
+    )
+
+    result = await agent.run(
+        task="run terminal operation",
+        profile=UserProfile(),
+        chat_id=6,
+    )
+
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
+    assert result.outcome.result_kind is None
+    assert result.outcome.job_kind is None
+
+
+@pytest.mark.asyncio
+async def test_successful_terminal_retry_clears_prior_failure() -> None:
+    decisions = [
+        _select("test_skill", "Run a terminal operation."),
+        _call_tools(
+            ToolCallRequest(tool_name="web_search", arguments={"query": "first"}),
+        ),
+        _call_tools(
+            ToolCallRequest(tool_name="web_search", arguments={"query": "retry"}),
+        ),
+    ]
+    agent, _ = _build_agent(
+        decisions,
+        tools=[AskUserTool(), RecoveringTerminalWebSearchTool()],
+    )
+
+    result = await agent.run(
+        task="run terminal operation",
+        profile=UserProfile(),
+        chat_id=7,
+    )
+
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.result_kind is ResultKind.INFORMATION
 
 
 @pytest.mark.asyncio
@@ -302,13 +575,17 @@ async def test_selection_corrective_recovery():
             distilled_task="Do something.",
         ),
         _select("test_skill", "Recovered task."),
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "q"})),
         _finish("ok"),
     ]
     agent, llm = _build_agent(decisions)
     result = await agent.run(task="t", profile=UserProfile(), chat_id=10)
 
-    assert result.answer == "ok"
-    assert len(llm.messages_log) == 3
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "ok"
+    assert len(llm.messages_log) == 4
     correction = next(
         m for m in llm.messages_log[1]
         if m["role"] == "system" and "previous skill-selection" in m.get("content", "")
@@ -325,11 +602,9 @@ async def test_selection_corrective_exhaustion():
     agent, _ = _build_agent(decisions)
     result = await agent.run(task="t", profile=UserProfile(), chat_id=11)
 
-    assert result.failure == AgentFailure(
-        stage=AgentPhase.SELECTION,
-        category="protocol_exhausted",
-        issue=ProtocolIssueCategory.MALFORMED_OUTPUT,
-    )
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
     assert await agent.has_pending_session(11) is False
 
 
@@ -361,8 +636,8 @@ async def test_suspend_on_ask_user():
         chat_id=100,
     )
 
-    assert result.clarification == "What timezone?"
-    assert result.answer is None
+    assert result.clarification is not None
+    assert result.clarification.question == "What timezone?"
     assert await agent.has_pending_session(100) is True
 
 
@@ -373,6 +648,7 @@ async def test_resume_after_suspend():
         _call_tools(ToolCallRequest(
             tool_name="ask_user", arguments={"question": "What timezone?"},
         )),
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "tz"})),
         _finish("Reminder set for Moscow time"),
     ]
 
@@ -383,12 +659,49 @@ async def test_resume_after_suspend():
         profile=UserProfile(),
         chat_id=200,
     )
-    assert result1.clarification == "What timezone?"
+    assert result1.clarification is not None
+    assert result1.clarification.question == "What timezone?"
 
     result2 = await agent.resume(200, "Europe/Moscow")
 
-    assert result2.answer == "Reminder set for Moscow time"
+    assert result2.clarification is None
+    assert result2.outcome is not None
+    assert result2.outcome.status is OutcomeStatus.SUCCESS
+    assert result2.outcome.summary == "Reminder set for Moscow time"
     assert await agent.has_pending_session(200) is False
+
+
+@pytest.mark.asyncio
+async def test_outcome_evidence_survives_suspend_and_authorizes_resume_finish() -> None:
+    decisions = [
+        _select("test_skill", "Search, then ask for output language."),
+        _call_tools(
+            ToolCallRequest(
+                tool_name="web_search",
+                arguments={"query": "current weather"},
+            ),
+            ToolCallRequest(
+                tool_name="ask_user",
+                arguments={"question": "Which output language?"},
+            ),
+        ),
+    ]
+    agent, llm = _build_agent(decisions)
+
+    suspended = await agent.run(
+        task="find current weather",
+        profile=UserProfile(),
+        chat_id=201,
+    )
+    assert suspended.clarification is not None
+
+    llm._decisions.append(_finish("The weather evidence, now in English."))
+    resumed = await agent.resume(201, "English")
+
+    assert resumed.outcome is not None
+    assert resumed.outcome.status is OutcomeStatus.SUCCESS
+    assert resumed.outcome.summary == "The weather evidence, now in English."
+    assert await agent.has_pending_session(201) is False
 
 
 @pytest.mark.asyncio
@@ -396,7 +709,9 @@ async def test_resume_without_session():
     agent, _ = _build_agent([])
     result = await agent.resume(999, "some answer")
 
-    assert result.answer == "No pending session found."
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.AMBIGUOUS
 
 
 @pytest.mark.asyncio
@@ -404,20 +719,23 @@ async def test_execution_tool_exception_does_not_crash_loop():
     decisions = [
         _select("test_skill", "Search for facts"),
         _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "facts"})),
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "facts retry"})),
         _finish("Recovered after tool failure."),
     ]
-    tools = [AskUserTool(), FailingWebSearchTool()]
+    tools = [AskUserTool(), FailThenSucceedWebSearchTool()]
     agent, llm = _build_agent(decisions, tools=tools)
 
     result = await agent.run(task="search facts", profile=UserProfile(), chat_id=778)
 
-    assert result.answer == "Recovered after tool failure."
-    assert "web_search" in result.tools_used
-    third_llm_call_messages = "\n".join(
-        str(m.get("content", "")) for m in llm.messages_log[2]
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "Recovered after tool failure."
+    fourth_llm_call_messages = "\n".join(
+        str(m.get("content", "")) for m in llm.messages_log[3]
     )
-    assert "[web_search] (FAILED)" in third_llm_call_messages
-    assert "Tool crashed with exception" in third_llm_call_messages
+    assert "[web_search] (FAILED, not outcome evidence)" in fourth_llm_call_messages
+    assert "Tool crashed with exception" in fourth_llm_call_messages
 
 
 @pytest.mark.asyncio
@@ -425,11 +743,15 @@ async def test_execution_corrective_recovery():
     decisions = [
         _select("test_skill", "Do something."),
         ExecutionDecision(mode="finish", final_answer=""),
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "q"})),
         _finish("acted"),
     ]
     agent, llm = _build_agent(decisions)
     result = await agent.run(task="t", profile=UserProfile(), chat_id=505)
-    assert result.answer == "acted"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "acted"
 
     nudged_call = llm.messages_log[2]
     correction = next(
@@ -449,11 +771,9 @@ async def test_execution_corrective_exhaustion():
     agent, _ = _build_agent(decisions)
     result = await agent.run(task="t", profile=UserProfile(), chat_id=506)
 
-    assert result.failure == AgentFailure(
-        stage=AgentPhase.EXECUTION,
-        category="protocol_exhausted",
-        issue=ProtocolIssueCategory.MALFORMED_OUTPUT,
-    )
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
     assert await agent.has_pending_session(506) is False
 
 
@@ -475,11 +795,9 @@ async def test_rejected_execution_never_dispatches_or_enters_history():
 
     result = await agent.run(task="t", profile=UserProfile(), chat_id=507)
 
-    assert result.failure == AgentFailure(
-        stage=AgentPhase.EXECUTION,
-        category="protocol_exhausted",
-        issue=ProtocolIssueCategory.UNKNOWN_TOOL,
-    )
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
     assert tool.calls == []
     retry_context = "\n".join(
         str(message.get("content", ""))
@@ -504,11 +822,9 @@ async def test_execution_retry_budget_survives_successful_tool_iteration():
 
     result = await agent.run(task="t", profile=UserProfile(), chat_id=508)
 
-    assert result.failure == AgentFailure(
-        stage=AgentPhase.EXECUTION,
-        category="protocol_exhausted",
-        issue=ProtocolIssueCategory.INVALID_MODE,
-    )
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
     assert len(tool.calls) == 1
     assert len(llm.messages_log) == 4
     assert sum(
@@ -535,12 +851,10 @@ async def test_iteration_limit_returns_typed_failure(caplog):
     with caplog.at_level(logging.WARNING, logger="yoda.mind.agent.agent"):
         result = await agent.run(task="t", profile=UserProfile(), chat_id=509)
 
-    assert result.answer is None
-    assert result.failure == AgentFailure(
-        stage=AgentPhase.EXECUTION,
-        category="protocol_exhausted",
-        issue=ProtocolIssueCategory.ITERATION_LIMIT,
-    )
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.FAILURE
+    assert result.outcome.failure_category is SafeFailureCategory.TRANSIENT
     assert len(tool.calls) == 3
     assert await agent.has_pending_session(509) is False
     agent_warnings = [
@@ -565,14 +879,20 @@ async def test_parallel_tool_calls_use_gather():
     # ParallelProbeTool only registers as web_search; ask_user still needed by skill.
     agent, _ = _build_agent(decisions, tools=[AskUserTool(), probe])
     result = await agent.run(task="t", profile=UserProfile(), chat_id=600)
-    assert result.answer == "done"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "done"
     assert len(probe.calls) == 2
     assert probe.max_concurrent >= 2
 
 
 @pytest.mark.asyncio
 async def test_run_with_skill_skips_selection():
-    decisions = [_finish("scheduled done")]
+    decisions = [
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "q"})),
+        _finish("scheduled done"),
+    ]
     agent, llm = _build_agent(decisions)
     result = await agent.run_with_skill(
         skill_name="test_skill",
@@ -580,8 +900,11 @@ async def test_run_with_skill_skips_selection():
         profile=UserProfile(),
         chat_id=700,
     )
-    assert result.answer == "scheduled done"
-    assert len(llm.messages_log) == 1
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "scheduled done"
+    assert len(llm.messages_log) == 2
     assert llm.response_formats[0] is ExecutionDecision
     assert "Forced task" in llm.messages_log[0][1]["content"]
 
@@ -590,6 +913,7 @@ async def test_run_with_skill_skips_selection():
 async def test_resume_refreshes_legacy_pre_selection_catalog():
     decisions = [
         _select("test_skill", "Search after clarification."),
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "q"})),
         _finish("done"),
     ]
     agent, llm = _build_agent(decisions)
@@ -629,7 +953,10 @@ async def test_resume_refreshes_legacy_pre_selection_catalog():
     await storage.hset("agent_sessions", "404", json.dumps(legacy))
 
     result = await agent.resume(404, "Paris")
-    assert result.answer == "done"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "done"
 
     resumed_selection = llm.messages_log[0]
     control = next(
@@ -646,7 +973,10 @@ async def test_resume_refreshes_legacy_pre_selection_catalog():
 
 @pytest.mark.asyncio
 async def test_resume_legacy_active_execution_skips_selection():
-    decisions = [_finish("resumed execution")]
+    decisions = [
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "q"})),
+        _finish("resumed execution"),
+    ]
     agent, llm = _build_agent(decisions)
     storage = agent._sessions._storage_api
     legacy = {
@@ -691,8 +1021,11 @@ async def test_resume_legacy_active_execution_skips_selection():
 
     result = await agent.resume(405, "current weather")
 
-    assert result.answer == "resumed execution"
-    assert llm.response_formats == [ExecutionDecision]
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "resumed execution"
+    assert llm.response_formats == [ExecutionDecision, ExecutionDecision]
     assert "executor agent" in llm.messages_log[0][0]["content"]
     assert "selected_skill" not in llm.messages_log[0][0]["content"]
     assert "User answered: current weather" in "\n".join(
@@ -706,6 +1039,89 @@ async def test_resume_legacy_active_execution_skips_selection():
     assert "prefer concise results" in resumed_context
     assert "never expose this" not in resumed_context
     assert await agent.has_pending_session(405) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol_version", [2, 3])
+async def test_resume_protocol_2_and_3_active_sessions_under_protocol_4(
+    protocol_version: int,
+) -> None:
+    decisions = [
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "q"})),
+        _finish("resumed under protocol 4"),
+    ]
+    agent, llm = _build_agent(decisions)
+    storage = agent._sessions._storage_api
+    chat_id = 500 + protocol_version
+    legacy = {
+        "task": "search after clarification",
+        "profile": {},
+        "chat_id": chat_id,
+        "user_id": 0,
+        "catalog_summaries": [
+            {
+                "name": "test_skill",
+                "description": "A test skill for unit tests.",
+                "public": True,
+            },
+        ],
+        "active_skill": {
+            "name": "test_skill",
+            "description": "A test skill for unit tests.",
+            "required_inputs": {"query": "The search query"},
+            "tools": ["web_search", "ask_user"],
+            "instructions": "Search, then answer.",
+            "max_iterations": 3,
+        },
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are an executor agent.\n"
+                    'Use mode \"call_tools\" or \"finish\".'
+                ),
+            },
+            {"role": "user", "content": "<task>\nsearch after clarification\n</task>"},
+            {
+                "role": "system",
+                "content": (
+                    "Skill 'test_skill' activated.\n\n"
+                    "Workflow:\nSearch, then answer."
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": '{"mode":"call_tools","tool_calls":[{"tool_name":"ask_user"}]}',
+            },
+            {"role": "system", "content": "User was asked: Query?"},
+        ],
+        "iteration": 1,
+        "tools_used": ["ask_user"],
+        "phase": "execution",
+        "selection_retry_used": True,
+        "execution_retry_used": False,
+        "protocol_version": protocol_version,
+        "request_constraints": {
+            "strict_source_domains": [],
+            "soft_source_domains": [],
+        },
+    }
+    await storage.hset("agent_sessions", str(chat_id), json.dumps(legacy))
+
+    result = await agent.resume(chat_id, "current weather")
+
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "resumed under protocol 4"
+    assert llm.response_formats == [ExecutionDecision, ExecutionDecision]
+    resumed_context = "\n".join(
+        str(message.get("content", ""))
+        for message in llm.messages_log[0]
+    )
+    assert '"fail"' in resumed_context
+    assert "User was asked: Query?" in resumed_context
+    assert "User answered: current weather" in resumed_context
+    assert await agent.has_pending_session(chat_id) is False
 
 
 @pytest.mark.asyncio
@@ -740,20 +1156,19 @@ async def test_retry_flag_survives_suspend_resume():
     ]
     agent, _ = _build_agent(decisions)
     r1 = await agent.run(task="t", profile=UserProfile(), chat_id=808)
-    assert r1.clarification == "TZ?"
+    assert r1.clarification is not None
+    assert r1.clarification.question == "TZ?"
 
     loaded = await agent._sessions.load(808)
     assert loaded is not None
     assert loaded.execution_retry_used is True
     assert loaded.phase == AgentPhase.EXECUTION
-    assert loaded.protocol_version == 3
+    assert loaded.protocol_version == 4
 
     r2 = await agent.resume(808, "UTC")
-    assert r2.failure == AgentFailure(
-        stage=AgentPhase.EXECUTION,
-        category="protocol_exhausted",
-        issue=ProtocolIssueCategory.MALFORMED_OUTPUT,
-    )
+    assert r2.outcome is not None
+    assert r2.outcome.status is OutcomeStatus.FAILURE
+    assert r2.outcome.failure_category is SafeFailureCategory.TRANSIENT
     assert await agent.has_pending_session(808) is False
 
 
@@ -778,7 +1193,10 @@ async def test_run_with_skill_filters_active_preferences_only():
         profile=profile,
         chat_id=1,
     )
-    assert result.answer == "done"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "done"
     joined = "\n".join(m["content"] for m in llm.messages_log[0])
     assert "prefer short answers" in joined
     assert "never show this" not in joined
@@ -789,6 +1207,7 @@ async def test_run_with_skill_filters_active_preferences_only():
 async def test_run_filters_active_preferences_only_after_selection():
     decisions = [
         _select("test_skill", "Do the selected task"),
+        _call_tools(ToolCallRequest(tool_name="web_search", arguments={"query": "q"})),
         _finish("done"),
     ]
     agent, llm = _build_agent(decisions)
@@ -805,7 +1224,10 @@ async def test_run_filters_active_preferences_only_after_selection():
         chat_id=2,
     )
 
-    assert result.answer == "done"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "done"
     selection_context = "\n".join(m["content"] for m in llm.messages_log[0])
     execution_context = "\n".join(m["content"] for m in llm.messages_log[1])
     assert "prefer short answers" not in selection_context
@@ -833,7 +1255,10 @@ async def test_run_with_skill_prepares_strict_include_domains():
             strict_source_domains=["accuweather.com"],
         ),
     )
-    assert result.answer == "done"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "done"
     assert tool.calls[0].arguments["include_domains"] == ["accuweather.com"]
 
 
@@ -886,7 +1311,10 @@ async def test_direct_selection_applies_strict_precedence_without_persisting_one
         user_id=9,
     )
 
-    assert result.answer == "done"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "done"
     assert search_tool.calls[0].arguments["include_domains"] == ["strict.example"]
     execution_context = "\n".join(
         message["content"] for message in llm.messages_log[1]
@@ -974,7 +1402,10 @@ async def test_direct_selection_materializes_remaining_precedence_tiers(
         chat_id=5,
     )
 
-    assert result.answer == "done"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "done"
     assert search_tool.calls[0].arguments.get("include_domains") == include_domains
     execution_context = "\n".join(
         message["content"] for message in llm.messages_log[1]
@@ -1013,7 +1444,10 @@ async def test_no_results_retry_retains_strict_include_domains():
         ),
     )
 
-    assert result.answer == "No result from the required source."
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "No result from the required source."
     assert len(tool.calls) == 2
     assert all(
         call.arguments["include_domains"] == ["accuweather.com"]
@@ -1078,7 +1512,9 @@ async def test_scheduled_constraint_survives_selection_persistence_and_dispatch(
         chat_id=77,
         user_id=7,
     )
-    assert scheduled.answer is not None
+    assert scheduled.clarification is None
+    assert scheduled.outcome is not None
+    assert scheduled.outcome.status is OutcomeStatus.SUCCESS
 
     jobs = storage.data["active_jobs:77"]
     assert len(jobs) == 1
@@ -1133,7 +1569,9 @@ async def test_scheduled_constraint_survives_selection_persistence_and_dispatch(
     assert mind.task == scheduled_task
     assert mind.constraints.strict_source_domains == ["accuweather.com"]
     assert mind.result is not None
-    assert mind.result.answer == "Forecast delivered."
+    assert mind.result.outcome is not None
+    assert mind.result.outcome.status is OutcomeStatus.SUCCESS
+    assert mind.result.outcome.summary == "Forecast delivered."
     assert search_tool.calls[0].arguments["include_domains"] == [
         "accuweather.com",
     ]
@@ -1141,8 +1579,17 @@ async def test_scheduled_constraint_survives_selection_persistence_and_dispatch(
 
 @pytest.mark.asyncio
 async def test_conflicting_include_domains_does_not_dispatch():
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage = FakeStorageApi()
     tool = FakeTool()
+    profile_tool = UpdateProfileTool(memory_provider=MemoryProvider(storage_api=storage))
     decisions = [
+        _call_tools(ToolCallRequest(
+            tool_name="update_profile",
+            arguments={"fields": {"preferred_name": "Test"}},
+        )),
         _call_tools(ToolCallRequest(
             tool_name="web_search",
             arguments={
@@ -1152,18 +1599,24 @@ async def test_conflicting_include_domains_does_not_dispatch():
         )),
         _finish("recovered"),
     ]
-    agent, _ = _build_agent(decisions, tools=[AskUserTool(), tool])
+    agent, _ = _build_agent(
+        decisions, tools=[AskUserTool(), tool, profile_tool],
+    )
     result = await agent.run_with_skill(
         skill_name="test_skill",
         task="only from accuweather.com",
         profile=UserProfile(),
         chat_id=1,
+        user_id=123,
         request_constraints=RequestConstraints(
             strict_source_domains=["accuweather.com"],
         ),
     )
     assert tool.calls == []
-    assert result.answer == "recovered"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "recovered"
 
 
 @pytest.mark.asyncio
@@ -1197,7 +1650,10 @@ async def test_update_profile_fields_are_canonicalized():
         chat_id=42,
         user_id=123,
     )
-    assert result.answer == "saved"
+    assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.summary == "saved"
     stored = json.loads(storage.data["user_profiles"]["123@42"])
     assert stored["skill_preferences"]["search_web"] == ["prefer BBC"]
     assert "web_search" not in stored["skill_preferences"]
@@ -1308,9 +1764,10 @@ async def test_schedule_message_timezone_schedules_without_ask_user(
     agent, scheduler, storage = _build_iana_schedule_message_agent(decisions)
     result = await agent.run(task=task, profile=profile, chat_id=501, user_id=1)
     assert result.clarification is None
-    assert result.answer is not None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
+    assert result.outcome.job_kind is JobKind.MESSAGE
     assert scheduler.scheduled
-    assert "ask_user" not in result.tools_used
     stored = json.loads(list(storage.data["active_jobs:501"].values())[0])
     assert stored["timezone"] == schedule_args["timezone"]
 
@@ -1350,9 +1807,10 @@ async def test_schedule_message_infers_location_persists_and_schedules() -> None
         user_id=9,
     )
     assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
     assert scheduler.cron_scheduled
     assert scheduler.cron_scheduled[0]["timezone"] == "Europe/Moscow"
-    assert "ask_user" not in result.tools_used
     profile_stored = json.loads(storage.data["user_profiles"]["9@502"])
     assert profile_stored["timezone"] == "Europe/Moscow"
     assert profile_stored["location"] == "Saint Petersburg"
@@ -1377,8 +1835,9 @@ async def test_schedule_message_relative_delay_no_timezone_ask() -> None:
         user_id=1,
     )
     assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
     assert scheduler.scheduled
-    assert "ask_user" not in result.tools_used
 
 
 @pytest.mark.asyncio
@@ -1417,8 +1876,8 @@ async def test_schedule_message_unresolved_asks_without_dispatch(
         chat_id=504,
         user_id=1,
     )
-    assert result.clarification == question
-    assert result.answer is None
+    assert result.clarification is not None
+    assert result.clarification.question == question
     assert scheduler.scheduled == []
     assert scheduler.cron_scheduled == []
     assert "active_jobs:504" not in storage.data
@@ -1457,7 +1916,7 @@ async def test_schedule_message_offset_after_clarify_does_not_dispatch() -> None
     assert first.clarification is not None
     second = await agent.resume(505, "+03:00")
     assert second.clarification is not None
-    assert second.answer is None
+    assert second.outcome is None
     assert scheduler.scheduled == []
     assert "active_jobs:505" not in storage.data
 
@@ -1511,7 +1970,9 @@ async def test_schedule_message_resume_valid_iana_then_profile_reuse() -> None:
     )
     assert first.clarification is not None
     resumed = await agent.resume(506, "Europe/Berlin")
-    assert resumed.answer is not None
+    assert resumed.clarification is None
+    assert resumed.outcome is not None
+    assert resumed.outcome.status is OutcomeStatus.SUCCESS
     assert scheduler.scheduled
     assert scheduler.scheduled[0]
     job1 = json.loads(list(storage.data["active_jobs:506"].values())[0])
@@ -1524,7 +1985,8 @@ async def test_schedule_message_resume_valid_iana_then_profile_reuse() -> None:
         user_id=3,
     )
     assert second.clarification is None
-    assert "ask_user" not in second.tools_used
+    assert second.outcome is not None
+    assert second.outcome.status is OutcomeStatus.SUCCESS
     assert len(scheduler.scheduled) == 2
     job2 = json.loads(list(storage.data["active_jobs:507"].values())[0])
     assert job2["timezone"] == "Europe/Berlin"
@@ -1575,9 +2037,9 @@ async def test_search_web_schedule_task_timezone_without_ask(
         user_id=1,
     )
     assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
     assert scheduler.scheduled
-    assert "ask_user" not in result.tools_used
-    assert "web_search" not in result.tools_used
     stored = json.loads(list(storage.data["active_jobs:601"].values())[0])
     assert stored["timezone"] == schedule_args["timezone"]
     assert stored["request_constraints"] == {
@@ -1632,8 +2094,9 @@ async def test_search_web_infers_location_persists_and_schedules_task() -> None:
         user_id=9,
     )
     assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
     assert scheduler.cron_scheduled[0]["timezone"] == "Europe/Moscow"
-    assert "web_search" not in result.tools_used
     profile_stored = json.loads(storage.data["user_profiles"]["9@602"])
     assert profile_stored["timezone"] == "Europe/Moscow"
     assert profile_stored["location"] == "Saint Petersburg"
@@ -1645,7 +2108,8 @@ async def test_search_web_infers_location_persists_and_schedules_task() -> None:
         user_id=9,
     )
     assert reused.clarification is None
-    assert "ask_user" not in reused.tools_used
+    assert reused.outcome is not None
+    assert reused.outcome.status is OutcomeStatus.SUCCESS
     reused_job = json.loads(list(storage.data["active_jobs:607"].values())[0])
     assert reused_job["timezone"] == "Europe/Moscow"
 
@@ -1672,8 +2136,9 @@ async def test_search_web_relative_delay_schedule_task_no_ask() -> None:
         user_id=1,
     )
     assert result.clarification is None
+    assert result.outcome is not None
+    assert result.outcome.status is OutcomeStatus.SUCCESS
     assert scheduler.scheduled
-    assert "ask_user" not in result.tools_used
 
 
 @pytest.mark.asyncio
@@ -1717,7 +2182,8 @@ async def test_search_web_unresolved_asks_without_schedule_task_dispatch(
         chat_id=604,
         user_id=1,
     )
-    assert result.clarification == question
+    assert result.clarification is not None
+    assert result.clarification.question == question
     assert scheduler.scheduled == []
     assert scheduler.cron_scheduled == []
     assert "active_jobs:604" not in storage.data
@@ -1758,7 +2224,7 @@ async def test_search_web_offset_after_clarify_does_not_dispatch() -> None:
     assert first.clarification is not None
     resumed = await agent.resume(608, "+03:00")
     assert resumed.clarification is not None
-    assert resumed.answer is None
+    assert resumed.outcome is None
     assert scheduler.scheduled == []
     assert scheduler.cron_scheduled == []
     assert "active_jobs:608" not in storage.data
@@ -1809,7 +2275,9 @@ async def test_search_web_resume_valid_iana_schedules_and_reuses() -> None:
     )
     assert first.clarification is not None
     resumed = await agent.resume(605, "Europe/Berlin")
-    assert resumed.answer is not None
+    assert resumed.clarification is None
+    assert resumed.outcome is not None
+    assert resumed.outcome.status is OutcomeStatus.SUCCESS
     assert scheduler.scheduled
     second = await agent.run(
         task="every morning search weather",
@@ -1818,6 +2286,7 @@ async def test_search_web_resume_valid_iana_schedules_and_reuses() -> None:
         user_id=3,
     )
     assert second.clarification is None
-    assert "ask_user" not in second.tools_used
+    assert second.outcome is not None
+    assert second.outcome.status is OutcomeStatus.SUCCESS
     assert scheduler.cron_scheduled
     assert scheduler.cron_scheduled[0]["timezone"] == "Europe/Berlin"

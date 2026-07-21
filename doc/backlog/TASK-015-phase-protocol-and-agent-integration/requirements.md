@@ -218,7 +218,6 @@ information for diagnosis.
   TASK-017.
 - Grounded tool/job outcome models, final success claims, and user-visible safe
   failure rendering owned by TASK-018.
-- Deterministic Telegram command routing owned by TASK-019.
 - The multilingual evaluation corpus, live-model thresholds, stage telemetry,
   and live evaluation runner owned by TASK-020 and TASK-021.
 - New skills, tools, scheduling capabilities, or storage backends.

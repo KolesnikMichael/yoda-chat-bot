@@ -56,7 +56,7 @@ Part of [[backlog/EPIC-002-agent-routing-reliability/epic|EPIC-002]] — read th
 
 ## Dependencies
 
-- Depends on: [[TASK-018-grounded-outcomes-and-safe-failures/task|TASK-018]], [[TASK-019-deterministic-telegram-commands/task|TASK-019]]
+- Depends on: [[TASK-018-grounded-outcomes-and-safe-failures/task|TASK-018]]
 - Blocks: [[TASK-021-stage-telemetry-and-live-eval-runner/task|TASK-021]]
 
 ## Notes

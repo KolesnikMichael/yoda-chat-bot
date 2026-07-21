@@ -9,19 +9,27 @@ from tests.test_agent_tools import FakeSchedulerApi, FakeStorageApi
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_routes_message_job():
+@pytest.mark.parametrize(
+    "schedule_type",
+    [None, "once", "cron"],
+    ids=["legacy", "one-shot", "recurring"],
+)
+async def test_dispatcher_routes_message_job(schedule_type: str | None) -> None:
     storage = FakeStorageApi()
     scheduler = FakeSchedulerApi()
     mind = MagicMock()
     mind.deliver_scheduled_reminder = AsyncMock()
     mind.execute_scheduled_task = AsyncMock()
 
-    payload = json.dumps({
+    job = {
         "kind": "message",
         "user_id": 5,
         "message_text": "hello",
         "description": "hello",
-    })
+    }
+    if schedule_type is not None:
+        job["type"] = schedule_type
+    payload = json.dumps(job)
     await storage.hset("active_jobs:42", "job_1", payload)
 
     dispatcher = JobDispatcher(storage, scheduler, mind)
@@ -34,19 +42,27 @@ async def test_dispatcher_routes_message_job():
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_routes_task_job():
+@pytest.mark.parametrize(
+    "schedule_type",
+    [None, "once", "cron"],
+    ids=["legacy", "one-shot", "recurring"],
+)
+async def test_dispatcher_routes_task_job(schedule_type: str | None) -> None:
     storage = FakeStorageApi()
     scheduler = FakeSchedulerApi()
     mind = MagicMock()
     mind.deliver_scheduled_reminder = AsyncMock()
     mind.execute_scheduled_task = AsyncMock()
 
-    payload = json.dumps({
+    job = {
         "kind": "task",
         "user_id": 5,
         "skill_name": "search_web",
         "distilled_task": "Find news",
-    })
+    }
+    if schedule_type is not None:
+        job["type"] = schedule_type
+    payload = json.dumps(job)
     await storage.hset("active_jobs:42", "job_2", payload)
 
     dispatcher = JobDispatcher(storage, scheduler, mind)
