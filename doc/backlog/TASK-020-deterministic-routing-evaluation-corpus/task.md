@@ -2,11 +2,11 @@
 id: TASK-020
 epic: EPIC-002
 title: "deterministic routing evaluation corpus"
-status: todo
+status: done
 priority: medium
 size: M
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-21
 tags:
   - evaluation
   - routing
@@ -18,7 +18,7 @@ tags:
 
 ## Description
 
-Create a versioned multilingual routing corpus and deterministic CI harness that scores expected decisions at each stage instead of judging only final prose. The corpus will cover intent, skill, tool or job kind, key arguments, allowed claims, recovery paths, commands, and the motivating July 20 session as a stable regression fixture.
+Create a versioned multilingual routing corpus and deterministic CI harness that scores expected decisions at each stage instead of judging only final prose. The corpus will cover intent, skill, tool or job kind, key arguments, allowed claims, recovery paths, and the motivating July 20 session as a stable regression fixture.
 
 ## Epic
 
@@ -40,7 +40,7 @@ Part of [[backlog/EPIC-002-agent-routing-reliability/epic|EPIC-002]] — read th
 **In scope:**
 - Define a versioned multilingual fixture schema with expected stage decisions and prohibited or allowed delivery claims.
 - Build a deterministic recorded/mock CI harness that reports intent, selection, planning, execution, and delivery failures separately.
-- Cover contrastive static/dynamic scheduling, refinements, suspend/resume, malformed output, preferences, commands, and the July 20 scenario.
+- Cover contrastive static/dynamic scheduling, refinements, suspend/resume, malformed output, preferences, and the July 20 scenario.
 
 **Out of scope:**
 - Calling live models in normal CI or setting a live-model release threshold.

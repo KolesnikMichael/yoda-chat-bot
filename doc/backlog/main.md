@@ -13,6 +13,7 @@
 - Agent: no test for batched ask_user + failing companion tool (e.g. update_profile) — suspend path works but untested
 - Agent: Mind._handle_agent_task / resume have no try/except — LLM, Redis session, or other failures during agent run can crash message handling
 - TASK-015 follow-up: strengthen Core coverage for blank `selected_skill`, empty `tool_calls`, `no_skill` without `unsupported`, and exhausted execution correction; fix session round-trip fixture phase consistency; update AGENTS.md legacy-upgrade wording
+- Keep `RoutingEvaluationCore.normalize_domains` in sync with `ExecutionContextCore` host rules (IODA-safe copy; silent drift risk)
 
 ## Add
 

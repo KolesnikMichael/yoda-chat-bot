@@ -145,6 +145,24 @@ Skills have a `public` field in frontmatter (default: `true`).
 
 The agent selection phase always sees the full catalog (public + private).
 
+## Deterministic routing evaluation (TASK-020)
+
+Structural routing quality is gated by a versioned synthetic corpus and a
+test-only harness — not by judging final Yoda prose.
+
+- **Corpus fixture:** `tests/fixtures/routing_evaluation/corpus-v1.json`
+  (`schema_version`, `corpus_version`, stable per-case IDs). All text is
+  synthetic; never copy production transcripts (ADR-000).
+- **Reusable contracts:** `yoda/mind/evaluation/` — Data (`data.py`), pure scorer
+  (`RoutingEvaluationCore` in `core.py`), async loader (`RoutingCorpusProvider`).
+- **Test-only runner:** `tests/routing_evaluation/` — `RoutingEvaluation`,
+  `EvaluationMind`, `EvaluationAgent`, and recorded adapters. Normal CI runs
+  `tests/test_routing_evaluation.py`; focused rerun:
+  `ROUTING_EVAL_CASE=<stable-id> .venv/bin/python -m pytest tests/test_routing_evaluation.py -q`
+- **TASK-021** owns live-model runs, production telemetry, and on-demand eval
+  transport. Import evaluation Data/Core/Provider from production code; do not
+  import the test harness from runtime wiring.
+
 ## Adding a new tool
 
 1. Create `tools/<name>_tool.py` implementing the `Tool` port (`tool_port.py`) with a Pydantic `parameters_schema`.

@@ -1,0 +1,2500 @@
+{
+  "schema_version": 1,
+  "corpus_version": "1.1.1",
+  "cases": [
+    {
+      "id": "en-intent-chat-greeting",
+      "language": "en",
+      "purpose": "en chat",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Hello!"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"chat\"}"
+            }
+          ],
+          "tool_results": [],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "chat"
+            },
+            "selection": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "planning": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "execution": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "delivery": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-intent-chat-greeting",
+      "language": "ru",
+      "purpose": "ru chat",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Привет!"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"chat\"}"
+            }
+          ],
+          "tool_results": [],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "chat"
+            },
+            "selection": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "planning": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "execution": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "delivery": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-intent-malformed-fallback",
+      "language": "en",
+      "purpose": "malformed intent falls back to chat",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Do something"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{bad-json"
+            }
+          ],
+          "tool_results": [],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "rejected_fallback_chat"
+            },
+            "selection": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "planning": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "execution": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "delivery": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-intent-malformed-fallback",
+      "language": "ru",
+      "purpose": "malformed intent ru",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Сделай что-нибудь"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{bad-json"
+            }
+          ],
+          "tool_results": [],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "rejected_fallback_chat"
+            },
+            "selection": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "planning": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "execution": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            },
+            "delivery": {
+              "kind": "not_applicable",
+              "reason": "chat_route"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-search-immediate",
+      "language": "en",
+      "purpose": "en immediate web search",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "What is the weather?"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"Find weather.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"weather\"}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"Sunny.\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "web_search",
+              "output": "Sunny 20C",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "web_search",
+                      "arguments": {
+                        "query": "weather"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "retrieve_information",
+              "result_kind": "information"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-search-immediate",
+      "language": "ru",
+      "purpose": "ru immediate web search",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Какая погода?"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"\\u0423\\u0437\\u043d\\u0430\\u0442\\u044c \\u043f\\u043e\\u0433\\u043e\\u0434\\u0443.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"\\u043f\\u043e\\u0433\\u043e\\u0434\\u0430\"}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"Sunny.\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "web_search",
+              "output": "Sunny 20C",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "web_search",
+                      "arguments": {
+                        "query": "погода"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "retrieve_information",
+              "result_kind": "information"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-search-refinement",
+      "language": "en",
+      "purpose": "en immediate web search",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "And tomorrow?",
+            "recent_messages": [
+              {
+                "role": "user",
+                "content": "What is the weather in Berlin?"
+              },
+              {
+                "role": "assistant",
+                "content": "It is sunny today."
+              }
+            ]
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"Find tomorrow's weather in Berlin.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"Berlin weather tomorrow\"}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"Sunny.\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "web_search",
+              "output": "Sunny 20C",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web",
+              "distilled_task": {
+                "required_fragments": [
+                  "tomorrow",
+                  "Berlin"
+                ]
+              }
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "web_search",
+                      "arguments": {
+                        "query": "Berlin weather tomorrow"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "retrieve_information",
+              "result_kind": "information"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-search-refinement",
+      "language": "ru",
+      "purpose": "ru immediate web search",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "А завтра?",
+            "recent_messages": [
+              {
+                "role": "user",
+                "content": "Какая погода в Москве?"
+              },
+              {
+                "role": "assistant",
+                "content": "Сегодня солнечно."
+              }
+            ]
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"\\u0423\\u0437\\u043d\\u0430\\u0442\\u044c \\u043f\\u043e\\u0433\\u043e\\u0434\\u0443 \\u0432 \\u041c\\u043e\\u0441\\u043a\\u0432\\u0435 \\u0437\\u0430\\u0432\\u0442\\u0440\\u0430.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"\\u043f\\u043e\\u0433\\u043e\\u0434\\u0430 \\u0432 \\u041c\\u043e\\u0441\\u043a\\u0432\\u0435 \\u0437\\u0430\\u0432\\u0442\\u0440\\u0430\"}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"Sunny.\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "web_search",
+              "output": "Sunny 20C",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web",
+              "distilled_task": {
+                "required_fragments": [
+                  "завтра",
+                  "Москве"
+                ]
+              }
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "web_search",
+                      "arguments": {
+                        "query": "погода в Москве завтра"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "retrieve_information",
+              "result_kind": "information"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-schedule-static-message",
+      "language": "en",
+      "purpose": "en recurring static reminder",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Remind me every morning to take vitamins"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"schedule_message\", \"distilled_task\": \"Remind me every morning to take vitamins\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"schedule_message\", \"arguments\": {\"reminder_text\": \"Take vitamins\", \"cron\": \"0 9 * * *\", \"timezone\": \"Europe/Moscow\"}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "schedule_message",
+              "output": "Scheduled",
+              "success": true,
+              "terminal_facts": {
+                "result_kind": "scheduled_job",
+                "summary": "Daily vitamins reminder scheduled",
+                "job_kind": "message",
+                "schedule": "0 9 * * * Europe/Moscow"
+              }
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "schedule_message"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "schedule_message",
+                      "arguments": {
+                        "reminder_text": "Take vitamins"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "schedule_work",
+              "result_kind": "scheduled_job",
+              "job_kind": "message"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "stored_text_scheduled"
+              ],
+              "prohibited_claims": [
+                "live_recomputation",
+                "future_result",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-schedule-static-message",
+      "language": "ru",
+      "purpose": "ru recurring static reminder",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Напоминай каждое утро принять витамины"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"schedule_message\", \"distilled_task\": \"\\u041d\\u0430\\u043f\\u043e\\u043c\\u0438\\u043d\\u0430\\u0439 \\u043a\\u0430\\u0436\\u0434\\u043e\\u0435 \\u0443\\u0442\\u0440\\u043e \\u043f\\u0440\\u0438\\u043d\\u044f\\u0442\\u044c \\u0432\\u0438\\u0442\\u0430\\u043c\\u0438\\u043d\\u044b\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"schedule_message\", \"arguments\": {\"reminder_text\": \"Take vitamins\", \"cron\": \"0 9 * * *\", \"timezone\": \"Europe/Moscow\"}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "schedule_message",
+              "output": "Scheduled",
+              "success": true,
+              "terminal_facts": {
+                "result_kind": "scheduled_job",
+                "summary": "Daily vitamins reminder scheduled",
+                "job_kind": "message",
+                "schedule": "0 9 * * * Europe/Moscow"
+              }
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "schedule_message"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "schedule_message",
+                      "arguments": {
+                        "reminder_text": "Take vitamins"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "schedule_work",
+              "result_kind": "scheduled_job",
+              "job_kind": "message"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "stored_text_scheduled"
+              ],
+              "prohibited_claims": [
+                "live_recomputation",
+                "future_result",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-skill-manage_jobs",
+      "language": "en",
+      "purpose": "en manage_jobs",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "List my scheduled jobs"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"manage_jobs\", \"distilled_task\": \"List my scheduled jobs\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"list_jobs\", \"arguments\": {}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"[{\\\"id\\\":\\\"job-1\\\"}]\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "list_jobs",
+              "output": "[{\"id\":\"job-1\"}]",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "manage_jobs"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "list_jobs",
+                      "arguments": {}
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "manage_scheduled_jobs",
+              "result_kind": "job_state"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-skill-manage_jobs",
+      "language": "ru",
+      "purpose": "ru manage_jobs",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Покажи мои запланированные задачи"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"manage_jobs\", \"distilled_task\": \"\\u041f\\u043e\\u043a\\u0430\\u0436\\u0438 \\u043c\\u043e\\u0438 \\u0437\\u0430\\u043f\\u043b\\u0430\\u043d\\u0438\\u0440\\u043e\\u0432\\u0430\\u043d\\u043d\\u044b\\u0435 \\u0437\\u0430\\u0434\\u0430\\u0447\\u0438\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"list_jobs\", \"arguments\": {}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"[]\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "list_jobs",
+              "output": "[]",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "manage_jobs"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "list_jobs",
+                      "arguments": {}
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "manage_scheduled_jobs",
+              "result_kind": "job_state"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-skill-manage_user_data",
+      "language": "en",
+      "purpose": "en manage_user_data",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "What do you remember about me?"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"manage_user_data\", \"distilled_task\": \"What do you remember about me?\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"get_user_data\", \"arguments\": {}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"timezone=Europe/Moscow\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "get_user_data",
+              "output": "timezone=Europe/Moscow",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "manage_user_data"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "get_user_data",
+                      "arguments": {}
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "manage_user_data",
+              "result_kind": "user_data"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-skill-manage_user_data",
+      "language": "ru",
+      "purpose": "ru manage_user_data",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Что ты знаешь обо мне?"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"manage_user_data\", \"distilled_task\": \"\\u0427\\u0442\\u043e \\u0442\\u044b \\u0437\\u043d\\u0430\\u0435\\u0448\\u044c \\u043e\\u0431\\u043e \\u043c\\u043d\\u0435?\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"get_user_data\", \"arguments\": {}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"timezone=Europe/Moscow\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "get_user_data",
+              "output": "timezone=Europe/Moscow",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "manage_user_data"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "get_user_data",
+                      "arguments": {}
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "manage_user_data",
+              "result_kind": "user_data"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-skill-create_picture",
+      "language": "en",
+      "purpose": "en create_picture",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Draw a sunset over the lake"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"create_picture\", \"distilled_task\": \"Draw a sunset over the lake\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"send_picture\", \"arguments\": {\"file_path\": \"/tmp/synthetic.png\", \"summary_for_chat\": \"A sunset over a lake\"}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "send_picture",
+              "output": "sent",
+              "success": true,
+              "terminal_facts": {
+                "result_kind": "picture_sent",
+                "summary": "Picture sent"
+              }
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "create_picture"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "send_picture",
+                      "arguments": {
+                        "file_path": "/tmp/synthetic.png",
+                        "summary_for_chat": "A sunset over a lake"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "create_picture",
+              "result_kind": "picture_sent"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "picture_sent"
+              ],
+              "prohibited_claims": [
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-skill-create_picture",
+      "language": "ru",
+      "purpose": "ru create_picture",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Нарисуй закат над озером"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"create_picture\", \"distilled_task\": \"\\u041d\\u0430\\u0440\\u0438\\u0441\\u0443\\u0439 \\u0437\\u0430\\u043a\\u0430\\u0442 \\u043d\\u0430\\u0434 \\u043e\\u0437\\u0435\\u0440\\u043e\\u043c\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"send_picture\", \"arguments\": {\"file_path\": \"/tmp/synthetic.png\", \"summary_for_chat\": \"\\u0417\\u0430\\u043a\\u0430\\u0442 \\u043d\\u0430\\u0434 \\u043e\\u0437\\u0435\\u0440\\u043e\\u043c\"}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "send_picture",
+              "output": "sent",
+              "success": true,
+              "terminal_facts": {
+                "result_kind": "picture_sent",
+                "summary": "Картинка отправлена"
+              }
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "create_picture"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "send_picture",
+                      "arguments": {
+                        "file_path": "/tmp/synthetic.png",
+                        "summary_for_chat": "Закат над озером"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "create_picture",
+              "result_kind": "picture_sent"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "picture_sent"
+              ],
+              "prohibited_claims": [
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-clarification-suspend-resume",
+      "language": "en",
+      "purpose": "ask_user clarification suspend and resume",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Schedule a reminder"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"schedule_message\", \"distilled_task\": \"Schedule a reminder\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"ask_user\", \"arguments\": {\"question\": \"What time should I remind you?\"}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "ask_user",
+              "output": "What time should I remind you?",
+              "success": true,
+              "suspend": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "schedule_message"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "ask_user",
+                      "arguments": {
+                        "question": "What time"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "clarification"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "clarification",
+              "prohibited_claims": [
+                "unproved_side_effect",
+                "internal_details",
+                "changed_certainty"
+              ]
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "event": "resume",
+          "input": {
+            "text": "At 9am every day"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"schedule_message\", \"arguments\": {\"reminder_text\": \"Reminder\", \"cron\": \"0 9 * * *\", \"timezone\": \"Europe/Moscow\"}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "schedule_message",
+              "output": "Scheduled",
+              "success": true,
+              "terminal_facts": {
+                "result_kind": "scheduled_job",
+                "summary": "Reminder scheduled",
+                "job_kind": "message",
+                "schedule": "0 9 * * * Europe/Moscow"
+              }
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_resume"
+            },
+            "selection": {
+              "kind": "not_applicable",
+              "reason": "resume_bypass"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "schedule_message",
+                      "arguments": {
+                        "reminder_text": "Reminder"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "schedule_work",
+              "result_kind": "scheduled_job",
+              "job_kind": "message"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "stored_text_scheduled"
+              ],
+              "prohibited_claims": [
+                "live_recomputation",
+                "future_result",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-selection-no-skill",
+      "language": "en",
+      "purpose": "unsupported request produces typed no-skill outcome",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Teleport me to Mars"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"no_skill\", \"reason\": \"unsupported\"}"
+            }
+          ],
+          "tool_results": [],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "no_skill"
+            },
+            "planning": {
+              "kind": "not_applicable",
+              "reason": "upstream_stop"
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "failure",
+              "operation": "requested_work",
+              "failure_category": "unsupported",
+              "next_step": "state_capability_boundary"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "failure",
+              "allowed_claims": [
+                "safe_limitation"
+              ],
+              "source_text": {
+                "prohibited_fragments": [
+                  "schema",
+                  "provider",
+                  "tool"
+                ]
+              },
+              "prohibited_claims": [
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-selection-protocol-corrected",
+      "language": "en",
+      "purpose": "malformed selection recovers on one bounded correction",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Find today's weather in Berlin"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{bad-json"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"Find today's weather in Berlin.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"Berlin weather today\"}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"Sunny in Berlin.\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "web_search",
+              "output": "Berlin: sunny 18C",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web",
+              "distilled_task": {
+                "required_fragments": [
+                  "Berlin",
+                  "weather"
+                ]
+              },
+              "recovery": "corrected"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "web_search",
+                      "arguments": {
+                        "query": "Berlin"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "retrieve_information",
+              "result_kind": "information"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-selection-protocol-exhausted",
+      "language": "ru",
+      "purpose": "malformed selection exhausts one bounded correction",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Найди свежие новости"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{bad-json"
+            },
+            {
+              "stage": "selection",
+              "raw": "{still-bad"
+            }
+          ],
+          "tool_results": [],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "protocol_exhausted",
+              "recovery": "exhausted"
+            },
+            "planning": {
+              "kind": "not_applicable",
+              "reason": "upstream_stop"
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "failure",
+              "operation": "requested_work",
+              "failure_category": "transient",
+              "next_step": "try_later"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "failure",
+              "allowed_claims": [
+                "safe_limitation"
+              ],
+              "source_text": {
+                "prohibited_fragments": [
+                  "schema",
+                  "provider",
+                  "tool"
+                ]
+              },
+              "prohibited_claims": [
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-strict-constraint-overrides-preference",
+      "language": "en",
+      "purpose": "strict source survives invalid preferred-domain plan correction",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Use only AccuWeather for today's Paris weather"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg",
+            "skill_preferences": {
+              "search_web": [
+                "example.com"
+              ]
+            }
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"Find today's Paris weather using only AccuWeather.\", \"request_constraints\": {\"strict_source_domains\": [\"accuweather.com\"], \"soft_source_domains\": []}}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"Paris weather today\", \"include_domains\": [\"example.com\"]}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"Paris weather today\"}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"Paris weather retrieved.\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "web_search",
+              "output": "Paris 24 C",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web",
+              "distilled_task": {
+                "required_fragments": [
+                  "Paris",
+                  "AccuWeather"
+                ]
+              },
+              "request_constraints": {
+                "strict_source_domains": [
+                  "accuweather.com"
+                ],
+                "soft_source_domains": []
+              }
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "recovery": "corrected",
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "web_search",
+                      "arguments": {
+                        "include_domains": [
+                          "accuweather.com"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "retrieve_information",
+              "result_kind": "information"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-execution-protocol-exhausted",
+      "language": "ru",
+      "purpose": "malformed execution exhausts one bounded correction",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Найди курс евро"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"\\u041d\\u0430\\u0439\\u0442\\u0438 \\u0442\\u0435\\u043a\\u0443\\u0449\\u0438\\u0439 \\u043a\\u0443\\u0440\\u0441 \\u0435\\u0432\\u0440\\u043e.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{bad-json"
+            },
+            {
+              "stage": "planning",
+              "raw": "{still-bad"
+            }
+          ],
+          "tool_results": [],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "fail"
+              ],
+              "recovery": "exhausted"
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "failure",
+              "operation": "retrieve_information",
+              "failure_category": "transient",
+              "next_step": "try_later"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "failure",
+              "allowed_claims": [
+                "safe_limitation"
+              ],
+              "source_text": {
+                "prohibited_fragments": [
+                  "schema",
+                  "provider",
+                  "tool"
+                ]
+              },
+              "prohibited_claims": [
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-execution-unsupported",
+      "language": "en",
+      "purpose": "accepted execution fail maps to safe unsupported outcome",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Find a private account password"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"Find a private account password.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"fail\", \"failure_reason\": \"unsupported\"}"
+            }
+          ],
+          "tool_results": [],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "fail"
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "failure",
+              "operation": "retrieve_information",
+              "failure_category": "unsupported",
+              "next_step": "state_capability_boundary"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "failure",
+              "allowed_claims": [
+                "safe_limitation"
+              ],
+              "source_text": {
+                "prohibited_fragments": [
+                  "schema",
+                  "provider",
+                  "tool"
+                ]
+              },
+              "prohibited_claims": [
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "en-delayed-dynamic-weather-check",
+      "language": "en",
+      "purpose": "delayed reminder performs fresh information task",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "In 30 minutes check the current weather in Oslo"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"In 30 minutes check current weather in Oslo.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"schedule_task\", \"arguments\": {\"skill_name\": \"search_web\", \"distilled_task\": \"Check current weather in Oslo.\", \"description\": \"Oslo weather check\", \"delay_minutes\": 30}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "schedule_task",
+              "output": "Scheduled",
+              "success": true,
+              "terminal_facts": {
+                "result_kind": "scheduled_job",
+                "summary": "Oslo weather check scheduled",
+                "job_kind": "task",
+                "scheduled_skill_name": "search_web",
+                "schedule": "in 30 minutes"
+              }
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web",
+              "distilled_task": {
+                "required_fragments": [
+                  "30 minutes",
+                  "Oslo"
+                ]
+              }
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "schedule_task",
+                      "arguments": {
+                        "skill_name": "search_web",
+                        "delay_minutes": 30
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "schedule_work",
+              "result_kind": "scheduled_job",
+              "job_kind": "task",
+              "scheduled_operation": "retrieve_information",
+              "schedule": {
+                "required_fragments": [
+                  "30 minutes"
+                ]
+              }
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "dynamic_operation_scheduled"
+              ],
+              "prohibited_claims": [
+                "future_result",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ru-relative-static-reminder",
+      "language": "ru",
+      "purpose": "relative static reminder requires no timezone clarification",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Через 15 минут напомни выключить духовку"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"schedule_message\", \"distilled_task\": \"\\u0427\\u0435\\u0440\\u0435\\u0437 15 \\u043c\\u0438\\u043d\\u0443\\u0442 \\u043d\\u0430\\u043f\\u043e\\u043c\\u043d\\u0438\\u0442\\u044c \\u0432\\u044b\\u043a\\u043b\\u044e\\u0447\\u0438\\u0442\\u044c \\u0434\\u0443\\u0445\\u043e\\u0432\\u043a\\u0443.\"}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"schedule_message\", \"arguments\": {\"reminder_text\": \"\\u0412\\u044b\\u043a\\u043b\\u044e\\u0447\\u0438\\u0442\\u044c \\u0434\\u0443\\u0445\\u043e\\u0432\\u043a\\u0443\", \"delay_minutes\": 15}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "schedule_message",
+              "output": "Scheduled",
+              "success": true,
+              "terminal_facts": {
+                "result_kind": "scheduled_job",
+                "summary": "Oven reminder scheduled",
+                "job_kind": "message",
+                "schedule": "in 15 minutes"
+              }
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "schedule_message",
+              "distilled_task": {
+                "required_fragments": [
+                  "15 минут",
+                  "духовку"
+                ]
+              }
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "schedule_message",
+                      "arguments": {
+                        "reminder_text": "духовку",
+                        "delay_minutes": 15
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "schedule_work",
+              "result_kind": "scheduled_job",
+              "job_kind": "message",
+              "schedule": {
+                "required_fragments": [
+                  "15 minutes"
+                ]
+              }
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "stored_text_scheduled"
+              ],
+              "prohibited_claims": [
+                "live_recomputation",
+                "future_result",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "july-20-recurring-spb-weather-accuweather",
+      "language": "ru",
+      "purpose": "July 20 synthetic recurring AccuWeather weather task",
+      "turns": [
+        {
+          "id": "t1",
+          "event": "message",
+          "input": {
+            "text": "Каждое утро в 08:00 присылай прогноз погоды в Санкт-Петербурге только с AccuWeather"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "intent",
+              "raw": "{\"intent\": \"agent_task\"}"
+            },
+            {
+              "stage": "selection",
+              "raw": "{\"mode\": \"select_skill\", \"selected_skill\": \"search_web\", \"distilled_task\": \"\\u041a\\u0430\\u0436\\u0434\\u043e\\u0435 \\u0443\\u0442\\u0440\\u043e \\u0432 08:00 \\u043f\\u043e\\u043b\\u0443\\u0447\\u0430\\u0442\\u044c \\u043f\\u0440\\u043e\\u0433\\u043d\\u043e\\u0437 \\u043f\\u043e\\u0433\\u043e\\u0434\\u044b \\u0432 \\u0421\\u0430\\u043d\\u043a\\u0442-\\u041f\\u0435\\u0442\\u0435\\u0440\\u0431\\u0443\\u0440\\u0433\\u0435 \\u0442\\u043e\\u043b\\u044c\\u043a\\u043e \\u0441 AccuWeather.\", \"request_constraints\": {\"strict_source_domains\": [\"accuweather.com\"], \"soft_source_domains\": []}}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"schedule_task\", \"arguments\": {\"skill_name\": \"search_web\", \"distilled_task\": \"\\u041f\\u0440\\u043e\\u0433\\u043d\\u043e\\u0437 \\u043f\\u043e\\u0433\\u043e\\u0434\\u044b \\u0432 \\u0421\\u0430\\u043d\\u043a\\u0442-\\u041f\\u0435\\u0442\\u0435\\u0440\\u0431\\u0443\\u0440\\u0433\\u0435 \\u0441 AccuWeather\", \"description\": \"\\u0423\\u0442\\u0440\\u0435\\u043d\\u043d\\u0438\\u0439 \\u043f\\u0440\\u043e\\u0433\\u043d\\u043e\\u0437\", \"cron\": \"0 8 * * *\", \"timezone\": \"Europe/Moscow\"}}]}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "schedule_task",
+              "output": "Scheduled",
+              "success": true,
+              "terminal_facts": {
+                "result_kind": "scheduled_job",
+                "summary": "Recurring weather lookup scheduled",
+                "job_kind": "task",
+                "scheduled_skill_name": "search_web",
+                "schedule": "0 8 * * * Europe/Moscow"
+              }
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "intent",
+              "route": "agent_task"
+            },
+            "selection": {
+              "kind": "selection",
+              "mode": "select_skill",
+              "selected_skill": "search_web",
+              "distilled_task": {
+                "required_fragments": [
+                  "08:00",
+                  "Санкт-Петербурге",
+                  "AccuWeather"
+                ]
+              },
+              "request_constraints": {
+                "strict_source_domains": [
+                  "accuweather.com"
+                ],
+                "soft_source_domains": []
+              }
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "schedule_task",
+                      "arguments": {
+                        "skill_name": "search_web",
+                        "distilled_task": "Санкт-Петербурге",
+                        "cron": "0 8 * * *",
+                        "timezone": "Europe/Moscow",
+                        "request_constraints": {
+                          "strict_source_domains": [
+                            "accuweather.com"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "schedule_work",
+              "result_kind": "scheduled_job",
+              "job_kind": "task",
+              "scheduled_operation": "retrieve_information",
+              "schedule": {
+                "required_fragments": [
+                  "0 8 * * *",
+                  "Europe/Moscow"
+                ]
+              }
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "dynamic_operation_scheduled"
+              ],
+              "prohibited_claims": [
+                "future_result",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "event": "scheduled_task",
+          "input": {
+            "text": "Прогноз погоды в Санкт-Петербурге с AccuWeather",
+            "request_constraints": {
+              "strict_source_domains": [
+                "accuweather.com"
+              ],
+              "soft_source_domains": []
+            },
+            "skill_name": "search_web",
+            "distilled_task": "Прогноз погоды в Санкт-Петербурге с AccuWeather"
+          },
+          "fixed_now_utc": "2026-07-20T08:00:00+00:00",
+          "profile": {
+            "timezone": "Europe/Moscow",
+            "location": "Saint Petersburg"
+          },
+          "model_responses": [
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"\\u043f\\u043e\\u0433\\u043e\\u0434\\u0430 \\u0421\\u0430\\u043d\\u043a\\u0442-\\u041f\\u0435\\u0442\\u0435\\u0440\\u0431\\u0443\\u0440\\u0433\"}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"call_tools\", \"tool_calls\": [{\"tool_name\": \"web_search\", \"arguments\": {\"query\": \"\\u043f\\u043e\\u0433\\u043e\\u0434\\u0430 \\u0421\\u0430\\u043d\\u043a\\u0442-\\u041f\\u0435\\u0442\\u0435\\u0440\\u0431\\u0443\\u0440\\u0433 \\u0441\\u0435\\u0433\\u043e\\u0434\\u043d\\u044f\", \"include_domains\": [\"accuweather.com\"]}}]}"
+            },
+            {
+              "stage": "planning",
+              "raw": "{\"mode\": \"finish\", \"final_answer\": \"\\u0412 \\u0421\\u0430\\u043d\\u043a\\u0442-\\u041f\\u0435\\u0442\\u0435\\u0440\\u0431\\u0443\\u0440\\u0433\\u0435 18 C.\"}"
+            }
+          ],
+          "tool_results": [
+            {
+              "tool_name": "web_search",
+              "output": "No results",
+              "success": true
+            },
+            {
+              "tool_name": "web_search",
+              "output": "Saint Petersburg weather: 18 C",
+              "success": true
+            }
+          ],
+          "expected": {
+            "intent": {
+              "kind": "not_applicable",
+              "reason": "scheduled_bypass"
+            },
+            "selection": {
+              "kind": "not_applicable",
+              "reason": "scheduled_bypass"
+            },
+            "planning": {
+              "kind": "planning",
+              "accepted_modes": [
+                "call_tools",
+                "finish"
+              ],
+              "tool_batches": [
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "web_search",
+                      "arguments": {
+                        "include_domains": [
+                          "accuweather.com"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "matching": "ordered",
+                  "calls": [
+                    {
+                      "tool_name": "web_search",
+                      "arguments": {
+                        "include_domains": [
+                          "accuweather.com"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "execution": {
+              "kind": "execution",
+              "result": "success",
+              "operation": "retrieve_information",
+              "result_kind": "information"
+            },
+            "delivery": {
+              "kind": "delivery",
+              "status": "success",
+              "allowed_claims": [
+                "operation_completed"
+              ],
+              "prohibited_claims": [
+                "uncreated_job",
+                "internal_details",
+                "changed_certainty",
+                "unproved_side_effect"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

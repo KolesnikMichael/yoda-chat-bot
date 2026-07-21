@@ -6,7 +6,7 @@ status: todo
 priority: high
 branch: feat/EPIC-002-agent-routing-reliability
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-21
 tags:
   - agent
   - routing
@@ -44,7 +44,6 @@ Outcomes:
   cannot claim that a static reminder will perform a recurring live search.
 - A repeatable multilingual evaluation suite protects routing, skill choice,
   tool plans, suspend/resume, and truthful completion against regressions.
-- Deterministic interface commands bypass probabilistic intent classification.
 
 ## Delivery profile
 

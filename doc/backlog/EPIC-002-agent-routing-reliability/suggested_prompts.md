@@ -1,7 +1,7 @@
 ---
 id: EPIC-002
 doc: suggested-prompts
-updated: 2026-07-20
+updated: 2026-07-21
 status: draft
 ---
 
@@ -23,7 +23,6 @@ required by the task.
 ## Prompt boundary
 
 No LLM prompt is used for:
-- recognized Telegram commands (`/start`, `/reset`, `/settings`, `/help`);
 - routing a reply into an already suspended agent session;
 - deterministic validation of parsed model output;
 - enforcing tool arguments such as `include_domains`;
