@@ -24,6 +24,10 @@ class LanguageProvider:
             raise ValueError(
                 "Language settings missing required 'model_name'") from e
 
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
     async def reply_in_conversation(self, conversation: list[dict]) -> str:
         return await self._llm_api.complete_chat_async(
             model_name=self._model_name,

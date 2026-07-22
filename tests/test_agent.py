@@ -244,6 +244,8 @@ class FailThenSucceedWebSearchTool(Tool):
 class FakeLanguageProvider:
     """Returns pre-configured decisions or raises StructuredOutputError."""
 
+    model_name = "test-model"
+
     def __init__(self, decisions: list):
         self._decisions = list(decisions)
         self._call_index = 0

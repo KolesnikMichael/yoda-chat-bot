@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dtm
+import json
 import logging
 from pathlib import Path
 
@@ -30,6 +31,14 @@ from yoda.mind.agent.data.outcome_data import (
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.skills.catalog import SkillCatalog
 from yoda.mind.agent.tools.tool_port import Tool
+from yoda.mind.evaluation.data import (
+    DiagnosticOutcome,
+    PromptIdentity,
+    StageDiagnostic,
+    StageName,
+)
+from yoda.mind.evaluation.prompt_identity_core import PromptIdentityCore
+from yoda.mind.evaluation.telemetry_core import RoutingTelemetryCore
 from yoda.mind.memory.data.user_profile import UserProfile
 from yoda.mind.perception.language import LanguageProvider, StructuredOutputError
 
@@ -88,7 +97,10 @@ class Agent:
         )
         context = context.with_messages([system_msg, control_msg, input_msg])
 
-        selected = await self._run_selection(context)
+        selected = await self._run_selection(
+            context,
+            catalog_control_text=str(control_msg["content"]),
+        )
         if isinstance(selected, AgentResult):
             return selected
         return await self._execute_loop(selected)
@@ -155,7 +167,13 @@ class Agent:
         context = context.with_messages(context.messages + [answer_msg])
 
         if context.phase == AgentPhase.SELECTION or context.active_skill is None:
-            selected = await self._run_selection(context)
+            control_msg = ReactLoop.build_selection_control_message(
+                context.catalog_summaries,
+            )
+            selected = await self._run_selection(
+                context,
+                catalog_control_text=str(control_msg["content"]),
+            )
             if isinstance(selected, AgentResult):
                 return selected
             return await self._execute_loop(selected)
@@ -165,11 +183,20 @@ class Agent:
     async def _run_selection(
         self,
         context: AgentContext,
+        *,
+        catalog_control_text: str,
     ) -> AgentContext | AgentResult:
+        selection_prompts = (
+            PromptIdentityCore.selection_identity(catalog_control_text),
+        )
         while True:
             decision, issue = await self._parse_selection(context)
             if issue is not None:
-                exhausted = await self._handle_phase_issue(context, issue)
+                exhausted = await self._handle_phase_issue(
+                    context,
+                    issue,
+                    prompts=selection_prompts,
+                )
                 if isinstance(exhausted, AgentResult):
                     return exhausted
                 context = exhausted
@@ -180,6 +207,12 @@ class Agent:
             logger.debug(f"Selection reasoning={decision.reasoning}")
 
             if decision.mode == "no_skill":
+                self._emit_stage_diagnostic(
+                    StageName.SELECTION,
+                    DiagnosticOutcome.FAILED,
+                    prompts=selection_prompts,
+                    detail="no_skill",
+                )
                 await self._sessions.delete(context.chat_id)
                 return self._failure_result(
                     AgentFailure(
@@ -195,6 +228,12 @@ class Agent:
                     decision.request_constraints,
                 )
             except ValueError:
+                self._emit_stage_diagnostic(
+                    StageName.SELECTION,
+                    DiagnosticOutcome.FAILED,
+                    prompts=selection_prompts,
+                    detail="invalid_constraint",
+                )
                 logger.warning(
                     "stage=%s category=%s",
                     AgentPhase.EXECUTION.value,
@@ -209,6 +248,12 @@ class Agent:
                     ),
                     skill_name=decision.selected_skill.strip(),
                 )
+            self._emit_stage_diagnostic(
+                StageName.SELECTION,
+                DiagnosticOutcome.SUCCESS,
+                prompts=selection_prompts,
+                detail="select_skill",
+            )
             context = ReactLoop._copy_context(
                 context,
                 request_constraints=constraints,
@@ -242,11 +287,16 @@ class Agent:
     async def _execute_loop(self, context: AgentContext) -> AgentResult:
         terminal_success = False
         finished_answer: str | None = None
+        execution_prompts = self._execution_prompts_for(context)
 
         while not ReactLoop.is_done(context):
             decision, issue = await self._parse_execution(context)
             if issue is not None:
-                exhausted = await self._handle_phase_issue(context, issue)
+                exhausted = await self._handle_phase_issue(
+                    context,
+                    issue,
+                    prompts=execution_prompts,
+                )
                 if isinstance(exhausted, AgentResult):
                     return exhausted
                 context = exhausted
@@ -255,6 +305,12 @@ class Agent:
             assert decision is not None
             logger.info(f"Execution iteration {context.iteration}: mode={decision.mode}")
             logger.debug(f"Execution reasoning={decision.reasoning}")
+            self._emit_stage_diagnostic(
+                StageName.PLANNING,
+                DiagnosticOutcome.SUCCESS,
+                prompts=execution_prompts,
+                detail=decision.mode,
+            )
             context = ReactLoop.append_assistant(context, decision)
 
             if decision.mode == "finish":
@@ -262,6 +318,12 @@ class Agent:
                 break
 
             if decision.mode == "fail":
+                self._emit_stage_diagnostic(
+                    StageName.EXECUTION,
+                    DiagnosticOutcome.FAILED,
+                    prompts=execution_prompts,
+                    detail="unsupported",
+                )
                 await self._sessions.delete(context.chat_id)
                 return AgentResult(
                     outcome=OutcomeCore.failure(
@@ -276,7 +338,11 @@ class Agent:
                 context.request_constraints,
             )
             if prep_issue is not None:
-                exhausted = await self._handle_phase_issue(context, prep_issue)
+                exhausted = await self._handle_phase_issue(
+                    context,
+                    prep_issue,
+                    prompts=execution_prompts,
+                )
                 if isinstance(exhausted, AgentResult):
                     return exhausted
                 context = exhausted
@@ -299,6 +365,12 @@ class Agent:
 
             suspended = next((r for r in results if r.suspend), None)
             if suspended:
+                self._emit_stage_diagnostic(
+                    StageName.EXECUTION,
+                    DiagnosticOutcome.SUCCESS,
+                    prompts=execution_prompts,
+                    detail="clarification",
+                )
                 await self._sessions.save(context)
                 return AgentResult(
                     clarification=ClarificationResult(question=suspended.output),
@@ -317,12 +389,24 @@ class Agent:
         await self._sessions.delete(context.chat_id)
 
         if terminal_success:
+            self._emit_stage_diagnostic(
+                StageName.EXECUTION,
+                DiagnosticOutcome.SUCCESS,
+                prompts=execution_prompts,
+                detail="terminal",
+            )
             return AgentResult(
                 outcome=OutcomeCore.success_from_terminal(context.outcome_evidence),
             )
 
         if finished_answer is not None:
             if context.terminal_failure_pending:
+                self._emit_stage_diagnostic(
+                    StageName.EXECUTION,
+                    DiagnosticOutcome.FAILED,
+                    prompts=execution_prompts,
+                    detail="transient",
+                )
                 return AgentResult(
                     outcome=OutcomeCore.failure(
                         self._operation_for_context(context),
@@ -332,6 +416,12 @@ class Agent:
             skill_name = (
                 context.active_skill.name if context.active_skill is not None else ""
             )
+            self._emit_stage_diagnostic(
+                StageName.EXECUTION,
+                DiagnosticOutcome.SUCCESS,
+                prompts=execution_prompts,
+                detail="finish",
+            )
             return AgentResult(
                 outcome=OutcomeCore.success_from_finish(
                     skill_name,
@@ -340,6 +430,12 @@ class Agent:
                 ),
             )
 
+        self._emit_stage_diagnostic(
+            StageName.EXECUTION,
+            DiagnosticOutcome.EXHAUSTED,
+            prompts=execution_prompts,
+            detail="iteration_limit",
+        )
         logger.warning(
             "stage=%s category=%s",
             AgentPhase.EXECUTION.value,
@@ -376,11 +472,18 @@ class Agent:
         self,
         context: AgentContext,
         issue: ProtocolIssue,
+        *,
+        prompts: tuple[PromptIdentity, ...] = (),
     ) -> AgentContext | AgentResult:
         logger.warning(
             "stage=%s category=%s",
             issue.stage.value,
             issue.category.value,
+        )
+        stage = (
+            StageName.SELECTION
+            if issue.stage == AgentPhase.SELECTION
+            else StageName.PLANNING
         )
         retry_used = (
             context.selection_retry_used
@@ -388,8 +491,20 @@ class Agent:
             else context.execution_retry_used
         )
         if not retry_used:
+            self._emit_stage_diagnostic(
+                stage,
+                DiagnosticOutcome.CORRECTED,
+                prompts=prompts,
+                detail=issue.category.value,
+            )
             return ReactLoop.append_correction(context, issue)
 
+        self._emit_stage_diagnostic(
+            stage,
+            DiagnosticOutcome.EXHAUSTED,
+            prompts=prompts,
+            detail=issue.category.value,
+        )
         await self._sessions.delete(context.chat_id)
         return self._failure_result(
             AgentFailure(
@@ -399,6 +514,55 @@ class Agent:
             ),
             context=context,
         )
+
+    def _execution_prompts_for(
+        self,
+        context: AgentContext,
+    ) -> tuple[PromptIdentity, ...]:
+        if context.active_skill is None:
+            return ()
+        filtered_schemas = ReactLoop.filter_tool_schemas(
+            self._tool_schemas,
+            context.active_skill,
+        )
+        schemas_json = json.dumps(
+            filtered_schemas,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        return tuple(
+            PromptIdentityCore.execution_identity(
+                context.active_skill.name,
+                context.active_skill.instructions,
+                schemas_json,
+            ),
+        )
+
+    def _emit_stage_diagnostic(
+        self,
+        stage: StageName,
+        outcome: DiagnosticOutcome,
+        *,
+        prompts: tuple[PromptIdentity, ...] = (),
+        detail: str | None = None,
+    ) -> None:
+        diagnostic = StageDiagnostic(
+            stage=stage,
+            outcome=outcome,
+            model_id=self._llm.model_name,
+            prompts=prompts,
+            detail=detail,
+        )
+        if outcome in (
+            DiagnosticOutcome.FAILED,
+            DiagnosticOutcome.REJECTED,
+            DiagnosticOutcome.EXHAUSTED,
+            DiagnosticOutcome.CORRECTED,
+        ):
+            logger.warning(RoutingTelemetryCore.format_warning(diagnostic))
+        else:
+            logger.info(RoutingTelemetryCore.format_info(diagnostic))
 
     def _available_tools_for_validation(self, context: AgentContext) -> set[str]:
         if context.active_skill is None:

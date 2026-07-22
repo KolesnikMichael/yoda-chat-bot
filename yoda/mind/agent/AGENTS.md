@@ -155,13 +155,46 @@ test-only harness — not by judging final Yoda prose.
   synthetic; never copy production transcripts (ADR-000).
 - **Reusable contracts:** `yoda/mind/evaluation/` — Data (`data.py`), pure scorer
   (`RoutingEvaluationCore` in `core.py`), async loader (`RoutingCorpusProvider`).
-- **Test-only runner:** `tests/routing_evaluation/` — `RoutingEvaluation`,
-  `EvaluationMind`, `EvaluationAgent`, and recorded adapters. Normal CI runs
-  `tests/test_routing_evaluation.py`; focused rerun:
+- **Observation Integrations:** `ObservingMind` / `ObservingAgent` /
+  `ObservingCognitionProvider` in `yoda/mind/evaluation/observation.py`
+  (shared with live eval). The test harness imports these; recorded LLM/tool
+  adapters stay under `tests/routing_evaluation/`.
+- **Test-only runner:** `tests/routing_evaluation/` — `RoutingEvaluation` and
+  recorded adapters. Normal CI runs `tests/test_routing_evaluation.py`;
+  focused rerun:
   `ROUTING_EVAL_CASE=<stable-id> .venv/bin/python -m pytest tests/test_routing_evaluation.py -q`
-- **TASK-021** owns live-model runs, production telemetry, and on-demand eval
-  transport. Import evaluation Data/Core/Provider from production code; do not
-  import the test harness from runtime wiring.
+
+## Live routing evaluation (TASK-021)
+
+On-demand live-model runs over the same corpus. **Not** PR/CI gating — cost,
+rate limits, and model drift make scores informational only. Pytest never
+invokes the live CLI and does not require live credentials.
+
+```bash
+.venv/bin/python -m yoda.mind.evaluation.live_runner \
+  [--case CASE_ID] \
+  [--corpus PATH] \
+  [--report-dir PATH] \
+  [--settings PATH]
+```
+
+- **Defaults:** checked-in `tests/fixtures/routing_evaluation/corpus-v1.json`,
+  report dir `artifacts/live_routing_eval/`, project `settings.json` with
+  `agent.model_name` + `llm.api_key`.
+- **Full corpus:** omit `--case`. **Single case:** `--case <stable-id>` (unknown
+  IDs fail before any model call).
+- **Side-effect boundary:** only the configured `LLMApi` may network; Telegram,
+  Tavily, media, Redis, scheduler, and Chroma are fail-on-call. Tool outcomes
+  still come from corpus-recorded fixtures.
+- **Reports:** unique JSON under `artifacts/live_routing_eval/` (gitignored)
+  with model id, prompt id/hash pairs, corpus version, exclusions, stage
+  metrics, and scored eligible cases. Console summary prints the artifact path.
+- **Metrics:** incomplete/excluded/unattempted cases do not inflate stage
+  pass rates. Forced-malformed/recovery fixtures are excluded with stable
+  reasons; deterministic CI still scores them.
+- **Production telemetry:** `Mind` / `Agent` / `CognitionProvider` emit
+  privacy-safe INFO/WARNING stage diagnostics via `RoutingTelemetryCore`
+  (no user content at those levels).
 
 ## Adding a new tool
 

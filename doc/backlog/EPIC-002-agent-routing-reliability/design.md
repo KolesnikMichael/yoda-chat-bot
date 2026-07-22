@@ -1,7 +1,7 @@
 ---
 id: EPIC-002
 doc: design
-updated: 2026-07-21
+updated: 2026-07-22
 ---
 
 # EPIC-002: agent routing reliability — Master design
@@ -274,7 +274,16 @@ developed after the stage contracts stabilize.
 
 ## Open questions
 
-No unresolved master-level decisions remain from the initial outline. Exact
-class/file extraction for the `Agent` Integration, corpus thresholds, and safe
-failure wording are member-task design details constrained by Decisions 7, 9,
-and 10.
+None remaining for this epic. Member-task details that were parked here are
+closed:
+
+| Former open item | Resolution |
+|------------------|------------|
+| `Agent` Integration class/file extraction | [[TASK-015-phase-protocol-and-agent-integration/task\|TASK-015]] |
+| Safe failure wording | [[TASK-018-grounded-outcomes-and-safe-failures/task\|TASK-018]] |
+| Deterministic corpus + stage scoring | [[TASK-020-deterministic-routing-evaluation-corpus/task\|TASK-020]] |
+| Stage telemetry + on-demand live runner | [[TASK-021-stage-telemetry-and-live-eval-runner/task\|TASK-021]] |
+
+**Explicitly carried over (out of epic scope):** live-eval release thresholds /
+PR or CI gating for remote model scores — runner stays opt-in
+(`python -m yoda.mind.evaluation.live_runner`).

@@ -16,6 +16,9 @@ from yoda.mind.agent.data.outcome_data import (
     StaticMessageDelivery,
     UserOperation,
 )
+from yoda.mind.evaluation.data import DiagnosticOutcome, StageDiagnostic, StageName
+from yoda.mind.evaluation.prompt_identity_core import PromptIdentityCore
+from yoda.mind.evaluation.telemetry_core import RoutingTelemetryCore
 
 from .affect import AffectCore, AffectProvider
 from .cognition import CognitionCore, CognitionProvider
@@ -210,12 +213,24 @@ class Mind:
         routing: RoutingContext,
     ) -> str:
         if not self.agent:
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.BYPASSED,
+                detail="no_agent",
+            )
             return "chat"
 
         if await self.agent.has_pending_session(chat_id):
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.BYPASSED,
+                detail="agent_resume",
+            )
             return "agent_resume"
 
         if not routing.current_user_text or self.cognition_provider is None:
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.NOT_APPLICABLE,
+                detail="no_classifier",
+            )
             return "chat"
 
         try:
@@ -223,7 +238,65 @@ class Mind:
         except Exception:
             logger.warning(
                 "Intent classification failed, defaulting to chat", exc_info=True)
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.REJECTED,
+                detail="rejected_fallback_chat",
+                include_prompt=True,
+            )
             return "chat"
+
+    def _emit_intent_diagnostic(
+        self,
+        outcome: DiagnosticOutcome,
+        *,
+        detail: str | None = None,
+        include_prompt: bool = False,
+    ) -> None:
+        prompts = (
+            (PromptIdentityCore.intent_identity(),) if include_prompt else ()
+        )
+        model_id = (
+            self.language_provider.model_name
+            if include_prompt
+            else None
+        )
+        diagnostic = StageDiagnostic(
+            stage=StageName.INTENT,
+            outcome=outcome,
+            model_id=model_id,
+            prompts=prompts,
+            detail=detail,
+        )
+        if outcome in (
+            DiagnosticOutcome.REJECTED,
+            DiagnosticOutcome.FAILED,
+            DiagnosticOutcome.EXHAUSTED,
+        ):
+            logger.warning(RoutingTelemetryCore.format_warning(diagnostic))
+        else:
+            logger.info(RoutingTelemetryCore.format_info(diagnostic))
+
+    def _emit_delivery_diagnostic(
+        self,
+        outcome: DiagnosticOutcome,
+        *,
+        detail: str | None = None,
+    ) -> None:
+        diagnostic = StageDiagnostic(
+            stage=StageName.DELIVERY,
+            outcome=outcome,
+            model_id=self.language_provider.model_name,
+            prompts=(PromptIdentityCore.delivery_identity(),),
+            detail=detail,
+        )
+        if outcome in (
+            DiagnosticOutcome.FAILED,
+            DiagnosticOutcome.REJECTED,
+            DiagnosticOutcome.EXHAUSTED,
+        ):
+            logger.warning(RoutingTelemetryCore.format_warning(diagnostic))
+        else:
+            logger.info(RoutingTelemetryCore.format_info(diagnostic))
 
     async def _handle_agent_task(
         self,
@@ -281,6 +354,15 @@ class Mind:
         conversation,
     ) -> None:
         payload = DeliveryCore.build_payload(result)
+        delivery_outcome = (
+            DiagnosticOutcome.FAILED
+            if payload.status == "failure"
+            else DiagnosticOutcome.SUCCESS
+        )
+        self._emit_delivery_diagnostic(
+            delivery_outcome,
+            detail=payload.status,
+        )
         utc_now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
         line = DeliveryCore.build_instruction(payload, current_time_utc=utc_now)
 

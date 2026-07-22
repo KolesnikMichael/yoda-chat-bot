@@ -71,7 +71,8 @@ async def test_evaluation_agent_captures_accepted_selection() -> None:
     from yoda.mind.memory.data.user_profile import UserProfile
     from yoda.mind.perception.language import LanguageProvider
     from tests.routing_evaluation.fakes import InMemoryStorageApi, RecordedLLMApi, RecordedToolProvider
-    from tests.routing_evaluation.harness import EvaluationAgent, _RecordedTool
+    from tests.routing_evaluation.harness import _RecordedTool
+    from yoda.mind.evaluation.observation import ObservingAgent
 
     turn_obs = TurnObservation(turn_id="t1")
     llm = RecordedLLMApi(
@@ -98,7 +99,7 @@ async def test_evaluation_agent_captures_accepted_selection() -> None:
             tool_provider,
         ),
     ]
-    agent = EvaluationAgent(
+    agent = ObservingAgent(
         language_provider=language,
         tools=tools,
         skills_dir=PRODUCTION_SKILLS_DIR,
@@ -120,7 +121,7 @@ async def test_evaluation_mind_captures_delivery_payload() -> None:
         UserOperation,
     )
     from yoda.mind.evaluation.data import TurnObservation
-    from tests.routing_evaluation.harness import EvaluationMind
+    from yoda.mind.evaluation.observation import ObservingMind
     from tests.fakes import FakeCognitionProvider, FakeLanguageProvider, FakeMemoryProvider
     from yoda.mind.perception.perception import Perception
     from tests.fakes import FakeAudioProvider, FakeVisionProvider
@@ -140,7 +141,7 @@ async def test_evaluation_mind_captures_delivery_payload() -> None:
             )
 
     turn_obs = TurnObservation(turn_id="t1")
-    mind = EvaluationMind(
+    mind = ObservingMind(
         language_provider=FakeLanguageProvider(),
         perception=Perception(FakeAudioProvider(), FakeVisionProvider()),
         memory_provider=FakeMemoryProvider(),

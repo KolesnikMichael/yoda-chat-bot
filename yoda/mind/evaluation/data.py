@@ -1,4 +1,4 @@
-"""Routing evaluation corpus and result Data contracts (TASK-020)."""
+"""Routing evaluation corpus and result Data contracts (TASK-020 / TASK-021)."""
 
 from __future__ import annotations
 
@@ -341,3 +341,92 @@ class RoutingObservation:
             if item.turn_id == turn_id:
                 return item
         return None
+
+
+class DiagnosticOutcome(StrEnum):
+    SUCCESS = "success"
+    REJECTED = "rejected"
+    CORRECTED = "corrected"
+    EXHAUSTED = "exhausted"
+    FAILED = "failed"
+    BYPASSED = "bypassed"
+    NOT_APPLICABLE = "not_applicable"
+    BLOCKED = "blocked"
+
+
+class PromptIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prompt_id: str
+    prompt_hash: str
+
+
+class StageDiagnostic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage: StageName
+    outcome: DiagnosticOutcome
+    model_id: str | None = None
+    prompts: tuple[PromptIdentity, ...] = ()
+    detail: str | None = None
+
+
+class LiveExclusionReason(StrEnum):
+    FORCED_MALFORMED_INTENT = "forced_malformed_intent"
+    FORCED_SELECTION_RECOVERY = "forced_selection_recovery"
+    FORCED_PLANNING_RECOVERY = "forced_planning_recovery"
+    FORCED_PROTOCOL_EXHAUSTION = "forced_protocol_exhaustion"
+
+
+class LiveCaseExclusion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_id: str
+    reason: LiveExclusionReason
+
+
+class LiveRunStatus(StrEnum):
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class OperationalErrorCategory(StrEnum):
+    PROVIDER_AUTH = "provider_auth"
+    PROVIDER_RATE_LIMIT = "provider_rate_limit"
+    PROVIDER_ERROR = "provider_error"
+    FORBIDDEN_SIDE_EFFECT = "forbidden_side_effect"
+    INTERRUPTED = "interrupted"
+    INTERNAL = "internal"
+
+
+class LiveStageMetrics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage: StageName
+    passed: int
+    failed: int
+    applicable: int
+    blocked: int
+    pass_rate: float
+
+
+class LiveEvalReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    report_schema_version: Literal[1]
+    run_id: str
+    started_at_utc: datetime
+    ended_at_utc: datetime
+    status: LiveRunStatus
+    corpus_schema_version: int
+    corpus_version: str
+    case_filter: str | None
+    model_id: str
+    prompts_used: list[PromptIdentity]
+    exclusions: list[LiveCaseExclusion]
+    case_results: list[RoutingCaseResult]
+    incomplete_case_ids: list[str]
+    unattempted_case_ids: list[str]
+    stage_metrics: list[LiveStageMetrics]
+    attempted: int
+    passed: int
+    failed: int
+    excluded: int
+    incomplete: int
+    operational_errors: list[OperationalErrorCategory]

@@ -141,6 +141,8 @@ class FakeSender:
 
 
 class FakeLanguageProvider:
+    model_name = "test-model"
+
     def __init__(self) -> None:
         self.reply_calls: list[list[dict]] = []
 

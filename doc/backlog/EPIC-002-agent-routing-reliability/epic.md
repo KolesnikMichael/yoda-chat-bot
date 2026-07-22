@@ -2,11 +2,11 @@
 id: EPIC-002
 doc: epic
 title: "agent routing reliability"
-status: todo
+status: done
 priority: high
 branch: feat/EPIC-002-agent-routing-reliability
 created: 2026-07-20
-updated: 2026-07-21
+updated: 2026-07-22
 tags:
   - agent
   - routing
@@ -142,3 +142,8 @@ dv.table(
   requirements, design, plan, and review artifacts are retained.
 - The motivating July 20 session was a test session; no operational job
   cancellation or migration is part of this epic.
+- Closed 2026-07-22: all eight member tasks done (TASK-010, 014–018, 020–021).
+  Shared branch `feat/EPIC-002-agent-routing-reliability` ready to merge to
+  `main` when approved.
+- Post-close follow-ups (tech debt + live-eval UX/settings): 
+  [[backlog/EPIC-002-agent-routing-reliability/follow-up|follow-up.md]]

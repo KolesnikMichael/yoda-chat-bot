@@ -18,6 +18,9 @@ from yoda.mind.agent.data.outcome_data import OutcomeEvidence
 from yoda.mind.data.routing_context import format_recent_messages_block
 from yoda.mind.memory.data.user_profile import UserProfile
 
+SKILL_SELECTOR_PROMPT_ID = "skill_selector/v1"
+SKILL_EXECUTOR_PROMPT_ID = "skill_executor/v1"
+
 SELECTION_SYSTEM_PROMPT = (
     "You are a skill-selection agent. Choose exactly one skill for the task "
     "or report that no skill applies.\n\n"

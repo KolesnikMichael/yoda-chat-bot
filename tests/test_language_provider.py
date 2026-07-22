@@ -61,3 +61,8 @@ async def test_parse_structured_reraises_other_errors():
 
     with pytest.raises(RuntimeError, match="provider down"):
         await provider.parse_structured([], _TinyModel)
+
+
+def test_model_name_exposes_configured_model_id() -> None:
+    provider = LanguageProvider({"model_name": "gpt-test-model"}, AsyncMock())
+    assert provider.model_name == "gpt-test-model"
