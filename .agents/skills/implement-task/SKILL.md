@@ -42,8 +42,10 @@ Use the following git protocol:
 
 ```bash
 git checkout main && git pull
-git status   # must be clean — if not, STOP and ask user
+git status
 ```
+
+**Working tree:** untracked or modified `*.md` files under the **current task folder** are expected — do not treat them as a blocker. If the task has `epic: EPIC-NNN`, the same applies to `doc/backlog/EPIC-{NNN}-*/`. These artifacts ship with the implementation: include them in the same commit(s) as the code when committing. In any other situation or when unsure - STOP and ask the user.
 
 **Resolve the branch (epic takes precedence):**
 
@@ -62,7 +64,7 @@ git status   # must be clean — if not, STOP and ask user
   git checkout -b <branch from plan frontmatter>
   ```
 
-If already on the correct branch with the task's (or epic's) commits and the user is resuming, skip recreate but still verify `git status`. On a shared epic branch, expect prior member-task commits to be present — that is normal, not a dirty tree.
+If already on the correct branch with the task's (or epic's) commits and the user is resuming, skip recreate but still run `git status` under the **Working tree** policy above. On a shared epic branch, prior member-task commits are normal; uncommitted pipeline docs for the current task/epic are also normal.
 
 ### Step 2: Validate `plan.md`
 
@@ -179,10 +181,10 @@ When all plan steps are checked:
 3. Mark FR acceptance criteria mentally or in the report — do not edit requirements checkboxes unless the user asks.
 4. `plan.md`: `updated: <today>`
 5. If any of the following occurred, create `implementation-notes.md` in the task folder and record the incident:
-    - a step failed or had to be reworked — note what the plan got wrong and how it should have been written.
-    - a workaround was used — note what was done, why, and when it should be revisited (`tech-debt: <condition>`).
-    - something discovered during implementation affects `design.md` or architecture — note the signal and which document needs updating.
-    - a decision made during implementation has cross-task or architectural reach — flag it as an **ADR candidate**.
+   - a step failed or had to be reworked — note what the plan got wrong and how it should have been written.
+   - a workaround was used — note what was done, why, and when it should be revisited (`tech-debt: <condition>`).
+   - something discovered during implementation affects `design.md` or architecture — note the signal and which document needs updating.
+   - a decision made during implementation has cross-task or architectural reach — flag it as an **ADR candidate**.
 
    These notes feed **review-task** (known divergences) and **close-task**
    (design reconciliation, ADR creation, follow-up tasks, epic close-out).
