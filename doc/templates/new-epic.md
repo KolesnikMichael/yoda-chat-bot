@@ -1,10 +1,41 @@
 <%*
-const num  = await tp.system.prompt("Epic number (e.g. 1)");
+// Next free EPIC-NNN across active backlog/ and backlog/archive/ (folder names only).
+const _idScan = (prefix, roots) => {
+  const re = new RegExp("^" + prefix + "-(\\d+)");
+  const used = new Set();
+  let max = -1;
+  const visit = (folder) => {
+    if (!folder || !folder.children) return;
+    for (const child of folder.children) {
+      const m = child.name.match(re);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        used.add(n);
+        if (n > max) max = n;
+      }
+      if (child.children) visit(child);
+    }
+  };
+  for (const root of roots) visit(app.vault.getAbstractFileByPath(root));
+  return { max, used };
+};
+
+const _epicIds = _idScan("EPIC", ["backlog"]);
+const suggested = String(_epicIds.max + 1);
+const num  = await tp.system.prompt("Epic number (next free: " + suggested + ")", suggested);
 const name = await tp.system.prompt("Hyphenated name (e.g. chat-context-management)");
 
 if (!num || !name) { new Notice("Epic creation cancelled."); return; }
+if (!/^\d+$/.test(num.trim())) {
+  new Notice("Epic number must be digits only."); return;
+}
+const numInt = parseInt(num.trim(), 10);
+if (_epicIds.used.has(numInt)) {
+  new Notice("EPIC-" + String(numInt).padStart(3, "0") + " already exists (active or archive).");
+  return;
+}
 
-const id     = "EPIC-" + num.padStart(3, "0");
+const id     = "EPIC-" + String(numInt).padStart(3, "0");
 const folder = "backlog/" + id + "-" + name;
 const title  = name.replace(/-/g, " ");
 const today  = tp.date.now("YYYY-MM-DD");

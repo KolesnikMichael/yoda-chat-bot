@@ -97,7 +97,9 @@ first, then the per-task flow for each member.
 
 Authoritative stubs and frontmatter: `templates/new-task.md`, `templates/new-epic.md`,
 `templates/new-adr.md`. Create new tasks/epics from these templates — do not hand-roll
-folder layouts.
+folder layouts. Templater prompts default to the next free numeric ID by scanning
+folder/file names under `backlog/` (including `archive/`) or `design/decisions/`;
+colliding IDs are rejected.
 
 ## Vault invariants
 
