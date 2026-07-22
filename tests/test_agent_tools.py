@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -124,6 +125,11 @@ async def test_scheduler_tool_schedules_reminder():
 
     assert result.success is True
     assert "call mom" in result.output
+    assert result.terminal_facts is not None
+    assert result.terminal_facts.job_kind.value == "message"
+    assert result.terminal_facts.result_kind.value == "scheduled_job"
+    assert result.terminal_facts.schedule
+    assert result.terminal_facts.scheduled_skill_name is None
     assert len(scheduler_api.scheduled) == 1
     job = scheduler_api.scheduled[0]
     assert job["chat_id"] == 42
@@ -339,6 +345,162 @@ async def test_schedule_message_cron():
     assert stored["type"] == "cron"
     assert stored["kind"] == "message"
     assert stored["cron"] == "0 9 * * 1"
+    assert stored["timezone"] == "Europe/Moscow"
+    assert scheduler_api.cron_scheduled[0]["timezone"] == "Europe/Moscow"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "timezone",
+    [None, "Invalid/Zone", "+03:00", "UTC+03:00"],
+)
+async def test_schedule_message_absolute_rejects_bad_timezone_before_side_effects(
+    timezone: str | None,
+):
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    args = {
+        "reminder_text": "call mom",
+        "year": 2030,
+        "month": 6,
+        "day": 15,
+        "hour": 14,
+        "minute": 30,
+    }
+    if timezone is not None:
+        args["timezone"] = timezone
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments=args,
+            metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        )
+    )
+    assert result.success is False
+    assert "timezone" in result.output.lower()
+    assert scheduler_api.scheduled == []
+    assert scheduler_api.cron_scheduled == []
+    assert storage_api.data == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "timezone",
+    [None, "Invalid/Zone", "+03:00"],
+)
+async def test_schedule_message_cron_rejects_bad_timezone_before_side_effects(
+    timezone: str | None,
+):
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    args = {"reminder_text": "vitamins", "cron": "0 9 * * *"}
+    if timezone is not None:
+        args["timezone"] = timezone
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments=args,
+            metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        )
+    )
+    assert result.success is False
+    assert "timezone" in result.output.lower()
+    assert scheduler_api.cron_scheduled == []
+    assert storage_api.data == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "other_mode",
+    [{"delay_minutes": 10}, {"cron": "0 9 * * *"}],
+    ids=["relative", "cron"],
+)
+async def test_schedule_message_rejects_partial_absolute_fields_with_other_mode(
+    other_mode: dict,
+) -> None:
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments={
+                "reminder_text": "call mom",
+                "year": 2030,
+                "timezone": "Europe/Berlin",
+                **other_mode,
+            },
+            metadata={"chat_id": 42},
+        )
+    )
+    assert result.success is False
+    assert scheduler_api.scheduled == []
+    assert scheduler_api.cron_scheduled == []
+    assert storage_api.data == {}
+
+
+@pytest.mark.asyncio
+async def test_schedule_message_absolute_propagates_valid_iana_unchanged():
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments={
+                "reminder_text": "call mom",
+                "year": 2030,
+                "month": 6,
+                "day": 15,
+                "hour": 14,
+                "minute": 30,
+                "timezone": "America/New_York",
+            },
+            metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        )
+    )
+    assert result.success is True
+    assert scheduler_api.scheduled[0]["run_date"].tzinfo is not None
+    stored = json.loads(list(storage_api.data["active_jobs:42"].values())[0])
+    assert stored["timezone"] == "America/New_York"
+
+
+@pytest.mark.asyncio
+async def test_schedule_message_rejects_invalid_timezone_even_with_profile_fallback():
+    """Invalid/offset identity must fail before side effects; profile is not a substitute."""
+    from yoda.mind.agent.tools.schedule_message_tool import ScheduleMessageTool
+
+    scheduler_api = FakeSchedulerApi()
+    storage_api = FakeStorageApi()
+    tool = ScheduleMessageTool(scheduler_api=scheduler_api, storage_api=storage_api)
+    result = await tool.execute(
+        ToolCall(
+            tool_name="schedule_message",
+            arguments={
+                "reminder_text": "call mom",
+                "year": 2030,
+                "month": 6,
+                "day": 15,
+                "hour": 14,
+                "minute": 30,
+                "timezone": "Not/AZone",
+            },
+            metadata={"chat_id": 42, "profile_timezone": "Europe/Moscow"},
+        )
+    )
+    assert result.success is False
+    assert scheduler_api.scheduled == []
+    assert storage_api.data == {}
 
 
 @pytest.mark.asyncio
@@ -415,6 +577,71 @@ async def test_update_profile_saves_skill_preferences():
     assert result.success is True
     stored = json.loads(storage_api.data["user_profiles"]["123@42"])
     assert stored["skill_preferences"] == {"web_search": ["accuweather.com"]}
+
+
+@pytest.mark.asyncio
+async def test_update_profile_accepts_skill_preferences_to_add():
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage_api = FakeStorageApi()
+    memory = MemoryProvider(storage_api=storage_api)
+    tool = UpdateProfileTool(memory_provider=memory)
+
+    call = ToolCall(
+        tool_name="update_profile",
+        arguments={
+            "fields": {
+                "skill_preferences_to_add": {
+                    "search_web": ["prefer Reuters"],
+                },
+            },
+        },
+        metadata={"user_id": 123, "chat_id": 42},
+    )
+
+    result = await tool.execute(call)
+
+    assert result.success is True
+    stored = json.loads(storage_api.data["user_profiles"]["123@42"])
+    assert stored["skill_preferences"]["search_web"] == ["prefer Reuters"]
+
+
+@pytest.mark.asyncio
+async def test_update_profile_logs_preference_content_at_debug_only(caplog):
+    from yoda.mind.agent.tools.update_profile_tool import UpdateProfileTool
+    from yoda.mind.memory.memory import MemoryProvider
+
+    storage_api = FakeStorageApi()
+    tool = UpdateProfileTool(
+        memory_provider=MemoryProvider(storage_api=storage_api),
+    )
+    marker = "private source preference"
+    call = ToolCall(
+        tool_name="update_profile",
+        arguments={
+            "fields": {
+                "skill_preferences_to_add": {
+                    "search_web": [marker],
+                },
+            },
+        },
+        metadata={"user_id": 123, "chat_id": 42},
+    )
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="yoda.mind.agent.tools.update_profile_tool",
+    ):
+        result = await tool.execute(call)
+
+    assert result.success is True
+    content_records = [
+        record for record in caplog.records
+        if marker in record.getMessage()
+    ]
+    assert content_records
+    assert all(record.levelno == logging.DEBUG for record in content_records)
 
 
 @pytest.mark.asyncio
@@ -655,12 +882,14 @@ class FakeTavilyApi:
         max_results: int = 5,
         search_depth: str = "basic",
         topic: str = "general",
+        include_domains: list[str] | None = None,
     ):
         self.last_search_kwargs = {
             "query": query,
             "max_results": max_results,
             "search_depth": search_depth,
             "topic": topic,
+            "include_domains": include_domains,
         }
         if self.search_error:
             raise self.search_error
@@ -718,6 +947,43 @@ async def test_web_search_tool_empty_results():
 
     assert result.success is True
     assert "No results" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_forwards_include_domains():
+    from yoda.mind.agent.tools.web_search_tool import WebSearchParams, WebSearchTool
+
+    schema = WebSearchParams.model_json_schema()
+    assert "include_domains" in schema["properties"]
+
+    fake = FakeTavilyApi()
+    fake.search_response = {"results": []}
+    tool = WebSearchTool(tavily_api=fake)
+    call = ToolCall(
+        tool_name="web_search",
+        arguments={
+            "query": "forecast",
+            "include_domains": ["accuweather.com", "weather.com"],
+        },
+    )
+    result = await tool.execute(call)
+    assert result.success is True
+    assert fake.last_search_kwargs["include_domains"] == [
+        "accuweather.com",
+        "weather.com",
+    ]
+    assert "No results" in result.output
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_omits_include_domains_when_none():
+    from yoda.mind.agent.tools.web_search_tool import WebSearchTool
+
+    fake = FakeTavilyApi()
+    tool = WebSearchTool(tavily_api=fake)
+    call = ToolCall(tool_name="web_search", arguments={"query": "news"})
+    await tool.execute(call)
+    assert fake.last_search_kwargs["include_domains"] is None
 
 
 @pytest.mark.asyncio
@@ -961,6 +1227,10 @@ async def test_delete_user_data_removes_everything():
     assert result.success is True
     assert "user record" in result.output
     assert "2 profile(s)" in result.output
+    assert result.terminal_facts is not None
+    assert result.terminal_facts.result_kind.value == "user_data"
+    assert "redis" not in result.terminal_facts.summary.lower()
+    assert "active_jobs" not in result.terminal_facts.summary
     assert "2 scheduled job(s)" in result.output
     assert "private chat metadata" in result.output
     assert memory.forget_calls == [100]
@@ -1135,6 +1405,10 @@ async def test_send_picture_success_deletes_file(tmp_path):
     assert "red balloon" in result.output.lower()
     assert "description:" in result.output.lower()
     assert not img.exists()
+    assert result.terminal_facts is not None
+    assert result.terminal_facts.result_kind.value == "picture_sent"
+    assert "/tmp" not in result.terminal_facts.summary
+    assert str(img) not in result.terminal_facts.summary
 
 
 @pytest.mark.asyncio
@@ -1156,6 +1430,7 @@ async def test_send_picture_missing_file(tmp_path):
     result = await tool.execute(call)
     assert result.success is False
     assert "not found" in result.output.lower()
+    assert result.terminal_facts is None
 
 
 @pytest.mark.asyncio

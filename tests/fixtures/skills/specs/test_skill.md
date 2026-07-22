@@ -1,6 +1,13 @@
 ---
 name: test_skill
 description: A test skill for unit tests.
+purpose: Exercise catalog loading in unit tests.
+when_to_use:
+  - Running automated tests that need a public skill with tools.
+do_not_use_when:
+  - Production user requests that need a real skill.
+selection_examples:
+  - '"run unit test" -> use'
 required_inputs:
   query: "The search query"
 tools:

@@ -1,5 +1,7 @@
 import logging
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from yoda.api.tavily_api import TavilyApi
@@ -11,15 +13,20 @@ logger = logging.getLogger(__name__)
 
 class WebSearchParams(BaseModel):
     query: str
-    search_depth: str = Field(
+    search_depth: Literal["basic", "advanced"] = Field(
         default="basic",
         description='Search depth: "basic" or "advanced"',
     )
-    topic: str = Field(
+    topic: Literal["general", "news", "finance"] = Field(
         default="general",
         description='Topic: "general", "news", or "finance"',
     )
     max_results: int = Field(default=5, ge=0, le=20)
+    include_domains: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional non-empty list of exact domains to restrict search",
+    )
 
 
 class WebSearchTool(Tool):
@@ -45,6 +52,7 @@ class WebSearchTool(Tool):
                 max_results=params.max_results,
                 search_depth=params.search_depth,
                 topic=params.topic,
+                include_domains=params.include_domains,
             )
         except Exception as e:
             logger.warning("web_search failed: %s", e, exc_info=True)

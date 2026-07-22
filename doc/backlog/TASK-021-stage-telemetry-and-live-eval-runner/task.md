@@ -2,11 +2,11 @@
 id: TASK-021
 epic: EPIC-002
 title: "stage telemetry and live eval runner"
-status: todo
+status: done
 priority: medium
 size: M
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-22
 tags:
   - telemetry
   - evaluation

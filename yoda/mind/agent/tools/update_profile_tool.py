@@ -13,13 +13,17 @@ ALLOWED_FIELDS = {
     "location", "timezone", "occupation",
     "interests", "facts",
     "skill_preferences",
+    "skill_preferences_to_add",
 }
 
 
 class UpdateProfileParams(BaseModel):
     fields: dict = Field(
-        description="Dictionary of profile fields to update, "
-        "e.g. {\"timezone\": \"Europe/Moscow\", \"location\": \"Saint Petersburg\"}"
+        description=(
+            "Dictionary of profile fields to update. Use canonical skill-name "
+            "keys under skill_preferences or skill_preferences_to_add "
+            '(e.g. {"skill_preferences_to_add": {"search_web": ["prefer Reuters"]}}).'
+        ),
     )
 
 
@@ -64,7 +68,7 @@ class UpdateProfileTool(Tool):
         await self._memory.update_user_profile(user_id, chat_id, params.fields)
 
         updated = ", ".join(f"{k}={v}" for k, v in params.fields.items())
-        logger.info(f"Updated profile for user {user_id}@{chat_id}: {updated}")
+        logger.debug(f"Updated profile for user {user_id}@{chat_id}: {updated}")
         return ToolResult(
             tool_name=self.name,
             output=f"Profile updated: {updated}",

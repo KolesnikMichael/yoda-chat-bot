@@ -223,7 +223,9 @@ class SummarizerCore:
                     if cleaned_prefs:
                         preferences[skill_name.strip()] = cleaned_prefs
                 if preferences:
-                    result[key] = preferences
+                    result[key] = SummarizerCore._canonicalize_skill_preferences(
+                        preferences,
+                    )
 
         return result
 
@@ -269,8 +271,35 @@ class SummarizerCore:
                     if kept_prefs:
                         preferences[skill_name] = kept_prefs
                 if preferences:
-                    result[key] = preferences
+                    result[key] = SummarizerCore._canonicalize_skill_preferences(
+                        preferences,
+                    )
 
+        return result
+
+    @staticmethod
+    def _canonicalize_skill_preferences(
+        preferences: dict[str, list[str]],
+    ) -> dict[str, list[str]]:
+        """Map legacy web_search preference writes onto search_web."""
+        result: dict[str, list[str]] = {}
+        for skill_name, values in preferences.items():
+            if skill_name == "web_search":
+                continue
+            result[skill_name] = list(values)
+        if "web_search" in preferences:
+            legacy = list(preferences.get("web_search") or [])
+            canonical = list(result.get("search_web") or [])
+            merged: list[str] = []
+            seen: set[str] = set()
+            for item in canonical + legacy:
+                key = item.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(item)
+            if merged:
+                result["search_web"] = merged
         return result
 
 

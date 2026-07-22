@@ -4,13 +4,21 @@ from typing import TypedDict
 from pydantic import BaseModel
 
 from yoda.mind.memory.data.conversation import Conversation
+from yoda.mind.memory.data.message import MessageKind
 from yoda.mind.data.routing_context import (
     RoutingContext,
     format_recent_messages_block,
 )
+from yoda.mind.evaluation.data import DiagnosticOutcome, StageDiagnostic, StageName
+from yoda.mind.evaluation.prompt_identity_core import PromptIdentityCore
+from yoda.mind.evaluation.telemetry_core import RoutingTelemetryCore
 from yoda.mind.perception.language import LanguageProvider
 
 logger = logging.getLogger(__name__)
+
+_VISIBLE_KINDS: frozenset[MessageKind] = frozenset({"user", "assistant"})
+
+INTENT_CLASSIFIER_PROMPT_ID = "intent_classifier/v1"
 
 INTENT_CLASSIFICATION_PROMPT = (
     "Classify the user's intent from one or more messages. "
@@ -69,7 +77,10 @@ class CognitionCore:
             msgs = msgs[:-exclude_trailing]
         if not msgs:
             return []
-        tail = msgs[-limit:]
+        visible = [m for m in msgs if m.kind in _VISIBLE_KINDS]
+        if not visible:
+            return []
+        tail = visible[-limit:]
         return [m.to_llm_dict() for m in tail]
 
     @staticmethod
@@ -147,5 +158,35 @@ class CognitionProvider:
             f"Intent classification: '{routing.current_user_text[:80]}' -> "
             f"{result.intent}")
         if result.intent in ("agent_task", "chat"):
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.SUCCESS,
+                detail=result.intent,
+            )
             return result.intent
+        self._emit_intent_diagnostic(
+            DiagnosticOutcome.SUCCESS,
+            detail="pass",
+        )
         return "pass"
+
+    def _emit_intent_diagnostic(
+        self,
+        outcome: DiagnosticOutcome,
+        *,
+        detail: str | None = None,
+    ) -> None:
+        diagnostic = StageDiagnostic(
+            stage=StageName.INTENT,
+            outcome=outcome,
+            model_id=self._llm.model_name,
+            prompts=(PromptIdentityCore.intent_identity(),),
+            detail=detail,
+        )
+        if outcome in (
+            DiagnosticOutcome.REJECTED,
+            DiagnosticOutcome.FAILED,
+            DiagnosticOutcome.EXHAUSTED,
+        ):
+            logger.warning(RoutingTelemetryCore.format_warning(diagnostic))
+        else:
+            logger.info(RoutingTelemetryCore.format_info(diagnostic))

@@ -2,7 +2,7 @@
 id: TASK-010
 epic: EPIC-002
 title: "only visible kinds for intent context"
-status: todo
+status: done
 priority: medium
 size: XS
 created: 2026-06-14

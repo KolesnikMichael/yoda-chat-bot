@@ -8,6 +8,17 @@ from typing import TYPE_CHECKING
 
 from yoda.mind.memory.data.pending_message import PendingMessage
 from yoda.mind.data.routing_context import RoutingContext
+from yoda.mind.agent.core.delivery_core import DeliveryCore
+from yoda.mind.agent.core.outcome_core import OutcomeCore
+from yoda.mind.agent.data.agent_data import AgentResult, RequestConstraints
+from yoda.mind.agent.data.outcome_data import (
+    SafeFailureCategory,
+    StaticMessageDelivery,
+    UserOperation,
+)
+from yoda.mind.evaluation.data import DiagnosticOutcome, StageDiagnostic, StageName
+from yoda.mind.evaluation.prompt_identity_core import PromptIdentityCore
+from yoda.mind.evaluation.telemetry_core import RoutingTelemetryCore
 
 from .affect import AffectCore, AffectProvider
 from .cognition import CognitionCore, CognitionProvider
@@ -16,7 +27,7 @@ from .perception.language import LanguageProvider
 from .perception.perception import Perception
 
 if TYPE_CHECKING:
-    from yoda.mind.agent.agent_provider import AgentProvider
+    from yoda.mind.agent.agent import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +40,7 @@ class Mind:
         memory_provider: MemoryProvider,
         affect_provider: AffectProvider,
         cognition_provider: CognitionProvider | None = None,
-        agent_provider: AgentProvider | None = None,
+        agent: Agent | None = None,
         public_skill_descriptions: list[str] | None = None,
     ):
         self.language_provider = language_provider
@@ -37,11 +48,10 @@ class Mind:
         self.memory_provider = memory_provider
         self.affect_provider = affect_provider
         self.cognition_provider = cognition_provider
-        self.agent_provider = agent_provider
+        self.agent = agent
         self._message_sender = None
         self._capabilities_block = self._build_capabilities_block(
             public_skill_descriptions or [])
-
     @staticmethod
     def _build_capabilities_block(descriptions: list[str]) -> str:
         if not descriptions:
@@ -104,11 +114,11 @@ class Mind:
         routing = CognitionCore.build_routing_context(perceived, conversation)
         intent = await self._classify_intent(chat_id, routing)
 
-        if intent == "agent_resume" and self.agent_provider:
+        if intent == "agent_resume" and self.agent:
             await self._handle_agent_resume(
                 chat_id, routing.current_user_text, system_prompt, conversation)
 
-        elif intent == "agent_task" and self.agent_provider:
+        elif intent == "agent_task" and self.agent:
             user_id = batch[0].user_id
             await self._handle_agent_task(
                 chat_id, user_id, routing, system_prompt, conversation)
@@ -128,18 +138,20 @@ class Mind:
         user_id: int,
         skill_name: str,
         distilled_task: str,
+        request_constraints: RequestConstraints | None = None,
     ) -> None:
-        if not self.agent_provider:
-            logger.error("execute_scheduled_task called without agent_provider")
+        if not self.agent:
+            logger.error("execute_scheduled_task called without agent")
             return
 
         profile = await self.memory_provider.get_user_profile(user_id, chat_id)
-        result = await self.agent_provider.run_with_skill(
+        result = await self.agent.run_with_skill(
             skill_name=skill_name,
             task=distilled_task,
             profile=profile,
             chat_id=chat_id,
             user_id=user_id,
+            request_constraints=request_constraints or RequestConstraints(),
         )
 
         emotional_state = self.affect_provider.get_emotional_state()
@@ -151,7 +163,7 @@ class Mind:
         await self._handle_agent_result(
             chat_id, result, system_prompt, conversation)
 
-    async def notify_scheduled_failure(self, chat_id: int, brief: str) -> None:
+    async def notify_scheduled_failure(self, chat_id: int) -> None:
         emotional_state = self.affect_provider.get_emotional_state()
         chat_type = CognitionCore.determine_chat_type(0, chat_id)
         system_prompt = AffectCore.build_system_prompt(
@@ -159,25 +171,16 @@ class Mind:
         )
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
-        line = (
-            f"SCHEDULED TASK FAILED: {brief}. "
-            f"Tell the user briefly in your voice. "
-            f"Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        outcome = OutcomeCore.failure(
+            UserOperation.REQUESTED_WORK,
+            SafeFailureCategory.TRANSIENT,
         )
-        conversation, messages = await self.memory_provider.append_message(
-            conversation=conversation,
+        await self._deliver_via_core(
             chat_id=chat_id,
-            kind="task_result",
-            role="system",
-            line=line,
+            result=outcome,
             system_prompt=system_prompt,
-            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+            conversation=conversation,
         )
-        self.memory_provider.save_conversation(conversation)
-
-        if messages:
-            await self._reply_and_send(
-                chat_id, messages, system_prompt, conversation)
 
     async def deliver_scheduled_reminder(self, chat_id: int, user_id: int, reminder_text: str) -> None:
         emotional_state = self.affect_provider.get_emotional_state()
@@ -186,21 +189,12 @@ class Mind:
             emotional_state, chat_type=chat_type)
         conversation = self.memory_provider.get_conversation(chat_id=chat_id)
 
-        line = f"SCHEDULED REMINDER: {reminder_text}. Deliver this reminder naturally. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
-        conversation, messages = await self.memory_provider.append_message(
-            conversation=conversation,
+        await self._deliver_via_core(
             chat_id=chat_id,
-            kind="task_result",
-            role="system",
-            line=line,
+            result=StaticMessageDelivery(reminder_text=reminder_text),
             system_prompt=system_prompt,
-            timestamp=f"{dtm.datetime.now(dtm.UTC)}",
+            conversation=conversation,
         )
-        self.memory_provider.save_conversation(conversation)
-
-        if messages:
-            await self._reply_and_send(
-                chat_id, messages, system_prompt, conversation)
 
     @staticmethod
     def _cleanup_temp_files(batch: list[PendingMessage]) -> None:
@@ -218,13 +212,25 @@ class Mind:
         chat_id: int,
         routing: RoutingContext,
     ) -> str:
-        if not self.agent_provider:
+        if not self.agent:
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.BYPASSED,
+                detail="no_agent",
+            )
             return "chat"
 
-        if await self.agent_provider.has_pending_session(chat_id):
+        if await self.agent.has_pending_session(chat_id):
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.BYPASSED,
+                detail="agent_resume",
+            )
             return "agent_resume"
 
         if not routing.current_user_text or self.cognition_provider is None:
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.NOT_APPLICABLE,
+                detail="no_classifier",
+            )
             return "chat"
 
         try:
@@ -232,7 +238,65 @@ class Mind:
         except Exception:
             logger.warning(
                 "Intent classification failed, defaulting to chat", exc_info=True)
+            self._emit_intent_diagnostic(
+                DiagnosticOutcome.REJECTED,
+                detail="rejected_fallback_chat",
+                include_prompt=True,
+            )
             return "chat"
+
+    def _emit_intent_diagnostic(
+        self,
+        outcome: DiagnosticOutcome,
+        *,
+        detail: str | None = None,
+        include_prompt: bool = False,
+    ) -> None:
+        prompts = (
+            (PromptIdentityCore.intent_identity(),) if include_prompt else ()
+        )
+        model_id = (
+            self.language_provider.model_name
+            if include_prompt
+            else None
+        )
+        diagnostic = StageDiagnostic(
+            stage=StageName.INTENT,
+            outcome=outcome,
+            model_id=model_id,
+            prompts=prompts,
+            detail=detail,
+        )
+        if outcome in (
+            DiagnosticOutcome.REJECTED,
+            DiagnosticOutcome.FAILED,
+            DiagnosticOutcome.EXHAUSTED,
+        ):
+            logger.warning(RoutingTelemetryCore.format_warning(diagnostic))
+        else:
+            logger.info(RoutingTelemetryCore.format_info(diagnostic))
+
+    def _emit_delivery_diagnostic(
+        self,
+        outcome: DiagnosticOutcome,
+        *,
+        detail: str | None = None,
+    ) -> None:
+        diagnostic = StageDiagnostic(
+            stage=StageName.DELIVERY,
+            outcome=outcome,
+            model_id=self.language_provider.model_name,
+            prompts=(PromptIdentityCore.delivery_identity(),),
+            detail=detail,
+        )
+        if outcome in (
+            DiagnosticOutcome.FAILED,
+            DiagnosticOutcome.REJECTED,
+            DiagnosticOutcome.EXHAUSTED,
+        ):
+            logger.warning(RoutingTelemetryCore.format_warning(diagnostic))
+        else:
+            logger.info(RoutingTelemetryCore.format_info(diagnostic))
 
     async def _handle_agent_task(
         self,
@@ -243,7 +307,7 @@ class Mind:
         conversation,
     ) -> None:
         profile = await self.memory_provider.get_user_profile(user_id, chat_id)
-        result = await self.agent_provider.run(
+        result = await self.agent.run(
             task=routing.current_user_text,
             profile=profile,
             chat_id=chat_id,
@@ -260,25 +324,47 @@ class Mind:
         system_prompt: str,
         conversation,
     ) -> None:
-        result = await self.agent_provider.resume(chat_id, user_text)
+        result = await self.agent.resume(chat_id, user_text)
         await self._handle_agent_result(
             chat_id, result, system_prompt, conversation)
 
     async def _handle_agent_result(
-        self, chat_id: int, result, system_prompt: str, conversation,
+        self, chat_id: int, result: AgentResult, system_prompt: str, conversation,
     ) -> None:
-        if result.clarification:
-            line = f"Ask the user (rephrase naturally in your voice): {result.clarification}"
-        elif result.answer:
-            tools = ", ".join(result.tools_used) if result.tools_used else "none"
-            line = (
-                f"Agent completed a task. Tools used: {tools}. "
-                f"Result: {result.answer}. Communicate this to the user naturally"
-            )
+        if result.clarification is not None:
+            payload_source = result.clarification
+        elif result.outcome is not None:
+            payload_source = result.outcome
         else:
             return
 
-        line = f"{line}. Current time: {dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        await self._deliver_via_core(
+            chat_id=chat_id,
+            result=payload_source,
+            system_prompt=system_prompt,
+            conversation=conversation,
+        )
+
+    async def _deliver_via_core(
+        self,
+        *,
+        chat_id: int,
+        result,
+        system_prompt: str,
+        conversation,
+    ) -> None:
+        payload = DeliveryCore.build_payload(result)
+        delivery_outcome = (
+            DiagnosticOutcome.FAILED
+            if payload.status == "failure"
+            else DiagnosticOutcome.SUCCESS
+        )
+        self._emit_delivery_diagnostic(
+            delivery_outcome,
+            detail=payload.status,
+        )
+        utc_now = f"{dtm.datetime.now(dtm.UTC):%Y-%m-%d %H:%M UTC}"
+        line = DeliveryCore.build_instruction(payload, current_time_utc=utc_now)
 
         conversation, messages = await self.memory_provider.append_message(
             conversation=conversation,

@@ -344,6 +344,14 @@ def test_infer_kind_cases():
         {"role": "system", "text": "Agent completed a task. Tools: none", "user_id": None},
         is_first=False, chat_id=1, message_index=2,
     ) == "task_result"
+    assert MemoryCore.infer_kind(
+        {
+            "role": "system",
+            "text": "GROUNDED DELIVERY: Render only the authorized meaning.",
+            "user_id": None,
+        },
+        is_first=False, chat_id=1, message_index=2,
+    ) == "task_result"
 
 
 def test_infer_kind_unknown_prefix_raises():
@@ -722,6 +730,85 @@ async def test_user_profile_legacy_load_without_skill_preferences():
     profile = await memory_provider.get_user_profile(user_id=1, chat_id=1)
 
     assert profile.skill_preferences == {}
+
+
+@pytest.mark.asyncio
+async def test_user_profile_dual_key_load_does_not_mutate_persisted_json():
+    from yoda.mind.agent.core.execution_context import ExecutionContextCore
+
+    storage = FakeStorageApi()
+    raw = {
+        "preferred_name": "Luke",
+        "skill_preferences": {
+            "search_web": ["Prefer Reuters"],
+            "web_search": ["prefer reuters", "prefer BBC"],
+        },
+        "schema_version": 2,
+    }
+    storage.data["user_profiles"] = {"1@1": json.dumps(raw)}
+    memory_provider = MemoryProvider(storage_api=storage)
+
+    profile = await memory_provider.get_user_profile(user_id=1, chat_id=1)
+    assert ExecutionContextCore.effective_skill_preferences(
+        profile, "search_web",
+    ) == ["Prefer Reuters", "prefer BBC"]
+
+    stored = json.loads(storage.data["user_profiles"]["1@1"])
+    assert stored["skill_preferences"] == raw["skill_preferences"]
+
+
+@pytest.mark.asyncio
+async def test_user_profile_only_legacy_web_search_still_readable():
+    from yoda.mind.agent.core.execution_context import ExecutionContextCore
+
+    storage = FakeStorageApi()
+    storage.data["user_profiles"] = {
+        "1@1": json.dumps({
+            "skill_preferences": {"web_search": ["prefer BBC"]},
+            "schema_version": 2,
+        }),
+    }
+    memory_provider = MemoryProvider(storage_api=storage)
+    profile = await memory_provider.get_user_profile(user_id=1, chat_id=1)
+    assert ExecutionContextCore.effective_skill_preferences(
+        profile, "search_web",
+    ) == ["prefer BBC"]
+    stored = json.loads(storage.data["user_profiles"]["1@1"])
+    assert stored["skill_preferences"] == {"web_search": ["prefer BBC"]}
+
+
+@pytest.mark.asyncio
+async def test_user_profile_only_canonical_search_web_reads_and_writes_canonical():
+    from yoda.mind.agent.core.execution_context import ExecutionContextCore
+
+    storage = FakeStorageApi()
+    storage.data["user_profiles"] = {
+        "1@1": json.dumps({
+            "skill_preferences": {"search_web": ["prefer Reuters"]},
+            "schema_version": 2,
+        }),
+    }
+    memory_provider = MemoryProvider(storage_api=storage)
+
+    profile = await memory_provider.get_user_profile(user_id=1, chat_id=1)
+    assert ExecutionContextCore.effective_skill_preferences(
+        profile, "search_web",
+    ) == ["prefer Reuters"]
+
+    await memory_provider.update_user_profile(
+        user_id=1,
+        chat_id=1,
+        user_profile={
+            "skill_preferences_to_add": {
+                "search_web": ["prefer AP"],
+            },
+        },
+    )
+    stored = json.loads(storage.data["user_profiles"]["1@1"])
+    assert stored["skill_preferences"] == {
+        "search_web": ["prefer Reuters", "prefer AP"],
+    }
+    assert "web_search" not in stored["skill_preferences"]
 
 
 @pytest.mark.asyncio

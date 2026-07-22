@@ -1,6 +1,15 @@
 ---
 name: manage_jobs
 description: List, inspect, or cancel the user's scheduled jobs (reminders, recurring tasks, etc).
+purpose: List, inspect, or cancel existing scheduled jobs.
+when_to_use:
+  - The user asks what reminders/tasks are scheduled or asks to cancel them.
+do_not_use_when:
+  - The user asks to create a new reminder or recurring task.
+  - The user asks to inspect or delete all stored personal data.
+selection_examples:
+  - '"Какие у меня напоминания?" -> use'
+  - '"Напомни завтра позвонить маме" -> do not use; schedule_message'
 required_inputs:
   action: "What the user wants to do — list jobs, cancel a specific job, or cancel all"
 tools:

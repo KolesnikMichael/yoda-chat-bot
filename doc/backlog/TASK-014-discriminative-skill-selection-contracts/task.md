@@ -2,7 +2,7 @@
 id: TASK-014
 epic: EPIC-002
 title: "discriminative skill selection contracts"
-status: todo
+status: done
 priority: high
 size: M
 created: 2026-07-20

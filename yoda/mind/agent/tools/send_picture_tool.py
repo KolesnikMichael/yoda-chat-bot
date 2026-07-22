@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from yoda.mind.agent.data.agent_data import ToolCall, ToolResult
+from yoda.mind.agent.data.outcome_data import ResultKind, TerminalResultFacts
 from yoda.mind.agent.tools.tool_port import Tool
 
 logger = logging.getLogger(__name__)
@@ -82,4 +83,12 @@ class SendPictureTool(Tool):
             "Keep this description in mind if the user discusses the image; do not read it "
             "verbatim to the user or paste the full text into chat."
         )
-        return ToolResult(tool_name=self.name, output=out, success=True)
+        return ToolResult(
+            tool_name=self.name,
+            output=out,
+            success=True,
+            terminal_facts=TerminalResultFacts(
+                result_kind=ResultKind.PICTURE_SENT,
+                summary="A picture was sent to the chat.",
+            ),
+        )

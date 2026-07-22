@@ -1,7 +1,7 @@
 ---
 id: EPIC-002
 doc: design
-updated: 2026-07-20
+updated: 2026-07-22
 ---
 
 # EPIC-002: agent routing reliability — Master design
@@ -63,7 +63,7 @@ IODA ownership:
 ### Stage-local correctness
 
 The pipeline has five independently testable decisions:
-1. **Intent routing:** chat, agent task, deterministic command, or resume.
+1. **Intent routing:** chat, agent task, or resume.
 2. **Skill selection:** which capability owns the requested outcome.
 3. **Tool planning:** which tools and arguments implement the selected workflow.
 4. **Execution:** what tools/jobs actually succeeded.
@@ -185,15 +185,6 @@ until prompt evaluation demonstrates the need, and never derive a timezone
 solely from a current UTC offset. Existing `ZoneInfo`/`CronTrigger` behavior is
 retained and covered with transition tests. (ADR candidate: no)
 
-### Decision 6: Handle interface commands deterministically
-
-**Context:** Commands such as `/reset` have exact interface semantics and should
-not depend on probabilistic chat/agent classification.
-
-**Choice:** Recognized commands are intercepted by the Portal before LLM intent
-routing. Unknown slash commands follow an explicit Portal fallback policy.
-(ADR candidate: no)
-
 ### Decision 7: Evaluate stages, not only end-to-end replies
 
 **Context:** Unit tests currently validate prompt assembly and mocked decision
@@ -202,7 +193,7 @@ sequences but do not measure real routing or skill-choice accuracy.
 **Choice:** Maintain a versioned multilingual corpus with expected intent,
 skill, tool/job kind, key arguments, and allowed user-visible claims. Report
 stage-specific failures and include contrastive static/dynamic scheduling,
-refinements, suspend/resume, malformed model output, preferences, and commands.
+refinements, suspend/resume, malformed model output, and preferences.
 
 Use a hybrid execution model:
 - deterministic tests with recorded/mock decisions run in normal CI and verify
@@ -274,9 +265,7 @@ yet assign member-task IDs:
 5. **Grounded outcomes:** distinguish message/task results structurally and
    constrain user-visible delivery and safe failure guidance to the actual
    completed operation/failure category.
-6. **Deterministic commands:** move recognized interface commands out of LLM
-   routing.
-7. **Evaluation and observability:** consolidate the regression corpus,
+6. **Evaluation and observability:** consolidate the regression corpus,
    stage-labelled telemetry, and the July 20 scenario as an end-to-end fixture.
 
 Steps 2 and 3 establish the first meaningful reliability checkpoint. Steps 4
@@ -285,7 +274,16 @@ developed after the stage contracts stabilize.
 
 ## Open questions
 
-No unresolved master-level decisions remain from the initial outline. Exact
-class/file extraction for the `Agent` Integration, corpus thresholds, and safe
-failure wording are member-task design details constrained by Decisions 7, 9,
-and 10.
+None remaining for this epic. Member-task details that were parked here are
+closed:
+
+| Former open item | Resolution |
+|------------------|------------|
+| `Agent` Integration class/file extraction | [[TASK-015-phase-protocol-and-agent-integration/task\|TASK-015]] |
+| Safe failure wording | [[TASK-018-grounded-outcomes-and-safe-failures/task\|TASK-018]] |
+| Deterministic corpus + stage scoring | [[TASK-020-deterministic-routing-evaluation-corpus/task\|TASK-020]] |
+| Stage telemetry + on-demand live runner | [[TASK-021-stage-telemetry-and-live-eval-runner/task\|TASK-021]] |
+
+**Explicitly carried over (out of epic scope):** live-eval release thresholds /
+PR or CI gating for remote model scores — runner stays opt-in
+(`python -m yoda.mind.evaluation.live_runner`).

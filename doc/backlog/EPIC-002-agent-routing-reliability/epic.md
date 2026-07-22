@@ -2,11 +2,11 @@
 id: EPIC-002
 doc: epic
 title: "agent routing reliability"
-status: todo
+status: done
 priority: high
 branch: feat/EPIC-002-agent-routing-reliability
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-22
 tags:
   - agent
   - routing
@@ -44,7 +44,6 @@ Outcomes:
   cannot claim that a static reminder will perform a recurring live search.
 - A repeatable multilingual evaluation suite protects routing, skill choice,
   tool plans, suspend/resume, and truthful completion against regressions.
-- Deterministic interface commands bypass probabilistic intent classification.
 
 ## Delivery profile
 
@@ -83,7 +82,6 @@ the next dependent stage consumes it.
 | [[TASK-016-execution-preferences-and-domain-constraints/task\|TASK-016]] | execution preferences and domain constraints | M | Skill-scoped preferences and explicit request constraints reach execution, with canonical keys and strict domain enforcement. |
 | [[TASK-017-iana-timezone-execution-guidance/task\|TASK-017]] | IANA timezone execution guidance | S | Scheduling infers and persists unambiguous IANA timezones, clarifying only genuine ambiguity and preserving DST semantics. |
 | [[TASK-018-grounded-outcomes-and-safe-failures/task\|TASK-018]] | grounded outcomes and safe failures | M | Structured outcomes constrain completion claims and capability-agnostic failures hide implementation details. |
-| [[TASK-019-deterministic-telegram-commands/task\|TASK-019]] | deterministic Telegram commands | S | Recognized Telegram commands bypass LLM routing and unknown commands follow an explicit fallback. |
 | [[TASK-020-deterministic-routing-evaluation-corpus/task\|TASK-020]] | deterministic routing evaluation corpus | M | A versioned multilingual corpus and stage-scored CI harness cover routing contracts, including the July 20 scenario. |
 | [[TASK-021-stage-telemetry-and-live-eval-runner/task\|TASK-021]] | stage telemetry and live eval runner | M | Stage diagnostics and prompt/model metadata feed a non-blocking live-model evaluation runner. |
 
@@ -97,8 +95,7 @@ graph TD
     T015 --> T017[TASK-017]
     T016 --> T018[TASK-018]
     T017 --> T018
-    T019[TASK-019] --> T020[TASK-020]
-    T018 --> T020
+    T018 --> T020[TASK-020]
     T020 --> T021[TASK-021]
 ```
 
@@ -107,7 +104,7 @@ selection, and a phase-safe IODA orchestration boundary—the first standalone
 reliability checkpoint. After TASK-018, the full motivating scheduled
 dynamic-content scenario is correct through truthful delivery.
 
-**Parallelisation:** TASK-010 and TASK-019 are independent roots. After TASK-015,
+**Parallelisation:** TASK-010 is an independent root. After TASK-015,
 TASK-016 and TASK-017 can proceed in parallel; all members still use the shared
 epic branch and are integrated sequentially.
 
@@ -145,3 +142,8 @@ dv.table(
   requirements, design, plan, and review artifacts are retained.
 - The motivating July 20 session was a test session; no operational job
   cancellation or migration is part of this epic.
+- Closed 2026-07-22: all eight member tasks done (TASK-010, 014–018, 020–021).
+  Shared branch `feat/EPIC-002-agent-routing-reliability` ready to merge to
+  `main` when approved.
+- Post-close follow-ups (tech debt + live-eval UX/settings): 
+  [[backlog/EPIC-002-agent-routing-reliability/follow-up|follow-up.md]]

@@ -1,6 +1,18 @@
-from pydantic import BaseModel
+import json
+import logging
+
+from pydantic import BaseModel, ValidationError
 
 from yoda.api.llm_api import LLMApi
+
+logger = logging.getLogger(__name__)
+
+
+class StructuredOutputError(Exception):
+    """Structured LLM output failed shape/JSON validation (no raw content)."""
+
+    def __str__(self) -> str:
+        return self.__class__.__name__
 
 
 class LanguageProvider:
@@ -11,6 +23,10 @@ class LanguageProvider:
         except KeyError as e:
             raise ValueError(
                 "Language settings missing required 'model_name'") from e
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
 
     async def reply_in_conversation(self, conversation: list[dict]) -> str:
         return await self._llm_api.complete_chat_async(
@@ -23,8 +39,12 @@ class LanguageProvider:
         messages: list[dict],
         response_format: type[BaseModel],
     ) -> BaseModel:
-        return await self._llm_api.parse_chat_async(
-            model_name=self._model_name,
-            messages=messages,
-            response_format=response_format,
-        )
+        try:
+            return await self._llm_api.parse_chat_async(
+                model_name=self._model_name,
+                messages=messages,
+                response_format=response_format,
+            )
+        except (json.JSONDecodeError, ValidationError) as exc:
+            logger.debug("Structured output parse failed")
+            raise StructuredOutputError() from exc

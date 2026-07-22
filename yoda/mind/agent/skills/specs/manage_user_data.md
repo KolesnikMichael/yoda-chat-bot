@@ -2,6 +2,15 @@
 name: manage_user_data
 description: Show or delete all stored user data (profile, jobs, personal info) across all chats.
 public: false
+purpose: Show or permanently delete all stored data for the user across chats.
+when_to_use:
+  - The user requests a data export, asks what is stored about them, or asks to delete/forget all their stored data.
+do_not_use_when:
+  - The user merely corrects one profile field or asks to cancel jobs.
+  - The user says not to mention one conversational topic.
+selection_examples:
+  - '"Покажи всё, что ты хранишь обо мне" -> use'
+  - '"Отмени мои напоминания" -> do not use; manage_jobs'
 required_inputs:
   action: "What the user wants — view their data or delete everything"
 tools:

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.storage_api import StorageApi
 from yoda.mind.agent.data.agent_data import ToolCall, ToolResult
+from yoda.mind.agent.data.outcome_data import ResultKind, TerminalResultFacts
 from yoda.mind.memory.memory import MemoryProvider
 from yoda.mind.agent.tools.job_keys import ACTIVE_JOBS_KEY_PREFIX
 from yoda.mind.agent.tools.tool_port import Tool
@@ -98,4 +99,8 @@ class DeleteUserDataTool(Tool):
             tool_name=self.name,
             output=summary,
             success=True,
+            terminal_facts=TerminalResultFacts(
+                result_kind=ResultKind.USER_DATA,
+                summary="User data deletion completed.",
+            ),
         )

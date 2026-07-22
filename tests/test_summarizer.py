@@ -211,6 +211,30 @@ def test_validate_envelope_happy_path():
     assert validated.summary == "User 42 moved."
     assert validated.topics == ["move"]
     assert validated.profile_updates[42]["location"] == "Berlin"
+    assert validated.profile_updates[42]["skill_preferences_to_add"] == {
+        "search_web": ["weather: accuweather.com"],
+    }
+
+
+def test_validate_envelope_canonicalizes_dual_key_search_prefs():
+    wire = LlmSummarizerEnvelope(
+        summary="prefs",
+        topics=[],
+        profile_updates={
+            "7": {
+                "skill_preferences_to_add": {
+                    "search_web": ["Prefer Reuters"],
+                    "web_search": ["prefer reuters", "use AP"],
+                    "schedule_message": ["short"],
+                },
+            },
+        },
+    )
+    validated = SummarizerCore.validate_envelope(wire)
+    prefs = validated.profile_updates[7]["skill_preferences_to_add"]
+    assert prefs["search_web"] == ["Prefer Reuters", "use AP"]
+    assert prefs["schedule_message"] == ["short"]
+    assert "web_search" not in prefs
 
 
 def test_validate_envelope_empty_profile_updates():
@@ -289,7 +313,7 @@ def test_redact_profile_updates_scalar_and_lists():
         42: {
             "location": "Berlin, Germany",
             "facts_to_add": ["has a dog"],
-            "skill_preferences_to_add": {"web_search": ["safe pref"]},
+            "skill_preferences_to_add": {"search_web": ["safe pref"]},
         },
     }
 
@@ -364,6 +388,9 @@ async def test_summarise_happy_path():
     assert result.participants == [42]
     assert result.skills == ["web_search"]
     assert result.profile_updates[42]["occupation"] == "engineer"
+    assert result.profile_updates[42]["skill_preferences_to_add"] == {
+        "search_web": ["prefers example.com"],
+    }
 
     _, messages, _ = fake.parse_calls[0]
     assert messages[0]["content"] == SUMMARIZER_SYSTEM_PROMPT

@@ -2,7 +2,7 @@
 id: TASK-015
 epic: EPIC-002
 title: "phase protocol and Agent Integration"
-status: todo
+status: done
 priority: high
 size: L
 created: 2026-07-20

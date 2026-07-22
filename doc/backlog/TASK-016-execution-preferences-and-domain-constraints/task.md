@@ -2,9 +2,9 @@
 id: TASK-016
 epic: EPIC-002
 title: "execution preferences and domain constraints"
-status: todo
+status: done
 priority: high
-size: M
+size: L
 created: 2026-07-20
 updated: 2026-07-20
 tags:
