@@ -12,10 +12,11 @@ An epic is a first-class entity, analogous to a task but at a higher level:
 
 ```
 doc/backlog/
-  EPIC-NNN-name/
-    epic.md      ← definition, goals, decomposition map, shared branch, live rollup
-    design.md    ← master design (cross-cutting architecture; source of truth for member tasks)
-  TASK-NNN-slug/ ← flat task folders, each carrying `epic: EPIC-NNN` frontmatter
+  EPIC-NNN-name/   ← active epic only (never create under archive/)
+    epic.md        ← definition, goals, decomposition map, shared branch, live rollup
+    design.md      ← master design (cross-cutting architecture; source of truth for member tasks)
+  archive/         ← frozen historical epics — do not resolve or edit here (see doc/AGENTS.md)
+  TASK-NNN-slug/   ← flat task folders, each carrying `epic: EPIC-NNN` frontmatter
 ```
 
 ## Input (resolve first)
@@ -26,13 +27,15 @@ The user may pass **one** of:
 |-------|------------|
 | Path to `epic.md` | Epic folder = parent directory |
 | Path to epic folder (e.g. `doc/backlog/EPIC-001-chat-context-management/`) | `epic.md` + `design.md` inside |
-| Epic id (`EPIC-001`, `001`, `1`) | Find folder: `doc/backlog/EPIC-{NNN}-*/` (zero-pad to 3 digits) |
+| Epic id (`EPIC-001`, `001`, `1`) | Find folder: `doc/backlog/EPIC-{NNN}-*/` only (exclude `backlog/archive/`) |
 | «decompose EPIC N» / «decompose EPIC-NNN» | Same as epic id |
 
-If multiple folders match or none exist, stop and ask.
+If multiple folders match or none exist, stop and ask. Do **not** look under
+`doc/backlog/archive/` for create/decompose work — archived epics are frozen.
 
 ```bash
-ls -d doc/backlog/EPIC-{NNN}-*   # substitute the zero-padded id, e.g. EPIC-001
+ls -d doc/backlog/EPIC-{NNN}-*   # active epics only; substitute zero-padded id, e.g. EPIC-001
+# never: ls doc/backlog/archive/EPIC-*
 ```
 
 ## Prerequisites

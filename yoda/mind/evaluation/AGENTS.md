@@ -46,7 +46,7 @@ tests/fixtures/routing_evaluation/corpus-v1.json
 | CI scoring contract | `core.py`, `tests/test_routing_evaluation.py` |
 | Live CLI, credentials, artifacts | [doc/runbooks/live-routing-eval.md](../../../doc/runbooks/live-routing-eval.md) |
 | Production telemetry | `telemetry_core.py` |
-| Epic-level eval strategy | [EPIC-002 design](../../../doc/backlog/EPIC-002-agent-routing-reliability/design.md) |
+| Epic-level eval strategy (historical) | [archived EPIC-002 design](../../../doc/backlog/archive/EPIC-002-agent-routing-reliability/design.md) — link only; not SoT |
 
 ## Tests
 

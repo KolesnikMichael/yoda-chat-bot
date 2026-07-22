@@ -10,10 +10,13 @@ doc/                      ← vault root, read from here
 ├── AGENTS.md             ← this file
 ├── backlog/              ← project tasks
 │  ├── main.md            ← operational notes and project backlog
-│  ├── EPIC-NNN-name/     ← epic: a connected set of tasks (optional grouping)
+│  ├── archive/           ← frozen historical epics + their member tasks
+│  │  ├── EPIC-NNN-name/  ← closed epic record (not a source of truth)
+│  │  └── TASK-NNN-name/  ← archived member tasks (moved with their epic)
+│  ├── EPIC-NNN-name/     ← active epic: connected set of tasks
 │  │  ├── epic.md         ← goal, decomposition map, shared branch, live rollup
-│  │  └── design.md       ← master design (cross-cutting; source of truth for member tasks)
-│  └── TASK-NNN-name/     ← single task folder (flat; an epic member carries `epic: EPIC-NNN`)
+│  │  └── design.md       ← master design (cross-cutting; SoT for member tasks)
+│  └── TASK-NNN-name/     ← active task folder (flat; an epic member carries `epic: EPIC-NNN`)
 │     ├── task.md         ← task definition, status, context, and relationships
 │     ├── requirements.md ← what needs to be done and acceptance criteria
 │     ├── design.md       ← how it works, solutions, diagrams
@@ -33,6 +36,25 @@ the `epic:` attribute in `task.md`, not folder nesting. Branch strategy for epic
 members is defined in the epic's `epic.md` (`## Delivery profile`); see **create-epic**
 and **implement-task** skills.
 
+### `backlog/archive/`
+
+Frozen historical backlog: a closed epic folder **and all of its member
+`TASK-*` folders**. **Not** a source of truth for current behavior — that lives
+in `doc/design/` and module `AGENTS.md` files. When archiving an epic, move the
+epic and every member task together.
+
+**Agents must:**
+
+- **Not browse or search** `backlog/archive/` to find context.
+- **Not edit** anything under `backlog/archive/` unless the user explicitly
+  asks to change the archive.
+- **Only open** an archived file when following a **concrete link** from a
+  non-archived document (e.g. `doc/design/*`, an active task, or a module
+  `AGENTS.md`). After reading the linked section, do not explore sibling
+  archive files.
+
+See also [backlog/archive/AGENTS.md](backlog/archive/AGENTS.md).
+
 ## Artifact roles
 
 Always start with `task.md` — it links to the rest.
@@ -46,7 +68,8 @@ Always start with `task.md` — it links to the rest.
 | `review.md` | Plan-compliance gate: `verdict`, findings, follow-ups |
 | `implementation-notes.md` | Optional execution log: incidents, workarounds, ADR candidates |
 | `EPIC-NNN/epic.md` | Epic goal, decomposition, delivery profile, live rollup |
-| `EPIC-NNN/design.md` | Epic master design — cross-cutting architecture |
+| `EPIC-NNN/design.md` | Epic master design — cross-cutting architecture (active epics) |
+| `backlog/archive/` | Frozen historical backlog; link-only access; never SoT |
 | `design/` | Project-level architecture |
 | `design/decisions/` | ADRs |
 | `runbooks/` | Operational procedures |
@@ -79,6 +102,11 @@ folder layouts.
 ## Vault invariants
 
 - Do not change the `backlog/` folder layout without explicit instruction.
-- Cross-cutting epic architecture belongs in the epic master design; member `design.md`
-  files **reference** it, they do not restate decisions.
+- Do not browse or edit `backlog/archive/` except as allowed under
+  [`backlog/archive/`](#backlogarchive) (link-following only; no edits unless
+  the user explicitly requests an archive change).
+- Cross-cutting epic architecture belongs in the **active** epic master design;
+  member `design.md` files **reference** it, they do not restate decisions.
+  After an epic is archived, durable contracts live in `doc/design/` (and ADRs);
+  the archive is historical only.
 - Project ADRs live under `design/decisions/`.

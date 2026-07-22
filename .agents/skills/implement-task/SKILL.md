@@ -45,7 +45,7 @@ git checkout main && git pull
 git status
 ```
 
-**Working tree:** untracked or modified `*.md` files under the **current task folder** are expected — do not treat them as a blocker. If the task has `epic: EPIC-NNN`, the same applies to `doc/backlog/EPIC-{NNN}-*/`. These artifacts ship with the implementation: include them in the same commit(s) as the code when committing. In any other situation or when unsure - STOP and ask the user.
+**Working tree:** untracked or modified `*.md` files under the **current task folder** are expected — do not treat them as a blocker. If the task has `epic: EPIC-NNN`, the same applies to the **active** epic folder `doc/backlog/EPIC-{NNN}-*/` (never `backlog/archive/`). These artifacts ship with the implementation: include them in the same commit(s) as the code when committing. In any other situation or when unsure - STOP and ask the user.
 
 **Resolve the branch (epic takes precedence):**
 

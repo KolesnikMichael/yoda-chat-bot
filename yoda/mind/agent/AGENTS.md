@@ -4,7 +4,11 @@ Two-phase ReAct loop with declarative skills and typed tools.
 
 Code conventions: [../../../AGENTS.md](../../../AGENTS.md)  
 Protocol design (source of truth):
-[EPIC-002 master design](../../../doc/backlog/EPIC-002-agent-routing-reliability/design.md)
+[agent two-phase protocol](../../../doc/design/agent-two-phase-protocol.md)
+([grounded outcomes](../../../doc/design/agent-grounded-outcomes.md),
+[skill selection](../../../doc/design/agent-skill-selection.md),
+[execution constraints](../../../doc/design/agent-execution-constraints.md),
+[timezone scheduling](../../../doc/design/agent-timezone-scheduling.md)).
 
 ## Layout
 
@@ -49,13 +53,18 @@ tools), APIs inside individual tools.
 ## Where to look
 
 | Question | Go to |
-| Two-phase protocol, stage correctness | [EPIC-002 design](../../../doc/backlog/EPIC-002-agent-routing-reliability/design.md) |
-| Phase protocol, suspend/resume | [TASK-015 design](../../../doc/backlog/TASK-015-phase-protocol-and-agent-integration/design.md) |
-| Preferences vs request constraints | [TASK-016 design](../../../doc/backlog/TASK-016-execution-preferences-and-domain-constraints/design.md) |
-| IANA timezone execution | [TASK-017 design](../../../doc/backlog/TASK-017-iana-timezone-execution-guidance/design.md), `skills/specs/schedule_message.md` |
-| Grounded outcomes, delivery | [TASK-018 design](../../../doc/backlog/TASK-018-grounded-outcomes-and-safe-failures/design.md) |
+| Two-phase protocol, stage correctness | [agent two-phase protocol](../../../doc/design/agent-two-phase-protocol.md) |
+| Phase protocol, suspend/resume | [agent two-phase protocol](../../../doc/design/agent-two-phase-protocol.md#suspend--resume) |
+| Skill selection contracts | [agent skill selection](../../../doc/design/agent-skill-selection.md) |
+| Preferences vs request constraints | [agent execution constraints](../../../doc/design/agent-execution-constraints.md) |
+| IANA timezone execution | [agent timezone scheduling](../../../doc/design/agent-timezone-scheduling.md), `skills/specs/schedule_message.md` |
+| Grounded outcomes, delivery | [agent grounded outcomes](../../../doc/design/agent-grounded-outcomes.md) |
+| Agent Integration boundary | [ADR-002](../../../doc/design/decisions/ADR-002-agent-orchestration-is-an-integration.md) |
+| Control-plane / system role | [ADR-003](../../../doc/design/decisions/ADR-003-control-plane-uses-system-role.md) |
+| Evidence-gated safe completion | [ADR-004](../../../doc/design/decisions/ADR-004-evidence-gated-capability-agnostic-completion.md) |
 | Routing evaluation (CI + live) | [evaluation/AGENTS.md](../evaluation/AGENTS.md), [live-routing-eval runbook](../../../doc/runbooks/live-routing-eval.md) |
 | Skill workflow details | `skills/specs/<name>.md` |
+| Historical EPIC-002 (link only) | [archived EPIC-002 design](../../../doc/backlog/archive/EPIC-002-agent-routing-reliability/design.md) — not SoT; do not browse `backlog/archive/` |
 
 ## Invariants
 
@@ -73,7 +82,9 @@ tools), APIs inside individual tools.
 ### Adding a skill
 
 1. Create `skills/specs/<name>.md` — YAML frontmatter (`name`, `description`,
-   `tools`, optional `public`) + workflow + `tool_calls` examples.
+   `tools`, optional `public`, plus selection fields `purpose` /
+   `when_to_use` / `do_not_use_when` / `selection_examples`) + workflow +
+   `tool_calls` examples. See [skill selection](../../../doc/design/agent-skill-selection.md).
 2. No code changes. `catalog.py` auto-discovers specs at startup.
 
 **Public vs private:** `public: true` (default) skills appear in chat
@@ -106,5 +117,8 @@ Routing evaluation: see [evaluation/AGENTS.md](../evaluation/AGENTS.md).
 
 - Put routing, validation, or constraint policy in `Agent` — use Core.
 - Call one Operation from another; Integration passes data as parameters.
-- Duplicate protocol prose here — update EPIC-002 / task `design.md` instead.
+- Duplicate protocol prose here — update `doc/design/agent-*.md` (and ADRs when
+  policy changes) instead of backlog task designs.
+- Browse or edit `doc/backlog/archive/` — open archived files only via an
+  explicit link from a live doc ([vault rules](../../../doc/AGENTS.md#backlogarchive)).
 - Copy production transcripts into eval fixtures (ADR-000).

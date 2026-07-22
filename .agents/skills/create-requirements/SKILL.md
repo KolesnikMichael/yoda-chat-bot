@@ -45,7 +45,14 @@ Per task folder (`doc/backlog/TASK-NNN-name/`):
 
 Broader context (read selectively):
 
-- If `task.md` frontmatter has `epic: EPIC-NNN`, read `doc/backlog/EPIC-NNN-*/epic.md` (decomposition, this task's deliverable + scope) and the master-design sections listed in `task.md` `## Master design` (the master design is the file `epic.md` links as `Master design`). Stay within the slice the epic assigns this task (`## Scope boundary`); do not absorb sibling tasks' scope.
+- If `task.md` frontmatter has `epic: EPIC-NNN`, resolve the **active** epic at
+  `doc/backlog/EPIC-NNN-*/` (decomposition + master design sections listed in
+  `task.md` `## Master design`). Do **not** browse `doc/backlog/archive/`. If the
+  epic folder is missing from the active backlog but `task.md` (or another live
+  doc) already links into `backlog/archive/...`, follow **that link only** for
+  historical context; prefer `doc/design/` when the contract has been harvested.
+  Stay within the slice the epic assigns this task (`## Scope boundary`); do not
+  absorb sibling tasks' scope.
 - **Delivery profile (epic members).** Read the epic's `## Delivery profile` before writing FRs. Apply two compatibility horizons:
   - **internal_compat** — state reachable *between* member tasks. If `none`, do NOT add FRs/acceptance criteria that defend against intermediate cross-task deploy states (they cannot occur on the shared branch).
   - **external_contract** — the epic's obligation to already-deployed/persisted state at merge. This is ALWAYS in force regardless of `internal_compat`: keep migration/upgrade criteria that meet real Redis/ChromaDB data on first boot after the epic merges.

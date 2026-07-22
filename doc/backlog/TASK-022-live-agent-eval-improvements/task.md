@@ -41,7 +41,7 @@ Key code paths (read before requirements/design):
 - `yoda/mind/evaluation/live_core.py`
 - `yoda/mind/agent/AGENTS.md` (live-runner docs)
 
-Provenance: [[backlog/EPIC-002-agent-routing-reliability/follow-up|EPIC-002 follow-ups]] items F-4…F-7 (post-close product asks).
+Provenance: [[backlog/archive/EPIC-002-agent-routing-reliability/follow-up|EPIC-002 follow-ups]] items F-4…F-7 (post-close product asks).
 
 ## Scope boundary
 
@@ -85,12 +85,12 @@ Resolve explicitly when writing FRs (do not leave implicit):
 - [[backlog/TASK-022-live-agent-eval-improvements/design|design]] — architectural solution
 - [[backlog/TASK-022-live-agent-eval-improvements/plan|plan]] — implementation plan
 - [[backlog/TASK-022-live-agent-eval-improvements/review|review]] — plan-compliance gate (verdict + findings)
-- [[backlog/TASK-021-stage-telemetry-and-live-eval-runner/task|TASK-021]] — as-built live runner and report pipeline
-- [[backlog/EPIC-002-agent-routing-reliability/follow-up|EPIC-002 follow-ups]] — source items F-4…F-7
+- [[backlog/archive/TASK-021-stage-telemetry-and-live-eval-runner/task|TASK-021]] — as-built live runner and report pipeline
+- [[backlog/archive/EPIC-002-agent-routing-reliability/follow-up|EPIC-002 follow-ups]] — source items F-4…F-7
 
 ## Dependencies
 
-- Depends on: [[TASK-021-stage-telemetry-and-live-eval-runner/task|TASK-021]]
+- Depends on: [[backlog/archive/TASK-021-stage-telemetry-and-live-eval-runner/task|TASK-021]]
 - Blocks: none
 
 ## Notes
