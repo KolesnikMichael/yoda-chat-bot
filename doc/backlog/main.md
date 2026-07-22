@@ -17,7 +17,8 @@
 
 ## Add
 
-- Design invariants to the root (?) AGENTS.md: chat isolation, chats nonpersistence, low hardware requirements, low budget, logging, exception handling, etc.
+- Pause active jobs for inactive users
+- Design invariants: low hardware requirements, low budget, logging, exception handling, etc.
 - Retry after 429 where needed
 - Scheduling jobs: add timezone/DST transition tests; scheduling already uses
   IANA `ZoneInfo` + timezone-aware `CronTrigger`, so verify behavior rather than
