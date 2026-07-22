@@ -39,7 +39,7 @@ ls -d doc/backlog/TASK-{NNN}-*   # substitute the zero-padded id, e.g. TASK-007
    before retrying close (do not close on a stale green from an old `review.md`).
    Skip the re-run only if the user explicitly says the suite was just proven green
    in this session.
-4. Read the root `AGENTS.md` and [doc/AGENTS.md](../../../doc/AGENTS.md) for vault conventions.
+4. Read the root `AGENTS.md` and [doc/AGENTS.md](../../../doc/AGENTS.md) (vault layout).
 
 ## Documentation map
 

@@ -46,7 +46,7 @@ If either is missing or a stub, **stop** and ask the developer to create the epi
 
 ## Documentation map
 
-Read [doc/AGENTS.md](../../../doc/AGENTS.md) first for vault structure and the **epic** conventions, and the root [AGENTS.md](../../../AGENTS.md) for IODA, coding guidelines, and the test command.
+Read [doc/AGENTS.md](../../../doc/AGENTS.md) for vault layout; root [AGENTS.md](../../../AGENTS.md) for IODA, coding guidelines, and the test command.
 
 | File | Role |
 |------|------|

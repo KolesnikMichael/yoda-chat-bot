@@ -30,7 +30,7 @@ ls -d doc/backlog/TASK-{NNN}-*   # substitute the zero-padded id, e.g. TASK-007
 
 Before any code change:
 1. Check that **`plan.md`** exists and is filled (not template placeholders like `<path/to/file>`). If **`plan.md` is missing or stub** — STOP; ask the user to complete the **plan** stage first (`create-plan`).
-2. Read the root `AGENTS.md` (IODA architecture + coding guidelines + test command), `doc/AGENTS.md`, and `coding_behavior.md`.
+2. Read the root `AGENTS.md` (IODA + coding guidelines + test command), `doc/AGENTS.md` (vault layout), and `coding_behavior.md`.
 
 ## Phase 0 — Pre-flight
 

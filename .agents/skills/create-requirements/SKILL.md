@@ -32,7 +32,7 @@ If `task.md` is missing or still a stub, **stop** and ask the user to fill the t
 
 ## Documentation map
 
-Read [doc/AGENTS.md](../../../doc/AGENTS.md) first for vault structure and conventions, and the root [AGENTS.md](../../../AGENTS.md) for the IODA architecture and coding guidelines.
+Read [doc/AGENTS.md](../../../doc/AGENTS.md) for vault layout; root [AGENTS.md](../../../AGENTS.md) for IODA and coding guidelines.
 
 Per task folder (`doc/backlog/TASK-NNN-name/`):
 
@@ -83,7 +83,7 @@ Do not copy the description verbatim into requirements; expand it into structure
 
 ### 2. Analyze project documentation
 
-Follow [doc/AGENTS.md](../../../doc/AGENTS.md): read only what answers open questions.
+Read broader vault docs selectively — only files that answer open questions (see **Artifact roles** in doc/AGENTS.md).
 
 Prioritize:
 

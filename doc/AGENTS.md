@@ -1,13 +1,13 @@
 # AGENTS.md
 
-Instructions for AI agents working with this repository.
-This folder (`doc/`) is the root of the documentation and the Obsidian vault.
+`doc/` is the documentation root and Obsidian vault. Code conventions (IODA, coding
+guidelines, tests): [../AGENTS.md](../AGENTS.md).
 
-## Structure
+## Layout
 
 ```
 doc/                      ← vault root, read from here
-├── AGENTS.md             ← this file, read first
+├── AGENTS.md             ← this file
 ├── backlog/              ← project tasks
 │  ├── main.md            ← operational notes and project backlog
 │  ├── EPIC-NNN-name/     ← epic: a connected set of tasks (optional grouping)
@@ -21,7 +21,7 @@ doc/                      ← vault root, read from here
 │     ├── review.md       ← review findings + verdict
 │     └── implementation-notes.md ← (optional) incidents, workarounds, ADR candidates from execution
 ├── design/               ← project-level architectural documents
-│  └── decisions/         ← architecture decision records
+│  └── decisions/         ← architecture decision records (ADRs)
 ├── runbooks/             ← operational procedures
 ├── templates/            ← Templater templates (ignore as content)
 ├── .obsidian/            ← vault files (ignore as content)
@@ -29,83 +29,56 @@ doc/                      ← vault root, read from here
 ```
 
 Tasks are **flat** under `backlog/` even when they belong to an epic; membership is
-the `epic:` attribute, not folder nesting. The epic owns one shared git branch; member
-tasks are implemented on it rather than on per-task branches.
+the `epic:` attribute in `task.md`, not folder nesting. Branch strategy for epic
+members is defined in the epic's `epic.md` (`## Delivery profile`); see **create-epic**
+and **implement-task** skills.
 
-## How to read a task
+## Artifact roles
 
-Always start with `task.md` — it provides context and links to other files.
-If it has `epic: EPIC-NNN`, read that epic's `epic.md` + the master-design sections
-listed in the task's `## Master design` **first**, then stay within the slice the epic
-assigns (`## Scope boundary`). Then read only what you need:
+Always start with `task.md` — it links to the rest.
 
-| Question                                 | File                 |
-| ---------------------------------------- | -------------------- |
-| What needs to be done?                   | `requirements.md`    |
-| How does it work?                        | `design.md`          |
-| What exactly is to be done?              | `plan.md`            |
-| Did review pass? What must be fixed?     | `review.md`          |
-| How does this task fit the bigger effort?| `EPIC-NNN/epic.md`   |
-| Cross-cutting architecture of the epic?  | `EPIC-NNN/design.md` |
-| How is the system structured as a whole? | `design/`            |
-| How to perform the operation?            | `runbooks/`          |
+| Artifact | Role |
+| -------- | ---- |
+| `task.md` | Entry point: scope, status, dependencies, links |
+| `requirements.md` | FR-N functional requirements and acceptance criteria |
+| `design.md` | Architecture, interfaces, decisions for this task |
+| `plan.md` | Implementation contract: stages, steps, FR traceability |
+| `review.md` | Plan-compliance gate: `verdict`, findings, follow-ups |
+| `implementation-notes.md` | Optional execution log: incidents, workarounds, ADR candidates |
+| `EPIC-NNN/epic.md` | Epic goal, decomposition, delivery profile, live rollup |
+| `EPIC-NNN/design.md` | Epic master design — cross-cutting architecture |
+| `design/` | Project-level architecture |
+| `design/decisions/` | ADRs |
+| `runbooks/` | Operational procedures |
 
-## Task Frontmatter (task.md)
+## Pipeline (agents)
 
-```yaml
-id: TASK-NNN # unique identifier
-epic: EPIC-NNN # owning epic, or empty for a standalone task
-title: improve skill selection # task title
-status: todo # todo | in-progress | in-review | blocked | done
-priority: medium # low | medium | high | critical
-size: M # XS | S | M | L | XL
-created: YYYY-MM-DD
-updated: YYYY-MM-DD # bump whenever the task or its artifacts change
-tags:
-  - agent
-  - prompt
-```
+Backlog work runs through skills in `.agents/skills/`. **Do not re-derive workflow
+from this file** — suggest the user to invoke the matching skill.
 
-## Epic Frontmatter (epic.md)
+| Phase | Skill |
+| ----- | ----- |
+| Decompose epic | `create-epic` |
+| Requirements | `create-requirements` |
+| Design | `create-design` |
+| Plan | `create-plan` |
+| Implement | `implement-task` |
+| Review | `review-task` |
+| Close | `close-task` |
 
-```yaml
-id: EPIC-NNN # unique identifier
-doc: epic
-title: chat context management
-status: todo # todo | in-progress | in-review | blocked | done
-priority: medium
-branch: feat/EPIC-NNN-slug # shared branch for all member tasks
-tags: []
-```
+Per-task flow: `create-requirements` → `create-design` → `create-plan` →
+`implement-task` → `review-task` → `close-task`. Epic members: run `create-epic`
+first, then the per-task flow for each member.
 
-## How to find tasks
+## Templates & frontmatter
 
-```bash
-# All tasks in progress
-grep -rl "status: in-progress" doc/backlog/*/task.md
+Authoritative stubs and frontmatter: `templates/new-task.md`, `templates/new-epic.md`,
+`templates/new-adr.md`. Create new tasks/epics from these templates — do not hand-roll
+folder layouts.
 
-# All tasks with high priority
-grep -rl "priority: high" doc/backlog/*/task.md
+## Vault invariants
 
-# Task by ID
-grep -rl "id: TASK-042" doc/backlog/*/task.md
-
-# All member tasks of an epic
-grep -rl "epic: EPIC-001" doc/backlog/*/task.md
-```
-
-## Agreements
-
-- Design decisions are recorded in `design.md`, not in code comments
-- Acceptance criteria are in `requirements.md` (sections FR-N)
-- Plan-compliance gate result lives in `review.md` (`verdict`); close only after `pass` / `pass-with-follow-ups` / `waived`
-- When a task is completed: `status` → `done`
-- Epic decomposition (task list, dependency graph) lives in `epic.md`, not in `main.md`
-- An epic's cross-cutting design lives in the epic's master design (linked from `epic.md`; `design.md` by template); member tasks reference it instead of restating decisions
-- All tasks of an epic share the epic's branch; do not open per-task branches for epic members
-
-## What an agent should NOT do
-
-- Do not change the backlog folder structure without explicit instructions
-- Do not update `plan.md` as a log - only structured steps
-- Do not duplicate information between files of the same task
+- Do not change the `backlog/` folder layout without explicit instruction.
+- Cross-cutting epic architecture belongs in the epic master design; member `design.md`
+  files **reference** it, they do not restate decisions.
+- Project ADRs live under `design/decisions/`.
