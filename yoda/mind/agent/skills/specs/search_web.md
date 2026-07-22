@@ -5,12 +5,14 @@ purpose: Retrieve current external information now or run a fresh web search at 
 when_to_use:
   - The user asks for current/changing externally verified information.
   - A deferred or recurring result must be recomputed at trigger time.
+  - A short follow-up only changes time or recurrence for a prior fresh-data or monitoring request.
 do_not_use_when:
   - The user only wants static text delivered later.
   - The question is conceptual and answerable without current external data.
 selection_examples:
   - '"Какая погода завтра?" -> use'
   - '"Каждое утро буди прогнозом с AccuWeather" -> use and schedule a search_web task'
+  - '"Шесть утра слишком рано, лучше в девять" (after AccuWeather wake-up) -> use; keep search_web and reschedule'
   - '"Через час напомни проверить погоду" -> do not use; schedule_message'
 required_inputs:
   topic: "What the user wants to find out, verify, or monitor"
@@ -45,7 +47,7 @@ Apply source policy in this fixed order:
 One-off “only from X” requests stay in `request_constraints` / `distilled_task`. Persist a preference only when the user explicitly wants it from now on, via `update_profile` with `skill_preferences_to_add.search_web` (never `web_search`).
 
 ## Workflow
-1. If the user wants **deferred or recurring** execution (e.g. "every morning", "at 6 PM", "watch the dollar rate daily") — clarify topic and schedule as needed, then resolve IANA timezone for absolute/recurring local times in this order:
+1. If the user wants **deferred or recurring** execution (e.g. "every morning", "at 6 PM", "watch the dollar rate daily"), or a **time-only refinement** of such a prior request — clarify topic and schedule as needed, then resolve IANA timezone for absolute/recurring local times in this order:
    1. A valid IANA name explicitly supplied in the current request — copy it into `schedule_task` arguments.
    2. A valid profile timezone — copy it into `schedule_task` arguments (self-contained; no hidden fallback).
    3. An unambiguous named location in the task or profile — infer the IANA name, call `update_profile` with both `timezone` and `location`, and pass that same explicit timezone to `schedule_task`. Batch only when every scheduling argument is already resolved.

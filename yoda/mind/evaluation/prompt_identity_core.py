@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from yoda.mind.evaluation.data import PromptIdentity
 
 INTENT_CLASSIFIER_PROMPT_ID = "intent_classifier/v1"
-SKILL_SELECTOR_PROMPT_ID = "skill_selector/v1"
+SKILL_SELECTOR_PROMPT_ID = "skill_selector/v2"
 SKILL_EXECUTOR_PROMPT_ID = "skill_executor/v1"
 GROUNDED_DELIVERY_PROMPT_ID = "grounded_delivery/v1"
 

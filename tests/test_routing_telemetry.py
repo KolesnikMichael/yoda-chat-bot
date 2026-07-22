@@ -198,7 +198,7 @@ async def test_agent_selection_planning_execution_diagnostics(
     assert "stage=selection" in joined
     assert "stage=planning" in joined
     assert "stage=execution" in joined
-    assert "prompt_id=skill_selector/v1" in joined
+    assert "prompt_id=skill_selector/v2" in joined
     assert "prompt_id=skill_executor/v1" in joined
     assert "prompt_id=test_skill/v1" in joined
     assert "secret user" not in joined

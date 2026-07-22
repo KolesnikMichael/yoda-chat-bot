@@ -251,10 +251,14 @@ def test_production_catalog_static_dynamic_contrasts():
     assert "витамины" in schedule_blob
     assert "актуальную погоду" in schedule_blob
     assert "search_web" in schedule_blob
+    assert "лучше в девять" in schedule_blob
+    assert "fresh-data" in schedule_blob or "monitoring" in schedule_blob
 
     assert "AccuWeather" in search_blob or "актуальн" in search_blob.lower()
     assert "проверить погоду" in search_blob
     assert "schedule_message" in search_blob
+    assert "лучше в девять" in search_blob
+    assert "reschedule" in search_blob or "time or recurrence" in search_blob
 
     # Order-neutral: reversing summaries must not change contract content.
     forward = [(s.name, s.purpose, tuple(s.when_to_use),
@@ -304,6 +308,9 @@ def test_schedule_message_workflow_declares_iana_timezone_resolution():
     schedule = SkillCatalog.load_skill(PRODUCTION_SKILLS_DIR, "schedule_message")
     _assert_iana_timezone_workflow(schedule.instructions)
     assert "schedule_message" in schedule.instructions
+    assert "Capability guard" in schedule.instructions
+    assert 'mode="fail"' in schedule.instructions
+    assert "failure_reason=\"unsupported\"" in schedule.instructions
     # Compact selection contract stays free of the ordered resolution policy.
     summary = next(
         s for s in SkillCatalog.load_catalog(PRODUCTION_SKILLS_DIR)

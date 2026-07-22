@@ -18,7 +18,7 @@ from yoda.mind.agent.data.outcome_data import OutcomeEvidence
 from yoda.mind.data.routing_context import format_recent_messages_block
 from yoda.mind.memory.data.user_profile import UserProfile
 
-SKILL_SELECTOR_PROMPT_ID = "skill_selector/v1"
+SKILL_SELECTOR_PROMPT_ID = "skill_selector/v2"
 SKILL_EXECUTOR_PROMPT_ID = "skill_executor/v1"
 
 SELECTION_SYSTEM_PROMPT = (
@@ -45,6 +45,13 @@ SELECTION_SYSTEM_PROMPT = (
     "(empty lists when none).\n"
     '- mode="no_skill": set reason to "unsupported"; selected_skill and '
     "distilled_task must be null; request_constraints may be empty.\n"
+    "Select by requested outcome, not by isolated words or catalog order.\n"
+    "For scheduling, distinguish payload semantics: static text delivered "
+    "later -> schedule_message; information recomputed at trigger time -> "
+    "search_web.\n"
+    "A short follow-up that only changes time or recurrence for a prior "
+    "fresh-data or monitoring request stays on search_web (reschedule), "
+    "not schedule_message.\n"
     "Do not call tools, ask questions, or produce a final answer."
 )
 
@@ -69,7 +76,8 @@ EXECUTION_SYSTEM_PROMPT = (
 )
 
 SELECTION_INSTRUCTION = (
-    "Select the best skill for this task. "
+    "Select the best skill for this task by requested outcome. "
+    "Time-only refinements of a prior fresh-data task keep search_web. "
     'Use mode="select_skill" with selected_skill and a clear distilled_task, '
     'or mode="no_skill" with reason="unsupported" if nothing fits. '
     "Do not call tools or ask questions during selection."

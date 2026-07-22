@@ -917,6 +917,148 @@ def execution_unsupported_case() -> dict:
     )
 
 
+def recurring_weather_time_refinement_case() -> dict:
+    """Time-only refinement of a prior AccuWeather wake-up stays on search_web."""
+    return routing_case(
+        "ru-recurring-weather-time-refinement",
+        "ru",
+        "time-only refinement of recurring AccuWeather task keeps search_web",
+        [
+            turn(
+                "t1",
+                "message",
+                "Шесть утра - это слишком рано, Лучше в девять",
+                recent=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "Теперь я хочу попросить тебя будить меня каждое "
+                            "утро прогнозом погоды с сервиса AccuWeather"
+                        ),
+                    },
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "Каждое утро в шесть часов по петербургскому времени "
+                            "стучаться буду. Прогноз с AccuWeather принесу."
+                        ),
+                    },
+                ],
+                model_responses=[
+                    recorded("intent", {"intent": "agent_task"}),
+                    recorded(
+                        "selection",
+                        {
+                            "mode": "select_skill",
+                            "selected_skill": "search_web",
+                            "distilled_task": (
+                                "Каждое утро в 09:00 получать прогноз погоды "
+                                "с AccuWeather."
+                            ),
+                            "request_constraints": {
+                                "strict_source_domains": ["accuweather.com"],
+                                "soft_source_domains": [],
+                            },
+                        },
+                    ),
+                    recorded(
+                        "planning",
+                        {
+                            "mode": "call_tools",
+                            "tool_calls": [
+                                {
+                                    "tool_name": "schedule_task",
+                                    "arguments": {
+                                        "skill_name": "search_web",
+                                        "distilled_task": (
+                                            "Прогноз погоды с AccuWeather"
+                                        ),
+                                        "description": "Утренний прогноз",
+                                        "cron": "0 9 * * *",
+                                        "timezone": "Europe/Moscow",
+                                    },
+                                },
+                            ],
+                        },
+                    ),
+                ],
+                tool_results=[
+                    {
+                        "tool_name": "schedule_task",
+                        "output": "Scheduled",
+                        "success": True,
+                        "terminal_facts": {
+                            "result_kind": "scheduled_job",
+                            "summary": "Recurring weather lookup rescheduled",
+                            "job_kind": "task",
+                            "scheduled_skill_name": "search_web",
+                            "schedule": "0 9 * * * Europe/Moscow",
+                        },
+                    },
+                ],
+                expected={
+                    "intent": {"kind": "intent", "route": "agent_task"},
+                    "selection": {
+                        "kind": "selection",
+                        "mode": "select_skill",
+                        "selected_skill": "search_web",
+                        "distilled_task": {
+                            "required_fragments": ["09:00", "AccuWeather"],
+                        },
+                        "request_constraints": {
+                            "strict_source_domains": ["accuweather.com"],
+                            "soft_source_domains": [],
+                        },
+                    },
+                    "planning": {
+                        "kind": "planning",
+                        "accepted_modes": ["call_tools"],
+                        "tool_batches": [
+                            {
+                                "matching": "ordered",
+                                "calls": [
+                                    {
+                                        "tool_name": "schedule_task",
+                                        "arguments": {
+                                            "skill_name": "search_web",
+                                            "cron": "0 9 * * *",
+                                            "timezone": "Europe/Moscow",
+                                            "request_constraints": {
+                                                "strict_source_domains": [
+                                                    "accuweather.com",
+                                                ],
+                                            },
+                                        },
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    "execution": {
+                        "kind": "execution",
+                        "result": "success",
+                        "operation": "schedule_work",
+                        "result_kind": "scheduled_job",
+                        "job_kind": "task",
+                        "scheduled_operation": "retrieve_information",
+                        "schedule": {
+                            "required_fragments": [
+                                "0 9 * * *",
+                                "Europe/Moscow",
+                            ],
+                        },
+                    },
+                    "delivery": {
+                        "kind": "delivery",
+                        "status": "success",
+                        "allowed_claims": ["dynamic_operation_scheduled"],
+                    },
+                },
+            ),
+        ],
+    )
+
+
 def delayed_dynamic_case() -> dict:
     return routing_case(
         "en-delayed-dynamic-weather-check",
@@ -1487,6 +1629,7 @@ def main() -> None:
         execution_unsupported_case(),
         delayed_dynamic_case(),
         relative_static_case(),
+        recurring_weather_time_refinement_case(),
         {
             "id": "july-20-recurring-spb-weather-accuweather",
             "language": "ru",
@@ -1737,7 +1880,7 @@ def main() -> None:
         },
     ]
 
-    corpus = {"schema_version": 1, "corpus_version": "1.1.1", "cases": cases}
+    corpus = {"schema_version": 1, "corpus_version": "1.1.2", "cases": cases}
     out = Path(__file__).with_name("corpus-v1.json")
     out.write_text(json.dumps(corpus, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"wrote {len(cases)} cases to {out}")

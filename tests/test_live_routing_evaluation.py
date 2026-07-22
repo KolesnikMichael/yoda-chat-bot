@@ -366,7 +366,7 @@ async def test_live_evaluation_prompts_used_retains_selector_and_skill(
     )
     prompt_ids = {item.prompt_id for item in report.prompts_used}
     assert "intent_classifier/v1" in prompt_ids
-    assert "skill_selector/v1" in prompt_ids
+    assert "skill_selector/v2" in prompt_ids
     assert "skill_executor/v1" in prompt_ids
     assert "search_web/v1" in prompt_ids
     assert "grounded_delivery/v1" in prompt_ids

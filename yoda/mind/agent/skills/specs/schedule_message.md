@@ -6,9 +6,11 @@ when_to_use:
   - The payload is known now and should be delivered later once or repeatedly.
 do_not_use_when:
   - The payload requires fresh data, web search, computation, or monitoring at trigger time.
+  - A short follow-up only changes time or recurrence for a prior fresh-data or monitoring task.
 selection_examples:
   - '"Каждый день в 9 напоминай принять витамины" -> use'
   - '"Каждый день в 9 присылай актуальную погоду" -> do not use; search_web'
+  - '"Шесть утра слишком рано, лучше в девять" (after AccuWeather wake-up) -> do not use; search_web'
 required_inputs:
   reminder_text: "What to remind the user about"
   time: "When to deliver — either a relative delay or an absolute time"
@@ -24,22 +26,23 @@ max_iterations: 4
 User asks to be reminded about something, to schedule a message, or to send a notification at a specific time. Examples: "remind me in 30 minutes to call mom", "send me a message at 3 PM tomorrow", "напомни мне через час купить молоко".
 
 ## Workflow
-1. Parse the user's request to extract **reminder_text** (what to remind about) and **time** (when).
-2. Choose the scheduling mode (exactly one):
+1. **Capability guard.** This skill delivers static text only. If the task requires fresh weather, prices, news, web search, monitoring, or any recomputation at trigger time — including a time-only refinement of such a prior request — do not call `schedule_message` or `ask_user`. Respond with mode="fail" and failure_reason="unsupported".
+2. Parse the user's request to extract **reminder_text** (what to remind about) and **time** (when).
+3. Choose the scheduling mode (exactly one):
    - **Relative delay** ("in 30 minutes", "через час"): call `schedule_message` with `delay_minutes`. No timezone needed and no timezone clarification.
    - **Absolute time** ("at 3 PM tomorrow", "завтра в 15:00"): year/month/day/hour/minute plus an explicit valid IANA `timezone`.
    - **Recurring** ("every Monday at 9:00", "каждый день в 9 утра"): `cron` (5-field crontab) plus an explicit valid IANA `timezone`. Example: Monday 09:00 → `cron: "0 9 * * 1"`.
-3. For **absolute or recurring** local time, resolve IANA timezone identity in this order (do not ask while a higher step already resolves it):
+4. For **absolute or recurring** local time, resolve IANA timezone identity in this order (do not ask while a higher step already resolves it):
    1. A valid IANA name explicitly supplied in the current request — copy it into the scheduling arguments.
    2. A valid profile timezone accepted as IANA — copy it into the scheduling arguments (do not rely on hidden profile fallback).
    3. An unambiguous named location in the task or profile — infer the IANA name, call `update_profile` with both `timezone` and `location`, and pass that same explicit timezone to `schedule_message`. Batch the two tools only when every scheduling argument is already resolved (scheduling must not depend on the profile write completing).
    4. Otherwise one `ask_user` asking for city/region or an IANA timezone name. Never ask for the user's current clock. Never accept a bare UTC offset (`+03:00`, `UTC+03:00`) as timezone identity.
-4. Build `reminder_text` with the right addressee semantics:
+5. Build `reminder_text` with the right addressee semantics:
    - If user asks to remind a specific person ("напомни мне", "remind me"), include the addressee in `reminder_text` when needed for group clarity.
    - If user asks to remind everyone ("напомни нам", "remind us"), use group wording in `reminder_text` and avoid targeting one user.
    - In private chats, keep `reminder_text` concise and natural.
-5. Call `schedule_message` with a self-contained explicit timezone for absolute/cron modes. If the tool returns success, set final_answer confirming the reminder.
-6. If the tool returns an error, explain the issue in final_answer.
+6. Call `schedule_message` with a self-contained explicit timezone for absolute/cron modes. If the tool returns success, set final_answer confirming the reminder.
+7. If the tool returns an error, explain the issue in final_answer.
 
 ## Examples
 {"tool_calls": [{"tool_name": "schedule_message", "arguments": {"reminder_text": "call mom", "delay_minutes": 30}}], "reasoning": "relative delay — no timezone clarification"}

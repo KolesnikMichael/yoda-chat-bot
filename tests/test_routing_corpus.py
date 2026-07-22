@@ -158,7 +158,7 @@ async def test_corpus_fixture_loads() -> None:
     provider = RoutingCorpusProvider()
     corpus = await provider.load(FIXTURE_PATH)
     assert corpus.schema_version == 1
-    assert corpus.corpus_version == "1.1.1"
+    assert corpus.corpus_version == "1.1.2"
 
 
 def test_corpus_has_en_and_ru_intent_families() -> None:
@@ -212,6 +212,7 @@ def test_corpus_contains_required_contrastive_families() -> None:
         "en-execution-unsupported",
         "en-delayed-dynamic-weather-check",
         "ru-relative-static-reminder",
+        "ru-recurring-weather-time-refinement",
         "july-20-recurring-spb-weather-accuweather",
     } <= case_ids
 
