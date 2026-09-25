@@ -1,8 +1,6 @@
 # Backlog archive
 
-Closed epics **and their member tasks** live here as **historical record only**.
-When an epic is archived, move `EPIC-NNN-*` and every member `TASK-*` folder
-together.
+Closed epics and tasks are stored here as **historical record only**.
 
 ## Agent rules
 

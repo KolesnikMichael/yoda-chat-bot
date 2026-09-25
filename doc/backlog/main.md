@@ -55,6 +55,7 @@
 - _classify_intent could return 'pass' to replace CognitionCore.should_reply. And _classify_intent could have a better name, e.g. "decide_next_action"
 - Regulate Еmotional state with system messages, instead of the system prompt (should those be acually saved?). 
 - AffectProvider: should return current emotional state as a string, and MemoryCore should pass it to MemoryProvider and it should append it to the conversation as a system message
+- https://openrouter.ai/typesafe/jev-1.13 for intent classification
 
 ## See
 

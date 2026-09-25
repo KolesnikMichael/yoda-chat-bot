@@ -10,9 +10,9 @@ doc/                      ← vault root, read from here
 ├── AGENTS.md             ← this file
 ├── backlog/              ← project tasks
 │  ├── main.md            ← operational notes and project backlog
-│  ├── archive/           ← frozen historical epics + their member tasks
+│  ├── archive/           ← frozen historical epics and tasks
 │  │  ├── EPIC-NNN-name/  ← closed epic record (not a source of truth)
-│  │  └── TASK-NNN-name/  ← archived member tasks (moved with their epic)
+│  │  └── TASK-NNN-name/  ← archived tasks
 │  ├── EPIC-NNN-name/     ← active epic: connected set of tasks
 │  │  ├── epic.md         ← goal, decomposition map, shared branch, live rollup
 │  │  └── design.md       ← master design (cross-cutting; SoT for member tasks)
@@ -38,10 +38,8 @@ and **implement-task** skills.
 
 ### `backlog/archive/`
 
-Frozen historical backlog: a closed epic folder **and all of its member
-`TASK-*` folders**. **Not** a source of truth for current behavior — that lives
-in `doc/design/` and module `AGENTS.md` files. When archiving an epic, move the
-epic and every member task together.
+Frozen historical backlog: closed epic and task folders. Not a source of truth for
+current behavior. When archiving an epic, move the epic and every member task together.
 
 **Agents must:**
 
