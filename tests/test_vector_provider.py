@@ -1,7 +1,7 @@
 import pytest
 
 from yoda.mind.memory.data.chroma_summary_record import ChromaSummaryRecord
-from yoda.mind.memory.data.summary_store_settings import EmbeddingsSettings, SummaryStoreSettings
+from yoda.mind.memory.data.summary_store_settings import SummaryStoreSettings
 from yoda.mind.memory.vector import VectorProvider
 
 
@@ -9,10 +9,6 @@ def _settings(tmp_path) -> SummaryStoreSettings:
     return SummaryStoreSettings(
         persist_directory=str(tmp_path / "chroma"),
         collection_prefix="chat_",
-        embeddings=EmbeddingsSettings(
-            model_name="openai/text-embedding-3-small",
-            openrouter_api_key="sk-test",
-        ),
     )
 
 

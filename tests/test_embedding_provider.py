@@ -20,7 +20,6 @@ async def test_embedding_provider_empty_batch_skips_api():
         embeddings_api=api,
         settings=EmbeddingsSettings(
             model_name="openai/text-embedding-3-small",
-            openrouter_api_key="sk-test",
         ),
     )
     result = await provider.embed_batch([])
@@ -35,7 +34,6 @@ async def test_embedding_provider_embed_batch_delegates():
         embeddings_api=api,
         settings=EmbeddingsSettings(
             model_name="openai/text-embedding-3-small",
-            openrouter_api_key="sk-test",
         ),
     )
     vectors = await provider.embed_batch(["a", "b"])
@@ -52,7 +50,6 @@ async def test_embedding_provider_embed_single():
         embeddings_api=api,
         settings=EmbeddingsSettings(
             model_name="openai/text-embedding-3-small",
-            openrouter_api_key="sk-test",
         ),
     )
     vector = await provider.embed("only")
@@ -66,6 +63,5 @@ def test_embedding_provider_unknown_model_raises():
             embeddings_api=api,
             settings=EmbeddingsSettings(
                 model_name="unknown/model",
-                openrouter_api_key="sk-test",
             ),
         )

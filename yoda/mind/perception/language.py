@@ -3,7 +3,7 @@ import logging
 
 from pydantic import BaseModel, ValidationError
 
-from yoda.api.llm_api import LLMApi
+from yoda.api.chat_backend import ChatBackend
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +16,8 @@ class StructuredOutputError(Exception):
 
 
 class LanguageProvider:
-    def __init__(self, settings: dict, llm_api: LLMApi):
-        self._llm_api = llm_api
+    def __init__(self, settings: dict, chat_backend: ChatBackend):
+        self._chat_backend = chat_backend
         try:
             self._model_name = settings["model_name"]
         except KeyError as e:
@@ -29,7 +29,7 @@ class LanguageProvider:
         return self._model_name
 
     async def reply_in_conversation(self, conversation: list[dict]) -> str:
-        return await self._llm_api.complete_chat_async(
+        return await self._chat_backend.complete_chat_async(
             model_name=self._model_name,
             messages=conversation,
         )
@@ -40,7 +40,7 @@ class LanguageProvider:
         response_format: type[BaseModel],
     ) -> BaseModel:
         try:
-            return await self._llm_api.parse_chat_async(
+            return await self._chat_backend.parse_chat_async(
                 model_name=self._model_name,
                 messages=messages,
                 response_format=response_format,

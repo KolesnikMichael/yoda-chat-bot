@@ -279,7 +279,7 @@ async def test_live_evaluation_excludes_and_filters_before_model_call(
 
     llm = _CountingLLM()
     evaluation = LiveRoutingEvaluation(
-        llm_api=llm,
+        chat_backend=llm,
         model_name="eval-model",
         skills_dir=FIXTURES_SKILLS,
     )
@@ -327,7 +327,7 @@ async def test_live_evaluation_runs_eligible_case_with_fake_llm(
     # Delivery may call complete_chat_async; RecordedLLMApi returns fixed reply.
     llm = RecordedLLMApi(responses, chat_reply="Hello there.")
     evaluation = LiveRoutingEvaluation(
-        llm_api=llm,
+        chat_backend=llm,
         model_name="eval-model",
         skills_dir=FIXTURES_SKILLS,
     )
@@ -356,7 +356,7 @@ async def test_live_evaluation_prompts_used_retains_selector_and_skill(
     case = next(c for c in corpus.cases if c.id == "en-search-immediate")
     llm = RecordedLLMApi(list(case.turns[0].model_responses))
     evaluation = LiveRoutingEvaluation(
-        llm_api=llm,
+        chat_backend=llm,
         model_name="eval-model",
     )
     report = await evaluation.run(
@@ -389,3 +389,91 @@ def test_pytest_suite_does_not_import_live_runner_module_at_collection() -> None
                 if "live_runner" in node.module:
                     offenders.append(str(path))
     assert offenders == []
+
+
+def _write_live_settings(path: Path, *, model: str | None) -> None:
+    agent: dict = {}
+    if model is not None:
+        agent["model"] = model
+    payload = {
+        "inference": {
+            "providers": {
+                "openrouter": {
+                    "backend": "openrouter",
+                    "api_key": "router-key",
+                    "base_url": "https://openrouter.ai/api/v1",
+                }
+            },
+            "profiles": {
+                "text_qwen27_free": {
+                    "provider": "openrouter",
+                    "model_name": "qwen/qwen3.8-27b:free",
+                }
+            },
+        },
+        "agent": agent,
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_live_runner_missing_agent_model_exits_before_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from yoda.mind.evaluation import live_runner
+
+    settings_path = tmp_path / "settings.json"
+    _write_live_settings(settings_path, model=None)
+
+    def _refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("evaluation constructed")
+
+    monkeypatch.setattr(live_runner.LiveRoutingEvaluation, "__init__", _refuse)
+    with pytest.raises(SystemExit, match="'model'"):
+        live_runner.main(["--settings", str(settings_path)])
+
+
+def test_live_runner_unknown_profile_exits_before_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from yoda.mind.evaluation import live_runner
+
+    settings_path = tmp_path / "settings.json"
+    _write_live_settings(settings_path, model="no-such-profile")
+
+    def _refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("evaluation constructed")
+
+    monkeypatch.setattr(live_runner.LiveRoutingEvaluation, "__init__", _refuse)
+    with pytest.raises(SystemExit, match=r"Unknown inference profile: 'no-such-profile'"):
+        live_runner.main(["--settings", str(settings_path)])
+
+
+def test_live_runner_builds_evaluation_from_agent_model_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yoda.api.openrouter_api import OpenRouterApi
+    from yoda.mind.evaluation import live_runner
+
+    settings_path = tmp_path / "settings.json"
+    _write_live_settings(settings_path, model="text_qwen27_free")
+    built: dict = {}
+
+    class _FakeEvaluation:
+        def __init__(self, *, chat_backend: object, model_name: str, **kwargs: object) -> None:
+            built["chat_backend"] = chat_backend
+            built["model_name"] = model_name
+            self.last_artifact_path = tmp_path / "report.json"
+
+        async def run(self, *args: object, **kwargs: object) -> object:
+            built["ran"] = True
+            return type("Report", (), {"status": LiveRunStatus.COMPLETED})()
+
+    monkeypatch.setattr(live_runner, "LiveRoutingEvaluation", _FakeEvaluation)
+    monkeypatch.setattr(
+        live_runner.LiveRoutingEvaluationCore,
+        "format_console_summary",
+        staticmethod(lambda report, artifact: "ok"),
+    )
+    with pytest.raises(SystemExit) as caught:
+        live_runner.main(["--settings", str(settings_path)])
+    assert caught.value.code == 0
+    assert built["ran"] is True
+    assert built["model_name"] == "qwen/qwen3.8-27b:free"
+    assert isinstance(built["chat_backend"], OpenRouterApi)
