@@ -25,19 +25,18 @@ def test_summary_store_settings_from_dict_valid():
     )
     assert settings.persist_directory == "data/chroma"
     assert settings.collection_prefix == "chat_"
-    assert settings.embeddings.model_name == "openai/text-embedding-3-small"
-    assert settings.embeddings.openrouter_api_key == "sk-test"
+    assert not hasattr(settings, "embeddings")
 
 
-def test_summary_store_settings_missing_embeddings_key_raises():
-    with pytest.raises(ValueError, match="Missing required key: embeddings.openrouter_api_key"):
-        SummaryStoreSettings.from_dict(
-            {
-                "persist_directory": "data/chroma",
-                "collection_prefix": "chat_",
-                "embeddings": {"model_name": "openai/text-embedding-3-small"},
-            }
-        )
+def test_summary_store_settings_without_embeddings_block():
+    settings = SummaryStoreSettings.from_dict(
+        {
+            "persist_directory": "data/chroma",
+            "collection_prefix": "chat_",
+        }
+    )
+    assert settings.persist_directory == "data/chroma"
+    assert settings.collection_prefix == "chat_"
 
 
 def test_chroma_summary_record_is_immutable():

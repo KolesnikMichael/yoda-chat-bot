@@ -8,7 +8,9 @@ import json
 import sys
 from pathlib import Path
 
-from yoda.api.llm_api import LLMApi
+from yoda.api.chat_backend import ChatBackend
+from yoda.api.inference.backends import build_chat_backend
+from yoda.api.inference.catalog import InferenceCatalogCore
 from yoda.mind.evaluation.data import LiveRunStatus
 from yoda.mind.evaluation.live_core import LiveRoutingEvaluationCore
 from yoda.mind.evaluation.live_evaluation import (
@@ -41,26 +43,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _load_agent_settings(settings_path: Path) -> tuple[str, str]:
+def _load_agent_chat(settings_path: Path) -> tuple[ChatBackend, str]:
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
     try:
-        agent = payload["agent"]
-        model_name = agent["model_name"]
-        api_key = payload["llm"]["api_key"]
-    except KeyError as exc:
-        raise SystemExit(
-            f"settings missing required key for live eval: {exc}",
-        ) from exc
-    if not model_name or not api_key:
-        raise SystemExit("settings agent.model_name and llm.api_key are required")
-    return model_name, api_key
+        profile_id = payload["agent"]["model"]
+        resolved = InferenceCatalogCore.from_settings(payload).resolve(profile_id)
+    except (KeyError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    return build_chat_backend(resolved), resolved.model_name
 
 
 async def _async_main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    model_name, api_key = _load_agent_settings(args.settings)
+    chat_backend, model_name = _load_agent_chat(args.settings)
     evaluation = LiveRoutingEvaluation(
-        llm_api=LLMApi(api_key=api_key),
+        chat_backend=chat_backend,
         model_name=model_name,
     )
     report = await evaluation.run(

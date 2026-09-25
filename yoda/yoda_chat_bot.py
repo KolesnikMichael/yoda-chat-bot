@@ -37,8 +37,8 @@ from yoda.embodiment.telegram_bot import TelegramBot
 from yoda.api.storage_api import StorageApi
 from yoda.api.scheduler_api import SchedulerApi
 from yoda.api.speech_api import SpeechApi
-from yoda.api.llm_api import LLMApi
-from yoda.api.openrouter_api import OpenRouterApi
+from yoda.api.inference.backends import build_chat_backend, build_embeddings_api
+from yoda.api.inference.catalog import InferenceCatalogCore
 from yoda.api.tavily_api import TavilyApi
 from yoda.api.pixazo_api import PixazoApi
 from yoda.mind.agent.tools.get_user_data_tool import GetUserDataTool
@@ -52,9 +52,8 @@ from yoda.mind.agent.skills.catalog import SkillCatalog
 from yoda.mind.data.maintenance_settings import MaintenanceSettings
 from yoda.mind.maintenance import Maintenance
 from yoda.mind.memory.data.summarizer_settings import SummarizerSettings
-from yoda.mind.memory.data.summary_store_settings import SummaryStoreSettings
+from yoda.mind.memory.data.summary_store_settings import EmbeddingsSettings, SummaryStoreSettings
 from yoda.mind.memory.summarizer import SummarizerProvider
-from yoda.api.embeddings_api import EmbeddingsApi
 from yoda.mind.memory.embedding import EmbeddingProvider
 from yoda.mind.memory.vector import VectorProvider
 
@@ -94,15 +93,13 @@ def main() -> None:
     with open('settings.json', 'r') as settings_file:
         settings_json = json.load(settings_file)
 
+    configured = InferenceCatalogCore.resolve_configured(settings_json)
+
     try:
         embodiment_settings = settings_json["embodiment"]
         telegram_settings = embodiment_settings["telegram"]
         mind_settings = settings_json["mind"]
         perception_settings = mind_settings["perception"]
-        language_settings = perception_settings["language"]
-        vision_settings = perception_settings["vision"]
-        language_api_key = language_settings["api_key"]
-        vision_api_key = vision_settings["api_key"]
         audio_settings = perception_settings["audio"]
         default_language = audio_settings["default_language"]
         memory_settings = mind_settings["memory"]
@@ -121,7 +118,6 @@ def main() -> None:
 
     try:
         agent_settings = settings_json["agent"]
-        agent_model_name = agent_settings["model_name"]
         tavily_api_key = (
             agent_settings["tools"]["web_search"]["tavily_api_key"]
         )
@@ -130,25 +126,19 @@ def main() -> None:
             f"Settings missing agent key: {e.args[0]}") from e
 
     debug_log_dir = Path("logs") if args.debug else None
-    llm_api = LLMApi(api_key=language_api_key, debug_log_dir=debug_log_dir)
     language_provider = LanguageProvider(
-        settings=language_settings, llm_api=llm_api)
-    agent_language_settings = {
-        **language_settings,
-        "model_name": agent_model_name,
-    }
+        {"model_name": configured.language.model_name},
+        build_chat_backend(configured.language, debug_log_dir=debug_log_dir),
+    )
     agent_language_provider = LanguageProvider(
-        settings=agent_language_settings, llm_api=llm_api)
-    vision_backend: OpenRouterApi | LLMApi
-    if vision_settings.get("provider", "mistral") == "openrouter":
-        vision_base = vision_settings.get(
-            "base_url", "https://openrouter.ai/api/v1")
-        vision_backend = OpenRouterApi(
-            api_key=vision_api_key, base_url=vision_base)
-    else:
-        vision_backend = LLMApi(api_key=vision_api_key, debug_log_dir=debug_log_dir)
+        {"model_name": configured.agent.model_name},
+        build_chat_backend(configured.agent, debug_log_dir=debug_log_dir),
+    )
     vision_provider = VisionProvider(
-        settings=vision_settings, chat_backend=vision_backend)
+        {"model_name": configured.vision.model_name},
+        build_chat_backend(configured.vision, debug_log_dir=debug_log_dir),
+        configured.vision.backend,
+    )
     audio_provider = AudioProvider(
         speech_api=SpeechApi(), default_language=default_language)
     storage_api = StorageApi(
@@ -165,13 +155,14 @@ def main() -> None:
         redis_db=memory_settings.get("redis_db", 0),
     )
 
-    summarizer_settings = SummarizerSettings.from_settings(settings_json)
-    summarizer_provider = SummarizerProvider(llm_api=llm_api, settings=summarizer_settings)
+    summarizer_provider = SummarizerProvider(
+        build_chat_backend(configured.summarizer, debug_log_dir=debug_log_dir),
+        SummarizerSettings(model_name=configured.summarizer.model_name),
+    )
 
-    embeddings_api = EmbeddingsApi(api_key=summary_store_settings.embeddings.openrouter_api_key)
     embedding_provider = EmbeddingProvider(
-        embeddings_api=embeddings_api,
-        settings=summary_store_settings.embeddings,
+        embeddings_api=build_embeddings_api(configured.embeddings),
+        settings=EmbeddingsSettings(model_name=configured.embeddings.model_name),
     )
     vector_provider = VectorProvider(settings=summary_store_settings)
 

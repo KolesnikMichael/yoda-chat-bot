@@ -3,7 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from yoda.api.llm_api import LLMApi
+from yoda.api.chat_backend import ChatBackend
 from yoda.mind.memory.data.message import Message
 from yoda.mind.memory.data.summarizer_envelope import (
     LlmSummarizerEnvelope,
@@ -304,8 +304,8 @@ class SummarizerCore:
 
 
 class SummarizerProvider:
-    def __init__(self, llm_api: LLMApi, settings: SummarizerSettings) -> None:
-        self._llm_api = llm_api
+    def __init__(self, chat_backend: ChatBackend, settings: SummarizerSettings) -> None:
+        self._chat_backend = chat_backend
         self._settings = settings
 
     async def summarise(
@@ -331,7 +331,7 @@ class SummarizerProvider:
         ]
 
         try:
-            wire = await self._llm_api.parse_chat_async(
+            wire = await self._chat_backend.parse_chat_async(
                 self._settings.model_name,
                 messages,
                 LlmSummarizerEnvelope,

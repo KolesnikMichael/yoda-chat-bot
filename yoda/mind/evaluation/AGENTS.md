@@ -48,6 +48,8 @@ tests/fixtures/routing_evaluation/corpus-v1.json
 | Production telemetry | `telemetry_core.py` |
 | Epic-level eval strategy (historical) | [archived EPIC-002 design](../../../doc/backlog/archive/EPIC-002-agent-routing-reliability/design.md) — link only; not SoT |
 
+Live eval resolves `agent.model` through `inference`. Only the resolved chat façade (`MistralApi` or `OpenRouterApi`) may network.
+
 ## Tests
 
 Deterministic (CI):

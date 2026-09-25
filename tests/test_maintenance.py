@@ -646,7 +646,7 @@ def test_maintenance_does_not_import_llm_or_embedding_apis():
             imported.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.append(node.module)
-    forbidden = ("yoda.api.llm_api", "yoda.api.embeddings_api", "chromadb")
+    forbidden = ("yoda.api.mistral_api", "yoda.api.embeddings_api", "chromadb")
     for module in imported:
         for token in forbidden:
             assert token not in module.lower()

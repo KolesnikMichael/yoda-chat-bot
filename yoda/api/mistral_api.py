@@ -67,7 +67,7 @@ def _write_debug_exchange(
     return path
 
 
-class LLMApi:
+class MistralApi:
     def __init__(self, api_key: str, debug_log_dir: Path | None = None):
         self._client = Mistral(api_key=api_key)
         self._debug_log_dir = debug_log_dir

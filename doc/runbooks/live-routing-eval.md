@@ -6,7 +6,7 @@ Pytest never invokes this CLI and does not require live credentials.
 
 ## Prerequisites
 
-- Project `settings.json` with `agent.model_name` and `llm.api_key`
+- Project `settings.json` with `inference` (providers and profiles) and `agent.model`
 - Corpus: `tests/fixtures/routing_evaluation/corpus-v1.json` (default)
 
 ## Run
@@ -26,7 +26,7 @@ Pytest never invokes this CLI and does not require live credentials.
 
 ## Side-effect boundary
 
-Only the configured `LLMApi` may network. Telegram, Tavily, media, Redis,
+Only the resolved chat façade (`MistralApi` or `OpenRouterApi`) may network. Telegram, Tavily, media, Redis,
 scheduler, and Chroma are fail-on-call. Tool outcomes come from
 corpus-recorded fixtures.
 

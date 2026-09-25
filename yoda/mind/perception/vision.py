@@ -2,6 +2,8 @@ import base64
 from pathlib import Path
 from typing import Protocol
 
+from yoda.api.inference.data import BackendName
+
 
 class VisionChatBackend(Protocol):
     async def complete_chat_async(
@@ -24,14 +26,19 @@ def _mime_type_for_image_path(image_file_path: str) -> str:
 
 
 class VisionProvider:
-    def __init__(self, settings: dict, chat_backend: VisionChatBackend) -> None:
+    def __init__(
+        self,
+        settings: dict,
+        chat_backend: VisionChatBackend,
+        backend: BackendName,
+    ) -> None:
         self._chat_backend = chat_backend
+        self._backend = backend
         try:
             self._model_name = settings["model_name"]
         except KeyError as e:
             raise ValueError(
                 "Vision settings missing required 'model_name'") from e
-        self._provider = settings.get("provider", "mistral")
 
     @staticmethod
     def encode_image_to_base64(image_file_path: str) -> str:
@@ -40,7 +47,7 @@ class VisionProvider:
 
     def _image_part(self, mime: str, image_base64: str) -> dict:
         data_url = f"data:{mime};base64,{image_base64}"
-        if self._provider == "openrouter":
+        if self._backend == "openrouter":
             return {
                 "type": "image_url",
                 "image_url": {"url": data_url},

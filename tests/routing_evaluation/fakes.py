@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
-from yoda.api.llm_api import LLMApi
+from yoda.api.mistral_api import MistralApi
 from yoda.mind.agent.data.agent_data import (
     ExecutionDecision,
     SelectionDecision,
@@ -30,7 +30,7 @@ _STAGE_BY_FORMAT: dict[type[BaseModel], str] = {
 }
 
 
-class RecordedLLMApi(LLMApi):
+class RecordedLLMApi(MistralApi):
     def __init__(
         self,
         responses: list[RecordedModelResponse] | None = None,

@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from yoda.api.llm_api import (
-    LLMApi,
+from yoda.api.mistral_api import (
+    MistralApi,
     _format_debug_exchange_md,
     _write_debug_exchange,
 )
@@ -71,13 +71,13 @@ def test_format_debug_exchange_md_non_json_response() -> None:
 
 
 def test_llm_api_skips_logging_when_debug_dir_is_none() -> None:
-    api = LLMApi(api_key="test-key", debug_log_dir=None)
+    api = MistralApi(api_key="test-key", debug_log_dir=None)
     api._log_exchange("complete_chat_async", "m", [], "ok")
 
 
 @pytest.mark.asyncio
 async def test_parse_chat_async_rejects_non_object_json_as_validation_error() -> None:
-    api = LLMApi(api_key="test-key", debug_log_dir=None)
+    api = MistralApi(api_key="test-key", debug_log_dir=None)
     api._client = SimpleNamespace(
         chat=SimpleNamespace(
             complete_async=AsyncMock(

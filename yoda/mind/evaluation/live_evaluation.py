@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Iterator
 from unittest.mock import patch
 
-from yoda.api.llm_api import LLMApi
+from yoda.api.chat_backend import ChatBackend
 from yoda.mind.agent.data.agent_data import ToolCall
 from yoda.mind.agent.session_provider import AgentSessionProvider
 from yoda.mind.agent.skills.catalog import SkillCatalog
@@ -106,13 +106,13 @@ class LiveRoutingEvaluation:
     def __init__(
         self,
         *,
-        llm_api: LLMApi,
+        chat_backend: ChatBackend,
         model_name: str,
         skills_dir: Path = PRODUCTION_SKILLS_DIR,
         corpus_provider: RoutingCorpusProvider | None = None,
         report_provider: LiveEvalReportProvider | None = None,
     ) -> None:
-        self._llm_api = llm_api
+        self._chat_backend = chat_backend
         self._model_name = model_name
         self._skills_dir = skills_dir
         self._catalog = SkillCatalog.load_catalog(skills_dir)
@@ -252,7 +252,7 @@ class LiveRoutingEvaluation:
         tool_provider = RecordedToolProvider(list(turn.tool_results))
         language_provider = LanguageProvider(
             {"model_name": self._model_name},
-            self._llm_api,
+            self._chat_backend,
         )
         tools = self._build_tools(tool_provider, storage)
         session_provider = AgentSessionProvider(storage_api=storage)

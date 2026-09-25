@@ -56,35 +56,6 @@ def test_summarizer_result_fields():
     assert isinstance(result.profile_updates, dict)
 
 
-def test_summarizer_settings_nested_block_wins():
-    settings = {
-        "mind": {
-            "memory": {
-                "chat_compression": {
-                    "summarizer": {"model_name": "mistral-small"},
-                },
-            },
-            "perception": {"language": {"model_name": "mistral-large"}},
-        },
-    }
-    assert SummarizerSettings.from_settings(settings).model_name == "mistral-small"
-
-
-def test_summarizer_settings_fallback_to_language_model():
-    settings = {
-        "mind": {
-            "memory": {"chat_compression": {}},
-            "perception": {"language": {"model_name": "mistral-large"}},
-        },
-    }
-    assert SummarizerSettings.from_settings(settings).model_name == "mistral-large"
-
-
-def test_summarizer_settings_missing_both_raises():
-    with pytest.raises(ValueError, match="model name"):
-        SummarizerSettings.from_settings({"mind": {}})
-
-
 def test_summarizer_envelope_valid_wire():
     envelope = LlmSummarizerEnvelope(
         summary="text",
